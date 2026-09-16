@@ -1,37 +1,121 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Clock3, ListChecks, BarChart3 } from "lucide-react"
 import { NoteInput } from "@/components/note-input"
 import { EntriesLog } from "@/components/entries-log"
 import { ManagerReport } from "@/components/manager-report"
+import { apiPath } from "@/lib/paths"
 import type { ParsedEntry, TimeEntry } from "@/lib/types"
 
 type View = "log" | "report"
 
-function makeId() {
-  return Math.random().toString(36).slice(2, 10)
-}
-
 export default function Page() {
   const [entries, setEntries] = useState<TimeEntry[]>([])
   const [view, setView] = useState<View>("log")
+  const [loadingEntries, setLoadingEntries] = useState(true)
+  const [syncError, setSyncError] = useState<string | null>(null)
 
-  function addParsed(parsed: ParsedEntry[]) {
-    setEntries((prev) => [
-      ...parsed.map((p) => ({ ...p, id: makeId() })),
-      ...prev,
-    ])
+  useEffect(() => {
+    let active = true
+
+    async function loadEntries() {
+      try {
+        const res = await fetch(apiPath("/api/entries"), { cache: "no-store" })
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error ?? "Failed to load entries.")
+        if (active) setEntries(data.entries ?? [])
+      } catch (err) {
+        if (active) {
+          setSyncError(
+            err instanceof Error ? err.message : "Failed to load entries.",
+          )
+        }
+      } finally {
+        if (active) setLoadingEntries(false)
+      }
+    }
+
+    loadEntries()
+
+    return () => {
+      active = false
+    }
+  }, [])
+
+  async function addParsed(parsed: ParsedEntry[]) {
+    const res = await fetch(apiPath("/api/entries"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ entries: parsed }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error ?? "Failed to save entries.")
+    setEntries((prev) => [...(data.entries ?? []), ...prev])
+    setSyncError(null)
   }
 
   function updateEntry(id: string, patch: Partial<TimeEntry>) {
+    const previous = entries
     setEntries((prev) =>
       prev.map((e) => (e.id === id ? { ...e, ...patch } : e)),
     )
+
+    fetch(apiPath(`/api/entries/${id}`), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    })
+      .then(async (res) => {
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error ?? "Failed to update entry.")
+        setEntries((prev) =>
+          prev.map((e) => (e.id === id ? data.entry : e)),
+        )
+        setSyncError(null)
+      })
+      .catch((err) => {
+        setEntries(previous)
+        setSyncError(
+          err instanceof Error ? err.message : "Failed to update entry.",
+        )
+      })
   }
 
   function deleteEntry(id: string) {
+    const previous = entries
     setEntries((prev) => prev.filter((e) => e.id !== id))
+
+    fetch(apiPath(`/api/entries/${id}`), { method: "DELETE" })
+      .then(async (res) => {
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error ?? "Failed to delete entry.")
+        setSyncError(null)
+      })
+      .catch((err) => {
+        setEntries(previous)
+        setSyncError(
+          err instanceof Error ? err.message : "Failed to delete entry.",
+        )
+      })
+  }
+
+  function clearEntries() {
+    const previous = entries
+    setEntries([])
+
+    fetch(apiPath("/api/entries"), { method: "DELETE" })
+      .then(async (res) => {
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error ?? "Failed to clear entries.")
+        setSyncError(null)
+      })
+      .catch((err) => {
+        setEntries(previous)
+        setSyncError(
+          err instanceof Error ? err.message : "Failed to clear entries.",
+        )
+      })
   }
 
   const totalHours = entries.reduce((s, e) => s + (Number(e.hours) || 0), 0)
@@ -61,6 +145,19 @@ export default function Page() {
       </header>
 
       <NoteInput onParsed={addParsed} />
+
+      {(loadingEntries || syncError) && (
+        <div
+          className={`rounded-lg border px-4 py-3 text-sm ${
+            syncError
+              ? "border-destructive/40 bg-destructive/10 text-destructive"
+              : "border-border bg-muted/50 text-muted-foreground"
+          }`}
+          role={syncError ? "alert" : "status"}
+        >
+          {syncError ?? "Loading saved entries..."}
+        </div>
+      )}
 
       {/* View switch */}
       <div className="flex items-center gap-1 rounded-lg border border-border bg-card p-1 shadow-sm">
@@ -98,7 +195,7 @@ export default function Page() {
           entries={entries}
           onUpdate={updateEntry}
           onDelete={deleteEntry}
-          onClear={() => setEntries([])}
+          onClear={clearEntries}
         />
       ) : entries.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border bg-card/50 px-6 py-16 text-center">
@@ -114,7 +211,7 @@ export default function Page() {
       <footer className="mt-auto pt-4 text-center text-xs text-muted-foreground">
         {entries.length} entries ·{" "}
         {totalHours.toLocaleString(undefined, { maximumFractionDigits: 2 })}h logged
-        this session · data is kept in memory only
+        this session · data is saved to Neon
       </footer>
     </main>
   )

@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { Loader2, Sparkles, WandSparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { apiPath } from "@/lib/paths"
 import type { ParsedEntry } from "@/lib/types"
 
 const SAMPLE = `Maria Alvarez: Mon worked 9-5 on the Acme website redesign, Tue only a half day (sick).
@@ -13,7 +14,7 @@ Tom did 3 hours of on-call support yesterday, nothing else this week.`
 export function NoteInput({
   onParsed,
 }: {
-  onParsed: (entries: ParsedEntry[]) => void
+  onParsed: (entries: ParsedEntry[]) => void | Promise<void>
 }) {
   const [notes, setNotes] = useState("")
   const [loading, setLoading] = useState(false)
@@ -24,7 +25,7 @@ export function NoteInput({
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch("/api/parse", {
+      const res = await fetch(apiPath("/api/parse"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ notes }),
@@ -35,7 +36,7 @@ export function NoteInput({
       if (entries.length === 0) {
         setError("No time entries were found in those notes.")
       } else {
-        onParsed(entries)
+        await onParsed(entries)
         setNotes("")
       }
     } catch (err) {
