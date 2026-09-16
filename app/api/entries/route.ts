@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { auth } from "@/auth"
 import {
   clearTimeEntries,
   createTimeEntries,
@@ -19,9 +20,19 @@ const createSchema = z.object({
   entries: z.array(entrySchema).min(1),
 })
 
+async function getOwnerEmail() {
+  const session = await auth()
+  return session?.user?.email ?? null
+}
+
 export async function GET() {
   try {
-    const entries = await listTimeEntries()
+    const ownerEmail = await getOwnerEmail()
+    if (!ownerEmail) {
+      return Response.json({ error: "Unauthorized." }, { status: 401 })
+    }
+
+    const entries = await listTimeEntries(ownerEmail)
     return Response.json({ entries })
   } catch (err) {
     console.error("[entries] list failed:", err)
@@ -34,8 +45,13 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
+    const ownerEmail = await getOwnerEmail()
+    if (!ownerEmail) {
+      return Response.json({ error: "Unauthorized." }, { status: 401 })
+    }
+
     const body = createSchema.parse(await req.json())
-    const entries = await createTimeEntries(body.entries)
+    const entries = await createTimeEntries(ownerEmail, body.entries)
     return Response.json({ entries }, { status: 201 })
   } catch (err) {
     console.error("[entries] create failed:", err)
@@ -48,7 +64,12 @@ export async function POST(req: Request) {
 
 export async function DELETE() {
   try {
-    await clearTimeEntries()
+    const ownerEmail = await getOwnerEmail()
+    if (!ownerEmail) {
+      return Response.json({ error: "Unauthorized." }, { status: 401 })
+    }
+
+    await clearTimeEntries(ownerEmail)
     return Response.json({ ok: true })
   } catch (err) {
     console.error("[entries] clear failed:", err)

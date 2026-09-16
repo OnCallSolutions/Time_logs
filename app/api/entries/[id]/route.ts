@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { auth } from "@/auth"
 import { deleteTimeEntry, updateTimeEntry } from "@/lib/db"
 
 export const runtime = "nodejs"
@@ -15,14 +16,24 @@ const patchSchema = z
     message: "At least one field is required.",
   })
 
+async function getOwnerEmail() {
+  const session = await auth()
+  return session?.user?.email ?? null
+}
+
 export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const ownerEmail = await getOwnerEmail()
+    if (!ownerEmail) {
+      return Response.json({ error: "Unauthorized." }, { status: 401 })
+    }
+
     const { id } = await params
     const patch = patchSchema.parse(await req.json())
-    const entry = await updateTimeEntry(id, patch)
+    const entry = await updateTimeEntry(ownerEmail, id, patch)
 
     if (!entry) {
       return Response.json({ error: "Entry not found." }, { status: 404 })
@@ -43,8 +54,13 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const ownerEmail = await getOwnerEmail()
+    if (!ownerEmail) {
+      return Response.json({ error: "Unauthorized." }, { status: 401 })
+    }
+
     const { id } = await params
-    await deleteTimeEntry(id)
+    await deleteTimeEntry(ownerEmail, id)
     return Response.json({ ok: true })
   } catch (err) {
     console.error("[entries] delete failed:", err)

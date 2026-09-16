@@ -37,35 +37,50 @@ function toTimeEntry(row: TimeEntryRow): TimeEntry {
 }
 
 export function ensureTimeEntriesTable() {
-  schemaReady ??= sql`
-    CREATE TABLE IF NOT EXISTS time_entries (
-      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-      contractor text NOT NULL,
-      work_date date NOT NULL,
-      hours numeric(8, 2) NOT NULL CHECK (hours >= 0),
-      project text NOT NULL DEFAULT 'General',
-      description text NOT NULL DEFAULT '',
-      created_at timestamptz NOT NULL DEFAULT now(),
-      updated_at timestamptz NOT NULL DEFAULT now()
-    )
-  `.then(() => undefined)
+  schemaReady ??= (async () => {
+    await sql`
+      CREATE TABLE IF NOT EXISTS time_entries (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        contractor text NOT NULL,
+        work_date date NOT NULL,
+        hours numeric(8, 2) NOT NULL CHECK (hours >= 0),
+        project text NOT NULL DEFAULT 'General',
+        description text NOT NULL DEFAULT '',
+        owner_email text,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        updated_at timestamptz NOT NULL DEFAULT now()
+      )
+    `
+    await sql`
+      ALTER TABLE time_entries
+      ADD COLUMN IF NOT EXISTS owner_email text
+    `
+    await sql`
+      CREATE INDEX IF NOT EXISTS time_entries_owner_email_created_at_idx
+      ON time_entries (owner_email, created_at DESC)
+    `
+  })()
 
   return schemaReady
 }
 
-export async function listTimeEntries() {
+export async function listTimeEntries(ownerEmail: string) {
   await ensureTimeEntriesTable()
 
   const rows = await sql`
     SELECT id, contractor, work_date, hours, project, description
     FROM time_entries
+    WHERE owner_email = ${ownerEmail}
     ORDER BY work_date DESC, created_at DESC
   `
 
   return (rows as TimeEntryRow[]).map(toTimeEntry)
 }
 
-export async function createTimeEntries(entries: ParsedEntry[]) {
+export async function createTimeEntries(
+  ownerEmail: string,
+  entries: ParsedEntry[],
+) {
   await ensureTimeEntriesTable()
 
   if (entries.length === 0) {
@@ -81,14 +96,16 @@ export async function createTimeEntries(entries: ParsedEntry[]) {
         work_date,
         hours,
         project,
-        description
+        description,
+        owner_email
       )
       VALUES (
         ${entry.contractor},
         ${entry.date},
         ${entry.hours},
         ${entry.project || "General"},
-        ${entry.description || ""}
+        ${entry.description || ""},
+        ${ownerEmail}
       )
       RETURNING id, contractor, work_date, hours, project, description
     `
@@ -99,6 +116,7 @@ export async function createTimeEntries(entries: ParsedEntry[]) {
 }
 
 export async function updateTimeEntry(
+  ownerEmail: string,
   id: string,
   patch: Partial<ParsedEntry>,
 ) {
@@ -114,6 +132,7 @@ export async function updateTimeEntry(
       description = COALESCE(${patch.description ?? null}, description),
       updated_at = now()
     WHERE id = ${id}
+      AND owner_email = ${ownerEmail}
     RETURNING id, contractor, work_date, hours, project, description
   `
 
@@ -121,19 +140,21 @@ export async function updateTimeEntry(
   return row ? toTimeEntry(row) : null
 }
 
-export async function deleteTimeEntry(id: string) {
+export async function deleteTimeEntry(ownerEmail: string, id: string) {
   await ensureTimeEntriesTable()
 
   await sql`
     DELETE FROM time_entries
     WHERE id = ${id}
+      AND owner_email = ${ownerEmail}
   `
 }
 
-export async function clearTimeEntries() {
+export async function clearTimeEntries(ownerEmail: string) {
   await ensureTimeEntriesTable()
 
   await sql`
     DELETE FROM time_entries
+    WHERE owner_email = ${ownerEmail}
   `
 }
