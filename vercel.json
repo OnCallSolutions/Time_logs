@@ -1,0 +1,9 @@
+{
+  "redirects": [
+    {
+      "source": "/",
+      "destination": "/timer_logs",
+      "permanent": false
+    }
+  ]
+}
