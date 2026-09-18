@@ -25,7 +25,7 @@ export function NoteInput({
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(apiPath("/api/parse"), {
+      const res = await fetch("/timer_logs/api/parse", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ notes }),
