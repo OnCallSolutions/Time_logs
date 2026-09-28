@@ -64,13 +64,13 @@ export function ensureTimeEntriesTable() {
   return schemaReady
 }
 
-export async function listTimeEntries(ownerEmail: string) {
+export async function listTimeEntries(ownerEmail: string, includeAll = false) {
   await ensureTimeEntriesTable()
 
   const rows = await sql`
     SELECT id, contractor, work_date, hours, project, description
     FROM time_entries
-    WHERE owner_email = ${ownerEmail}
+    WHERE ${includeAll} OR owner_email = ${ownerEmail}
     ORDER BY work_date DESC, created_at DESC
   `
 
@@ -119,6 +119,7 @@ export async function updateTimeEntry(
   ownerEmail: string,
   id: string,
   patch: Partial<ParsedEntry>,
+  includeAll = false,
 ) {
   await ensureTimeEntriesTable()
 
@@ -132,7 +133,7 @@ export async function updateTimeEntry(
       description = COALESCE(${patch.description ?? null}, description),
       updated_at = now()
     WHERE id = ${id}
-      AND owner_email = ${ownerEmail}
+      AND (${includeAll} OR owner_email = ${ownerEmail})
     RETURNING id, contractor, work_date, hours, project, description
   `
 
@@ -140,21 +141,25 @@ export async function updateTimeEntry(
   return row ? toTimeEntry(row) : null
 }
 
-export async function deleteTimeEntry(ownerEmail: string, id: string) {
+export async function deleteTimeEntry(
+  ownerEmail: string,
+  id: string,
+  includeAll = false,
+) {
   await ensureTimeEntriesTable()
 
   await sql`
     DELETE FROM time_entries
     WHERE id = ${id}
-      AND owner_email = ${ownerEmail}
+      AND (${includeAll} OR owner_email = ${ownerEmail})
   `
 }
 
-export async function clearTimeEntries(ownerEmail: string) {
+export async function clearTimeEntries(ownerEmail: string, includeAll = false) {
   await ensureTimeEntriesTable()
 
   await sql`
     DELETE FROM time_entries
-    WHERE owner_email = ${ownerEmail}
+    WHERE ${includeAll} OR owner_email = ${ownerEmail}
   `
 }

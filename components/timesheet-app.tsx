@@ -12,9 +12,11 @@ import type { ParsedEntry, TimeEntry } from "@/lib/types"
 type View = "log" | "report"
 
 export function TimesheetApp({
+  role,
   userName,
   userEmail,
 }: {
+  role: string
   userName?: string | null
   userEmail?: string | null
 }) {
@@ -153,7 +155,7 @@ export function TimesheetApp({
           contractor.
         </p>
         <p className="text-xs text-muted-foreground">
-          Signed in as {userName || userEmail}
+          Signed in as {userName || userEmail} · {role}
         </p>
       </header>
 

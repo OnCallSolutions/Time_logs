@@ -1,6 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  basePath: "/timer_logs",
+  basePath: "/timelog",
   typescript: {
     ignoreBuildErrors: true,
   },
