@@ -15,3 +15,5 @@ node_modules
 tsconfig.tsbuildinfo
 .DS_Store
 .pdf
+.vercel
+.env*
