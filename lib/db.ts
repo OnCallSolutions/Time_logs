@@ -20,7 +20,18 @@ type TimeEntryRow = {
   description: string | null
 }
 
+export type UserProfile = {
+  displayName: string
+  imageDataUrl: string | null
+}
+
+type UserProfileRow = {
+  display_name: string | null
+  image_data_url: string | null
+}
+
 let schemaReady: Promise<void> | null = null
+let profileSchemaReady: Promise<void> | null = null
 
 function toTimeEntry(row: TimeEntryRow): TimeEntry {
   return {
@@ -62,6 +73,70 @@ export function ensureTimeEntriesTable() {
   })()
 
   return schemaReady
+}
+
+export function ensureUserProfilesTable() {
+  profileSchemaReady ??= (async () => {
+    await sql`
+      CREATE TABLE IF NOT EXISTS user_profiles (
+        owner_email text PRIMARY KEY,
+        display_name text NOT NULL DEFAULT '',
+        image_data_url text,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        updated_at timestamptz NOT NULL DEFAULT now()
+      )
+    `
+  })()
+
+  return profileSchemaReady
+}
+
+export async function getUserProfile(ownerEmail: string): Promise<UserProfile> {
+  await ensureUserProfilesTable()
+
+  const rows = await sql`
+    SELECT display_name, image_data_url
+    FROM user_profiles
+    WHERE owner_email = ${ownerEmail}
+  `
+  const row = (rows as UserProfileRow[])[0]
+
+  return {
+    displayName: row?.display_name ?? "",
+    imageDataUrl: row?.image_data_url ?? null,
+  }
+}
+
+export async function upsertUserProfile(
+  ownerEmail: string,
+  profile: UserProfile,
+) {
+  await ensureUserProfilesTable()
+
+  const rows = await sql`
+    INSERT INTO user_profiles (
+      owner_email,
+      display_name,
+      image_data_url
+    )
+    VALUES (
+      ${ownerEmail},
+      ${profile.displayName},
+      ${profile.imageDataUrl}
+    )
+    ON CONFLICT (owner_email)
+    DO UPDATE SET
+      display_name = EXCLUDED.display_name,
+      image_data_url = EXCLUDED.image_data_url,
+      updated_at = now()
+    RETURNING display_name, image_data_url
+  `
+  const row = (rows as UserProfileRow[])[0]
+
+  return {
+    displayName: row?.display_name ?? "",
+    imageDataUrl: row?.image_data_url ?? null,
+  }
 }
 
 export async function listTimeEntries(ownerEmail: string, includeAll = false) {

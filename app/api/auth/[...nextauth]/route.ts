@@ -7,7 +7,6 @@ function withPublicAuthPath(req: NextRequest) {
   if (url.pathname.startsWith("/api/auth")) {
     url.pathname = `/timelog${url.pathname}`
   }
-
   return new NextRequest(url, req)
 }
 

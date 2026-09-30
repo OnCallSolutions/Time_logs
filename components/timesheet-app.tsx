@@ -1,7 +1,8 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Clock3, ListChecks, BarChart3 } from "lucide-react"
+import { BarChart3, Clock3, ListChecks } from "lucide-react"
+import { AccountProfile } from "@/components/account-profile"
 import { NoteInput } from "@/components/note-input"
 import { EntriesLog } from "@/components/entries-log"
 import { ManagerReport } from "@/components/manager-report"
@@ -137,14 +138,21 @@ export function TimesheetApp({
   return (
     <main className="mx-auto flex min-h-svh max-w-4xl flex-col gap-6 px-4 py-8 md:py-12">
       <header className="flex flex-col gap-1">
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex items-center gap-2 text-primary">
             <Clock3 className="size-5" aria-hidden="true" />
             <span className="text-xs font-semibold uppercase tracking-widest">
               Timesheet
             </span>
           </div>
-          <SignOutButton />
+          <div className="flex items-center justify-end gap-3">
+            <AccountProfile
+              email={userEmail}
+              fallbackName={userName}
+              role={role}
+            />
+            <SignOutButton />
+          </div>
         </div>
         <h1 className="text-2xl font-semibold tracking-tight text-balance md:text-3xl">
           Contractor hours, from messy notes to a manager report
@@ -153,9 +161,6 @@ export function TimesheetApp({
           Paste time-worked notes in any format. AI extracts structured entries you
           can review and edit, then rolls them into a clean report of hours per
           contractor.
-        </p>
-        <p className="text-xs text-muted-foreground">
-          Signed in as {userName || userEmail} · {role}
         </p>
       </header>
 

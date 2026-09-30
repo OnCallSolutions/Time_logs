@@ -28,7 +28,11 @@ export default async function Page() {
             className="mt-5"
             action={async () => {
               "use server"
-              await signIn("microsoft-entra-id")
+              await signIn(
+                "microsoft-entra-id",
+                undefined,
+                { max_age: "0", prompt: "login" },
+              )
             }}
           >
             <Button type="submit" size="lg">
