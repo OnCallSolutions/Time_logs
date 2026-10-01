@@ -2,8 +2,8 @@
  * Configures NextAuth with Microsoft Entra ID and exports auth helpers.
  *
  * The configuration pins the app's auth routes under /timelog/api/auth so they
- * match the Next.js base path and Azure redirect URI. Exported helpers are reused
- * by pages, API routes, and server actions.
+ * match the public Next.js base path and Azure redirect URI. The route handler
+ * wrapper re-adds that public base path before requests reach Auth.js locally.
  */
 import NextAuth from "next-auth"
 import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id"
