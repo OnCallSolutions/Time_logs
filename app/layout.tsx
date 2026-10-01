@@ -1,3 +1,10 @@
+/**
+ * Defines the root Next.js layout, metadata, fonts, and global analytics.
+ *
+ * This file is responsible for document-level concerns shared by every route:
+ * SEO metadata, viewport theme colors, Google font variables, global styles, and
+ * production-only Vercel Analytics.
+ */
 import { Analytics } from '@vercel/analytics/next'
 import type { Metadata, Viewport } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
@@ -38,6 +45,17 @@ export const viewport: Viewport = {
   ],
 }
 
+/**
+ * Wraps every page with global fonts, body styles, and production analytics.
+ *
+ * The layout keeps page components focused on feature UI while centralizing the
+ * HTML shell. Analytics is only rendered in production to keep local development
+ * quieter and avoid unnecessary telemetry calls.
+ *
+ * @param props - Layout props.
+ * @param props.children - Page content rendered inside the app shell.
+ * @returns The root HTML document layout.
+ */
 export default function RootLayout({
   children,
 }: Readonly<{

@@ -1,3 +1,10 @@
+/**
+ * Converts free-form contractor time notes into structured entries using AI.
+ *
+ * This route is intentionally focused on parsing only. It accepts raw notes,
+ * asks the model for a schema-constrained response, and returns entries for the
+ * client to review before they are saved through the entries API.
+ */
 import { generateText, Output } from "ai"
 import { z } from "zod"
 
@@ -31,6 +38,16 @@ const schema = z.object({
     .describe("One item per distinct contractor + date + project combination."),
 })
 
+/**
+ * Parses free-form time notes into structured time entries with the AI model.
+ *
+ * The prompt asks for one entry per contractor, date, and project combination so
+ * a single messy paragraph can become several reviewable timesheet rows. Relative
+ * dates are resolved against the server's current date.
+ *
+ * @param req - Request containing the free-form notes in the JSON body.
+ * @returns JSON response containing parsed entries or an error.
+ */
 export async function POST(req: Request) {
   try {
     const { notes } = (await req.json()) as { notes?: string }

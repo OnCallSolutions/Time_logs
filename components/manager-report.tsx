@@ -1,14 +1,40 @@
 "use client"
 
+/**
+ * Provides the manager-facing report, filters, summaries, and CSV export.
+ *
+ * The report turns visible time entries into contractor totals, project counts,
+ * date ranges, and exportable detail rows. It expects authorization to have
+ * already happened upstream through the API response.
+ */
 import { useMemo, useState } from "react"
 import { Download, Users, Clock, FolderKanban } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { TimeEntry } from "@/lib/types"
 
+/**
+ * Formats decimal hours for display without unnecessary trailing digits.
+ *
+ * Report totals can contain quarter-hour or decimal values, so formatting keeps
+ * numbers compact while preserving meaningful fractions for billing review.
+ *
+ * @param n - Hour value to format.
+ * @returns Localized hour string with up to two decimal places.
+ */
 function fmtHours(n: number) {
   return n.toLocaleString(undefined, { maximumFractionDigits: 2 })
 }
 
+/**
+ * Formats an ISO date string for report tables while preserving invalid input.
+ *
+ * The parser and database normally provide YYYY-MM-DD strings. If a value cannot
+ * be parsed as a date, the original text is returned so the UI remains truthful
+ * instead of hiding malformed data.
+ *
+ * @param iso - Date string formatted as YYYY-MM-DD.
+ * @returns Localized date label, or the original value when invalid.
+ */
 function fmtDate(iso: string) {
   const d = new Date(iso + "T00:00:00")
   if (isNaN(d.getTime())) return iso
@@ -19,6 +45,17 @@ function fmtDate(iso: string) {
   })
 }
 
+/**
+ * Builds a filterable manager report with summary stats and CSV export.
+ *
+ * The component derives all summaries from the currently filtered entry set. This
+ * keeps the stat tiles, contractor bars, date range, detail table, and CSV export
+ * aligned with the same filter state.
+ *
+ * @param props - Component props.
+ * @param props.entries - Entries available to summarize and export.
+ * @returns A filterable report view for manager-facing summaries.
+ */
 export function ManagerReport({ entries }: { entries: TimeEntry[] }) {
   const [contractor, setContractor] = useState("all")
   const [project, setProject] = useState("all")
@@ -75,6 +112,14 @@ export function ManagerReport({ entries }: { entries: TimeEntry[] }) {
       : `${fmtDate(dates[0])} – ${fmtDate(dates[dates.length - 1])}`
   }, [filtered])
 
+  /**
+   * Downloads the currently filtered report rows as a CSV file.
+   *
+   * Values are quoted and embedded quotes are escaped so contractor names,
+   * descriptions, or project labels containing commas remain valid CSV fields.
+   *
+   * @returns Nothing; triggers a browser download as a side effect.
+   */
   function exportCsv() {
     const rows = [
       ["Contractor", "Date", "Project", "Description", "Hours"],

@@ -1,5 +1,12 @@
 "use client"
 
+/**
+ * Provides the editable entries table used for personal and team time logs.
+ *
+ * This component is shared by regular users, managers, and administrators. Its
+ * props control whether the table describes personal or team data and whether
+ * elevated bulk clearing controls should be available.
+ */
 import { Trash2, ClipboardList } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { TimeEntry } from "@/lib/types"
@@ -7,16 +14,39 @@ import type { TimeEntry } from "@/lib/types"
 const inputCls =
   "w-full rounded-md border border-transparent bg-transparent px-2 py-1 text-sm outline-none hover:border-border focus:border-ring focus:bg-background focus:ring-2 focus:ring-ring/30"
 
+/**
+ * Renders editable time entries with role-aware clearing controls.
+ *
+ * Each row is edited inline and delegates persistence to callbacks supplied by
+ * the parent workspace. The component intentionally does not know whether entries
+ * are personal or team-wide; it only renders the data and controls it receives.
+ *
+ * @param props - Entries table props and row action callbacks.
+ * @param props.canClear - Whether to show the bulk clear button.
+ * @param props.description - Supporting text shown under the table title.
+ * @param props.entries - Entries to display and edit.
+ * @param props.onUpdate - Callback invoked when an entry field changes.
+ * @param props.onDelete - Callback invoked when an entry is deleted.
+ * @param props.onClear - Callback invoked when visible entries are cleared.
+ * @param props.title - Heading displayed above the table.
+ * @returns An editable entries table or empty-state panel.
+ */
 export function EntriesLog({
+  canClear = false,
+  description = "Edit any cell to correct it.",
   entries,
   onUpdate,
   onDelete,
   onClear,
+  title = "Time entries",
 }: {
+  canClear?: boolean
+  description?: string
   entries: TimeEntry[]
   onUpdate: (id: string, patch: Partial<TimeEntry>) => void
   onDelete: (id: string) => void
   onClear: () => void
+  title?: string
 }) {
   if (entries.length === 0) {
     return (
@@ -39,16 +69,18 @@ export function EntriesLog({
     <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <div>
-          <h2 className="text-sm font-semibold">Time entries</h2>
+          <h2 className="text-sm font-semibold">{title}</h2>
           <p className="text-xs text-muted-foreground">
-            {entries.length} {entries.length === 1 ? "entry" : "entries"} · edit any
-            cell to correct it
+            {entries.length} {entries.length === 1 ? "entry" : "entries"} ·{" "}
+            {description}
           </p>
         </div>
-        <Button variant="destructive" size="sm" onClick={onClear}>
-          <Trash2 className="size-3.5" aria-hidden="true" />
-          Clear all
-        </Button>
+        {canClear && (
+          <Button variant="destructive" size="sm" onClick={onClear}>
+            <Trash2 className="size-3.5" aria-hidden="true" />
+            Clear all
+          </Button>
+        )}
       </div>
 
       <div className="overflow-x-auto">

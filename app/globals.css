@@ -1,3 +1,10 @@
+/**
+ * Defines Tailwind imports, theme tokens, color modes, and base app styles.
+ *
+ * The CSS variables here power the app's light and dark themes, shared component
+ * colors, chart colors, and radius scale. Keeping those tokens global lets the
+ * UI components stay consistent without repeating literal color values.
+ */
 @import 'tailwindcss';
 @import 'tw-animate-css';
 @import 'shadcn/tailwind.css';

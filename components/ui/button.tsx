@@ -1,3 +1,10 @@
+/**
+ * Defines the shared Base UI button component and visual variants.
+ *
+ * The app uses one button wrapper so sizing, icon spacing, disabled states, and
+ * focus rings stay consistent across forms, tables, reports, and navigation
+ * controls.
+ */
 import { Button as ButtonPrimitive } from '@base-ui/react/button'
 import { cva, type VariantProps } from 'class-variance-authority'
 
@@ -40,6 +47,19 @@ const buttonVariants = cva(
   },
 )
 
+/**
+ * Renders the shared styled button primitive with app variants and sizes.
+ *
+ * The component forwards all Base UI button behavior while applying class-variance
+ * styles. Callers choose semantic variants and sizes instead of repeating long
+ * Tailwind class strings.
+ *
+ * @param props - Base UI button props plus local variant and size options.
+ * @param props.className - Additional class names merged with variant classes.
+ * @param props.variant - Visual style variant for the button.
+ * @param props.size - Size variant for the button.
+ * @returns The styled button primitive.
+ */
 function Button({
   className,
   variant = 'default',

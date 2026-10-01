@@ -1,20 +1,44 @@
 "use client"
 
+/**
+ * Provides the main role-aware timesheet workspace and navigation.
+ *
+ * This client component owns the visible application state after authentication:
+ * loaded entries, current tab, sync errors, and optimistic edit behavior. It also
+ * translates the user's role into visible navigation choices so the UI matches
+ * the permissions enforced by the API routes.
+ */
 import { useEffect, useState } from "react"
-import { Clock3, ListChecks, BarChart3 } from "lucide-react"
+import { BarChart3, Clock3, ListChecks, ShieldCheck } from "lucide-react"
 import { NoteInput } from "@/components/note-input"
 import { EntriesLog } from "@/components/entries-log"
 import { ManagerReport } from "@/components/manager-report"
 import { SignOutButton } from "@/components/sign-out-button"
 import { apiPath } from "@/lib/paths"
-import type { ParsedEntry, TimeEntry } from "@/lib/types"
+import type { ParsedEntry, TimeEntry, UserRole } from "@/lib/types"
 
-type View = "log" | "report"
+type View = "log" | "report" | "admin"
 
+/**
+ * Coordinates the signed-in user's role-aware timesheet workspace.
+ *
+ * The app receives the effective role from the server-rendered page and uses it
+ * to decide which tabs, descriptions, and bulk actions to expose. Data mutations
+ * still go through the API, so this component improves ergonomics without being
+ * the source of authorization truth.
+ *
+ * @param props - Role and signed-in user identity for the current session.
+ * @param props.role - Effective role used to choose visible navigation.
+ * @param props.userName - Display name from Microsoft authentication.
+ * @param props.userEmail - Email from Microsoft authentication.
+ * @returns The interactive timesheet application shell.
+ */
 export function TimesheetApp({
+  role,
   userName,
   userEmail,
 }: {
+  role: UserRole
   userName?: string | null
   userEmail?: string | null
 }) {
@@ -26,6 +50,15 @@ export function TimesheetApp({
   useEffect(() => {
     let active = true
 
+    /**
+     * Loads saved entries visible to the signed-in user's role.
+     *
+     * The API decides whether the caller receives personal entries or team-wide
+     * entries. The local active flag prevents state updates after unmounting while
+     * the request is still in flight.
+     *
+     * @returns A promise that resolves after entries are loaded or an error is stored.
+     */
     async function loadEntries() {
       try {
         const res = await fetch(apiPath("/api/entries"), { cache: "no-store" })
@@ -50,6 +83,31 @@ export function TimesheetApp({
     }
   }, [])
 
+  const canViewTeamReports = role === "admin" || role === "manager"
+  const canViewAdmin = role === "admin"
+  const canClearVisibleEntries = role === "admin" || role === "manager"
+  const roleLabel = {
+    admin: "Administrator",
+    manager: "Manager",
+    worker: "Worker",
+    user: "User",
+  }[role]
+
+  useEffect(() => {
+    if (view === "report" && !canViewTeamReports) setView("log")
+    if (view === "admin" && !canViewAdmin) setView("log")
+  }, [canViewAdmin, canViewTeamReports, view])
+
+  /**
+   * Persists newly parsed entries and prepends them to the local view.
+   *
+   * Parsed entries come from the note input and do not have ids yet. The API
+   * stores them under the current user and returns database-backed entries that
+   * can be edited or deleted immediately.
+   *
+   * @param parsed - Entries returned by the AI parser.
+   * @returns A promise that resolves after entries are saved and local state updates.
+   */
   async function addParsed(parsed: ParsedEntry[]) {
     const res = await fetch(apiPath("/api/entries"), {
       method: "POST",
@@ -62,6 +120,17 @@ export function TimesheetApp({
     setSyncError(null)
   }
 
+  /**
+   * Optimistically updates one entry and rolls back if the API rejects it.
+   *
+   * The user sees edits immediately while the PATCH request runs. If the backend
+   * rejects the change because of validation, permissions, or connectivity, the
+   * previous entry list is restored and a sync error is shown.
+   *
+   * @param id - Entry id to update.
+   * @param patch - Partial entry fields to apply.
+   * @returns Nothing; local state and API sync happen as side effects.
+   */
   function updateEntry(id: string, patch: Partial<TimeEntry>) {
     const previous = entries
     setEntries((prev) =>
@@ -89,6 +158,16 @@ export function TimesheetApp({
       })
   }
 
+  /**
+   * Optimistically removes one entry and restores it if deletion fails.
+   *
+   * Deletion follows the same optimistic pattern as editing. The API still checks
+   * ownership and role scope, so a locally visible row cannot be removed unless
+   * the server confirms permission.
+   *
+   * @param id - Entry id to delete.
+   * @returns Nothing; local state and API sync happen as side effects.
+   */
   function deleteEntry(id: string) {
     const previous = entries
     setEntries((prev) => prev.filter((e) => e.id !== id))
@@ -107,6 +186,15 @@ export function TimesheetApp({
       })
   }
 
+  /**
+   * Clears every entry visible to the signed-in user's role.
+   *
+   * This action is only exposed to managers and administrators. The backend uses
+   * the same role information to decide whether "visible" means team-wide data or
+   * the current user's own entries.
+   *
+   * @returns Nothing; local state and API sync happen as side effects.
+   */
   function clearEntries() {
     const previous = entries
     setEntries([])
@@ -128,8 +216,17 @@ export function TimesheetApp({
   const totalHours = entries.reduce((s, e) => s + (Number(e.hours) || 0), 0)
 
   const tabs: { key: View; label: string; icon: typeof ListChecks }[] = [
-    { key: "log", label: "Entries", icon: ListChecks },
-    { key: "report", label: "Manager report", icon: BarChart3 },
+    {
+      key: "log",
+      label: canViewTeamReports ? "Team entries" : "My entries",
+      icon: ListChecks,
+    },
+    ...(canViewTeamReports
+      ? [{ key: "report" as const, label: "Team report", icon: BarChart3 }]
+      : []),
+    ...(canViewAdmin
+      ? [{ key: "admin" as const, label: "Admin", icon: ShieldCheck }]
+      : []),
   ]
 
   return (
@@ -153,9 +250,11 @@ export function TimesheetApp({
           contractor.
         </p>
         <p className="text-xs text-muted-foreground">
-          Signed in as {userName || userEmail}
+          Signed in as {userName || userEmail} · {roleLabel}
         </p>
       </header>
+
+      <RoleOverview role={role} />
 
       <NoteInput onParsed={addParsed} />
 
@@ -209,16 +308,27 @@ export function TimesheetApp({
           onUpdate={updateEntry}
           onDelete={deleteEntry}
           onClear={clearEntries}
+          canClear={canClearVisibleEntries}
+          description={
+            canViewTeamReports
+              ? "Review and edit visible team entries for your role."
+              : "Review and edit your own saved time entries."
+          }
+          title={canViewTeamReports ? "Team entries" : "My time entries"}
         />
-      ) : entries.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-border bg-card/50 px-6 py-16 text-center">
-          <p className="text-sm font-medium">Nothing to report yet</p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Add some entries first and the manager report will build itself.
-          </p>
-        </div>
+      ) : view === "report" ? (
+        entries.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-border bg-card/50 px-6 py-16 text-center">
+            <p className="text-sm font-medium">Nothing to report yet</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Add some entries first and the manager report will build itself.
+            </p>
+          </div>
+        ) : (
+          <ManagerReport entries={entries} />
+        )
       ) : (
-        <ManagerReport entries={entries} />
+        <AdminPanel />
       )}
 
       <footer className="mt-auto pt-4 text-center text-xs text-muted-foreground">
@@ -227,5 +337,86 @@ export function TimesheetApp({
         this session · data is saved to Neon
       </footer>
     </main>
+  )
+}
+
+/**
+ * Shows the active role and what that role can do.
+ *
+ * The panel is intentionally informational: it helps the signed-in user understand
+ * why they see a personal log, team report, or admin controls. Permission checks
+ * remain enforced in the API layer.
+ *
+ * @param props - Component props.
+ * @param props.role - Effective role for the signed-in user.
+ * @returns A role summary panel.
+ */
+function RoleOverview({ role }: { role: UserRole }) {
+  const content = {
+    admin: {
+      title: "Admin access",
+      body: "You can view and manage all entries, use team reporting, and access admin controls.",
+    },
+    manager: {
+      title: "Manager access",
+      body: "You can view team entries and build manager reports across the visible team data.",
+    },
+    worker: {
+      title: "Worker access",
+      body: "You can create, edit, and manage your own time entries.",
+    },
+    user: {
+      title: "User access",
+      body: "You can create and manage your own time entries.",
+    },
+  }[role]
+
+  return (
+    <section className="rounded-lg border border-border bg-card px-4 py-3 shadow-sm">
+      <p className="text-sm font-medium">{content.title}</p>
+      <p className="mt-1 text-xs text-muted-foreground">{content.body}</p>
+    </section>
+  )
+}
+
+/**
+ * Explains where administrators configure role assignments.
+ *
+ * The app currently reads roles from environment variables instead of providing a
+ * database-backed admin editor. This panel makes that operational model visible
+ * to administrators from inside the app.
+ *
+ * @returns The administrator information panel.
+ */
+function AdminPanel() {
+  return (
+    <section className="rounded-xl border border-border bg-card p-4 shadow-sm">
+      <div className="flex items-center gap-2">
+        <ShieldCheck className="size-4 text-primary" aria-hidden="true" />
+        <h2 className="text-sm font-semibold">Admin controls</h2>
+      </div>
+      <p className="mt-2 text-sm text-muted-foreground">
+        Role assignments are currently controlled through environment variables:
+        ADMIN_EMAILS, MANAGER_EMAILS, WORKER_EMAILS, and ALLOWED_EMAILS.
+      </p>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <div className="rounded-lg border border-border bg-muted/40 p-3">
+          <p className="text-xs font-medium uppercase text-muted-foreground">
+            Team visibility
+          </p>
+          <p className="mt-1 text-sm">
+            Admins and managers can view all saved entries returned by the API.
+          </p>
+        </div>
+        <div className="rounded-lg border border-border bg-muted/40 p-3">
+          <p className="text-xs font-medium uppercase text-muted-foreground">
+            Self-service users
+          </p>
+          <p className="mt-1 text-sm">
+            Workers and users are scoped to entries owned by their signed-in email.
+          </p>
+        </div>
+      </div>
+    </section>
   )
 }

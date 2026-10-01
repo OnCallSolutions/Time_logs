@@ -1,5 +1,12 @@
 "use client"
 
+/**
+ * Provides the note input surface that submits free-form text for AI parsing.
+ *
+ * The input lets users paste informal notes, keyboard-submit them, or load a
+ * sample. It owns transient parsing state and delegates persisted entry handling
+ * to its parent through the onParsed callback.
+ */
 import { useState } from "react"
 import { Loader2, Sparkles, WandSparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -11,6 +18,17 @@ Deepak logged full days Wednesday and Thursday building the payments API for Nor
 Sarah — Friday, roughly 6 hrs, QA testing + a client call for the Acme project.
 Tom did 3 hours of on-call support yesterday, nothing else this week.`
 
+/**
+ * Captures messy time notes and sends them to the parser API.
+ *
+ * This component does not save entries directly. It only asks the parser API to
+ * turn free-form text into structured entries, then hands those entries to the
+ * parent so the main workspace can persist them.
+ *
+ * @param props - Component props.
+ * @param props.onParsed - Callback invoked with parsed entries after extraction.
+ * @returns The note entry form and parse controls.
+ */
 export function NoteInput({
   onParsed,
 }: {
@@ -20,12 +38,21 @@ export function NoteInput({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  /**
+   * Parses the current notes and forwards any extracted entries to the parent.
+   *
+   * The handler blocks duplicate submissions while loading, displays parser errors
+   * inline, and clears the text area only after the parent callback accepts the
+   * extracted entries.
+   *
+   * @returns A promise that resolves after parsing, saving, or error handling.
+   */
   async function handleParse() {
     if (!notes.trim() || loading) return
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch("/timer_logs/api/parse", {
+      const res = await fetch(apiPath("/api/parse"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ notes }),
