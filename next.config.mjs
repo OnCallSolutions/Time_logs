@@ -13,6 +13,19 @@ const nextConfig = {
     return [
       {
         /**
+         * Collapses accidental duplicated base paths back to the canonical app URL.
+         *
+         * Auth callbacks and manual testing can occasionally produce
+         * /timelog/timelog when base-path variables are misconfigured. This redirect
+         * normalizes those requests without touching valid /timelog routes.
+         */
+        source: "/timelog/timelog/:path*",
+        destination: "/timelog/:path*",
+        basePath: false,
+        permanent: false,
+      },
+      {
+        /**
          * Redirects plain localhost/domain visits into the configured app base path.
          *
          * Next.js normally prefixes redirect sources with basePath, so basePath=false

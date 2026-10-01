@@ -27,7 +27,18 @@ type TimeEntryRow = {
   description: string | null
 }
 
+export type UserProfile = {
+  displayName: string
+  imageDataUrl: string | null
+}
+
+type UserProfileRow = {
+  display_name: string | null
+  image_data_url: string | null
+}
+
 let schemaReady: Promise<void> | null = null
+let profileSchemaReady: Promise<void> | null = null
 
 /**
  * Maps a database row into the client-facing time entry shape.
@@ -88,6 +99,99 @@ export function ensureTimeEntriesTable() {
   })()
 
   return schemaReady
+}
+
+/**
+ * Creates the user profile schema once per server process before profile queries.
+ *
+ * User profiles are separate from time entries because they store display
+ * preferences and image data keyed by email. The table is created lazily so local
+ * and preview environments bootstrap themselves on first use.
+ *
+ * @returns A promise that resolves after the user profiles table exists.
+ */
+export function ensureUserProfilesTable() {
+  profileSchemaReady ??= (async () => {
+    await sql`
+      CREATE TABLE IF NOT EXISTS user_profiles (
+        owner_email text PRIMARY KEY,
+        display_name text NOT NULL DEFAULT '',
+        image_data_url text,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        updated_at timestamptz NOT NULL DEFAULT now()
+      )
+    `
+  })()
+
+  return profileSchemaReady
+}
+
+/**
+ * Loads a user's persisted display profile.
+ *
+ * Missing rows are treated as an empty profile so first-time users can open the
+ * profile editor without requiring a separate create step.
+ *
+ * @param ownerEmail - Email for the signed-in user.
+ * @returns The saved profile or an empty default profile.
+ */
+export async function getUserProfile(ownerEmail: string): Promise<UserProfile> {
+  await ensureUserProfilesTable()
+
+  const rows = await sql`
+    SELECT display_name, image_data_url
+    FROM user_profiles
+    WHERE owner_email = ${ownerEmail}
+  `
+  const row = (rows as UserProfileRow[])[0]
+
+  return {
+    displayName: row?.display_name ?? "",
+    imageDataUrl: row?.image_data_url ?? null,
+  }
+}
+
+/**
+ * Creates or updates the signed-in user's persisted profile.
+ *
+ * The owner email is the primary key, so each account has exactly one profile.
+ * Updating replaces the display name and image payload while preserving the same
+ * owner identity.
+ *
+ * @param ownerEmail - Email for the signed-in user.
+ * @param profile - Profile values to persist.
+ * @returns The saved profile returned from the database.
+ */
+export async function upsertUserProfile(
+  ownerEmail: string,
+  profile: UserProfile,
+) {
+  await ensureUserProfilesTable()
+
+  const rows = await sql`
+    INSERT INTO user_profiles (
+      owner_email,
+      display_name,
+      image_data_url
+    )
+    VALUES (
+      ${ownerEmail},
+      ${profile.displayName},
+      ${profile.imageDataUrl}
+    )
+    ON CONFLICT (owner_email)
+    DO UPDATE SET
+      display_name = EXCLUDED.display_name,
+      image_data_url = EXCLUDED.image_data_url,
+      updated_at = now()
+    RETURNING display_name, image_data_url
+  `
+  const row = (rows as UserProfileRow[])[0]
+
+  return {
+    displayName: row?.display_name ?? "",
+    imageDataUrl: row?.image_data_url ?? null,
+  }
 }
 
 /**
