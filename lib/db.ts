@@ -20,7 +20,18 @@ type TimeEntryRow = {
   description: string | null
 }
 
+export type UserProfile = {
+  displayName: string
+  imageDataUrl: string | null
+}
+
+type UserProfileRow = {
+  display_name: string | null
+  image_data_url: string | null
+}
+
 let schemaReady: Promise<void> | null = null
+let profileSchemaReady: Promise<void> | null = null
 
 function toTimeEntry(row: TimeEntryRow): TimeEntry {
   return {
@@ -64,13 +75,77 @@ export function ensureTimeEntriesTable() {
   return schemaReady
 }
 
-export async function listTimeEntries(ownerEmail: string) {
+export function ensureUserProfilesTable() {
+  profileSchemaReady ??= (async () => {
+    await sql`
+      CREATE TABLE IF NOT EXISTS user_profiles (
+        owner_email text PRIMARY KEY,
+        display_name text NOT NULL DEFAULT '',
+        image_data_url text,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        updated_at timestamptz NOT NULL DEFAULT now()
+      )
+    `
+  })()
+
+  return profileSchemaReady
+}
+
+export async function getUserProfile(ownerEmail: string): Promise<UserProfile> {
+  await ensureUserProfilesTable()
+
+  const rows = await sql`
+    SELECT display_name, image_data_url
+    FROM user_profiles
+    WHERE owner_email = ${ownerEmail}
+  `
+  const row = (rows as UserProfileRow[])[0]
+
+  return {
+    displayName: row?.display_name ?? "",
+    imageDataUrl: row?.image_data_url ?? null,
+  }
+}
+
+export async function upsertUserProfile(
+  ownerEmail: string,
+  profile: UserProfile,
+) {
+  await ensureUserProfilesTable()
+
+  const rows = await sql`
+    INSERT INTO user_profiles (
+      owner_email,
+      display_name,
+      image_data_url
+    )
+    VALUES (
+      ${ownerEmail},
+      ${profile.displayName},
+      ${profile.imageDataUrl}
+    )
+    ON CONFLICT (owner_email)
+    DO UPDATE SET
+      display_name = EXCLUDED.display_name,
+      image_data_url = EXCLUDED.image_data_url,
+      updated_at = now()
+    RETURNING display_name, image_data_url
+  `
+  const row = (rows as UserProfileRow[])[0]
+
+  return {
+    displayName: row?.display_name ?? "",
+    imageDataUrl: row?.image_data_url ?? null,
+  }
+}
+
+export async function listTimeEntries(ownerEmail: string, includeAll = false) {
   await ensureTimeEntriesTable()
 
   const rows = await sql`
     SELECT id, contractor, work_date, hours, project, description
     FROM time_entries
-    WHERE owner_email = ${ownerEmail}
+    WHERE ${includeAll} OR owner_email = ${ownerEmail}
     ORDER BY work_date DESC, created_at DESC
   `
 
@@ -119,6 +194,7 @@ export async function updateTimeEntry(
   ownerEmail: string,
   id: string,
   patch: Partial<ParsedEntry>,
+  includeAll = false,
 ) {
   await ensureTimeEntriesTable()
 
@@ -132,7 +208,7 @@ export async function updateTimeEntry(
       description = COALESCE(${patch.description ?? null}, description),
       updated_at = now()
     WHERE id = ${id}
-      AND owner_email = ${ownerEmail}
+      AND (${includeAll} OR owner_email = ${ownerEmail})
     RETURNING id, contractor, work_date, hours, project, description
   `
 
@@ -140,21 +216,25 @@ export async function updateTimeEntry(
   return row ? toTimeEntry(row) : null
 }
 
-export async function deleteTimeEntry(ownerEmail: string, id: string) {
+export async function deleteTimeEntry(
+  ownerEmail: string,
+  id: string,
+  includeAll = false,
+) {
   await ensureTimeEntriesTable()
 
   await sql`
     DELETE FROM time_entries
     WHERE id = ${id}
-      AND owner_email = ${ownerEmail}
+      AND (${includeAll} OR owner_email = ${ownerEmail})
   `
 }
 
-export async function clearTimeEntries(ownerEmail: string) {
+export async function clearTimeEntries(ownerEmail: string, includeAll = false) {
   await ensureTimeEntriesTable()
 
   await sql`
     DELETE FROM time_entries
-    WHERE owner_email = ${ownerEmail}
+    WHERE ${includeAll} OR owner_email = ${ownerEmail}
   `
 }
