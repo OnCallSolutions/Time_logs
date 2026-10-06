@@ -15,7 +15,7 @@ export default async function Page() {
           <div className="flex items-center gap-2 text-primary">
             <Clock3 className="size-5" aria-hidden="true" />
             <span className="text-xs font-semibold uppercase tracking-widest">
-              Timesheet
+              Tanovo Time
             </span>
           </div>
           <h1 className="mt-3 text-2xl font-semibold tracking-tight text-balance md:text-3xl">
@@ -52,7 +52,7 @@ export default async function Page() {
           <div className="flex items-center gap-2 text-primary">
             <Clock3 className="size-5" aria-hidden="true" />
             <span className="text-xs font-semibold uppercase tracking-widest">
-              Timesheet
+              Tanovo Time
             </span>
           </div>
           <h1 className="mt-3 text-2xl font-semibold tracking-tight text-balance md:text-3xl">

@@ -4,7 +4,7 @@ import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id"
 export const { handlers, auth, signIn, signOut } = NextAuth({
   debug: process.env.NODE_ENV !== "production",
   trustHost: true,
-  basePath: "/timelog/api/auth",
+  basePath: "/tanonvo-time/api/auth",
   providers: [
     MicrosoftEntraID({
       clientId: process.env.AUTH_MICROSOFT_ENTRA_ID_ID,

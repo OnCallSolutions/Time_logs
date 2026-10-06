@@ -1,17 +1,17 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  basePath: "/timelog",
+  basePath: "/tanonvo-time",
   async redirects() {
     return [
       {
-        source: "/timelog/timelog/:path*",
-        destination: "/timelog/:path*",
+        source: "/tanonvo-time/tanonvo-time/:path*",
+        destination: "/tanonvo-time/:path*",
         permanent: false,
         basePath: false,
       },
       {
         source: "/",
-        destination: "/timelog",
+        destination: "/tanonvo-time",
         permanent: false,
         basePath: false,
       },

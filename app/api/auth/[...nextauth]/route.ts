@@ -5,7 +5,7 @@ function withPublicAuthPath(req: NextRequest) {
   const url = req.nextUrl.clone()
 
   if (url.pathname.startsWith("/api/auth")) {
-    url.pathname = `/timelog${url.pathname}`
+    url.pathname = `/tanonvo-time${url.pathname}`
   }
   return new NextRequest(url, req)
 }

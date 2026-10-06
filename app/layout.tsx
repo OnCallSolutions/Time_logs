@@ -7,9 +7,9 @@ const geistSans = Geist({ subsets: ['latin'], variable: '--font-geist-sans' })
 const geistMono = Geist_Mono({ subsets: ['latin'], variable: '--font-geist-mono' })
 
 export const metadata: Metadata = {
-  title: 'Timesheet — Contractor Hours & Manager Reports',
+  title: 'Tanovo Time | Contractor Hours & Manager Reports',
   description:
-    'Paste contractor time notes in any format and generate a clean report of hours worked for managers.',
+    'Tanovo Time turns contractor time notes into clear reports of hours worked for managers.',
   generator: 'v0.app',
   icons: {
     icon: [

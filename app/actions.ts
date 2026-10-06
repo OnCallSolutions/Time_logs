@@ -62,7 +62,7 @@ async function clearAuthCookies() {
     cookieStore.set(expireCookie(name, "/"))
 
     if (!name.startsWith("__Host-")) {
-      cookieStore.set(expireCookie(name, "/timelog"))
+      cookieStore.set(expireCookie(name, "/tanonvo-time"))
     }
   }
 }

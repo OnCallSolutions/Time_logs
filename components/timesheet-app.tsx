@@ -142,7 +142,7 @@ export function TimesheetApp({
           <div className="flex items-center gap-2 text-primary">
             <Clock3 className="size-5" aria-hidden="true" />
             <span className="text-xs font-semibold uppercase tracking-widest">
-              Timesheet
+              Tanovo Time
             </span>
           </div>
           <div className="flex items-center justify-end gap-3">
