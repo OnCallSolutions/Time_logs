@@ -1,5 +1,9 @@
 # Branch Responsibilities
 
+- `employee`: personal employee workflow controls and AI-assisted draft review.
+- `manager`: team review, advisory AI recommendations, and explicit approval/rejection dialogs.
+- `admin`: technology management, access administration, and security-report navigation.
+
 `Development` is the shared source of truth for integrated work. Create future feature branches from its latest commit and open feature pull requests targeting `Development`. After review and testing, release changes through a pull request from `Development` to `main`. Keep feature branches after integration; do not merge feature branches directly into `main`.
 
 - `audit_logging_security`: employee administration, audit capture, white admin activity views, and event details. IP addresses appear only in selected event details.
