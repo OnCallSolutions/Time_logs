@@ -15,6 +15,9 @@ import type { TimeEntry } from "@/lib/types"
  * Renders manager shortcuts to the approval queue and existing team reports.
  * @param props.pending - Number of submitted entries awaiting review.
  * @param props.entries - Currently submitted records used to discard stale advice.
+ * @param props.canReview - Whether live rights permit review decisions.
+ * @param props.canReports - Whether live rights permit report navigation.
+ * @param props.canAI - Whether live rights permit preparing AI recommendations.
  * @param props.onApprovals - Callback that opens the existing approval queue.
  * @param props.onReports - Callback that opens the existing report view.
  * @param props.onRecommendation - Callback opening a human decision dialog.

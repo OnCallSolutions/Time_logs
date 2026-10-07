@@ -8,6 +8,7 @@ import { useEffect,useState } from "react"
 import { Pencil, RefreshCw, Save, Send } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { apiPath } from "@/lib/paths"
+import { notifyPermissionsChanged } from "@/lib/permission-events"
 import { permissionLabels, type Permission, type Permissions } from "@/lib/permissions"
 type Employee = {email:string;permissions:Permissions}
 type Message = {id:string;sender_email:string;recipient_email:string|null;body:string;created_at:string}
@@ -103,7 +104,7 @@ export function EmployeeRightsPanel({permissions}:{permissions:Permissions}) {
   async function save():Promise<void> {
     if(!selected)return;setSaving(true);setError(null)
     const changed=Object.fromEntries(Object.entries(draft).filter(([key,value])=>selected.permissions[key as Permission]!==value))
-    try{const response=await fetch(apiPath("/api/delegation"),{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({email,permissions:changed})});const data=await response.json();if(!response.ok)throw new Error(data.error);setSavedRights(previous=>({...previous,[email]:{...selected.permissions,...draft}}));setEditing(false)}
+    try{const response=await fetch(apiPath("/api/delegation"),{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({email,permissions:changed})});const data=await response.json();if(!response.ok)throw new Error(data.error);setSavedRights(previous=>({...previous,[email]:{...selected.permissions,...draft}}));setEditing(false);notifyPermissionsChanged()}
     catch(error){setError(error instanceof Error?error.message:"Unable to save rights.")}
     finally{setSaving(false)}
   }

@@ -11,6 +11,7 @@
 import { useEffect, useState } from "react"
 import { EmployeeWorkspace } from "@/components/employee-workspace"
 import { EmployeeRightsPanel, MessagesPanel } from "@/components/collaboration-panel"
+import { notifyPermissionsChanged } from "@/lib/permission-events"
 import { EntryReviewDialog, ManagerWorkspace } from "@/components/manager-workspace"
 import { permissionLabels, resolvePermissions, type Permission, type PermissionOverrides } from "@/lib/permissions"
 import { AdminWorkspace } from "@/components/admin-workspace"
@@ -199,7 +200,10 @@ export function TimesheetApp({
     void refreshPermissions()
     const timer = window.setInterval(refreshPermissions,15000)
     window.addEventListener("focus",refreshPermissions)
-    return () => { controller.abort(); window.clearInterval(timer); window.removeEventListener("focus",refreshPermissions) }
+    window.addEventListener("permissions-changed",refreshPermissions)
+    const channel=typeof BroadcastChannel !== "undefined" ? new BroadcastChannel("permissions-changed") : null
+    if(channel)channel.onmessage=()=>void refreshPermissions()
+    return () => { controller.abort(); window.clearInterval(timer); window.removeEventListener("focus",refreshPermissions); window.removeEventListener("permissions-changed",refreshPermissions); channel?.close() }
   },[])
 
   useEffect(() => {
@@ -864,6 +868,7 @@ function AdminPanel({ role }: { role: UserRole }) {
         throw new Error(data.error ?? "Failed to save user access.")
       }
       applyManagedAccessUser(data.user)
+      notifyPermissionsChanged()
       return true
     } catch (err) {
       setManagementError(

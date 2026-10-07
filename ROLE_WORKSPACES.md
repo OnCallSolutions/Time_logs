@@ -12,7 +12,7 @@ Manager AI review examines up to 50 submitted entries. Its recommendations are t
 
 ## Dynamic Rights and Messages
 
-Admins edit individual control permissions in the existing access editor and click Save. Rights are stored as JSONB overrides in `managed_user_access`; role defaults preserve existing functionality until an explicit override is saved. Open UIs refresh rights every 15 seconds and on browser focus. Routes enforce current database rights on each request, so stale buttons do not bypass revocation. Technical-admin controls remain admin-only.
+Admins edit individual control permissions in the existing access editor and click Save. Rights are stored as JSONB overrides in `managed_user_access`; role defaults preserve existing functionality until an explicit override is saved. Same-browser workspaces refresh immediately through local events/BroadcastChannel; other devices refresh every 15 seconds and on browser focus. Routes enforce current database rights on each request, so stale buttons do not bypass revocation. Technical-admin controls remain admin-only.
 
 Managers with delegation rights use Employee rights -> select an employee -> Edit rights -> choose controls -> Save rights. They may grant only workflow rights they currently hold, and cannot promote roles, unblock users, or delegate their delegation/message-sending authority. Team visibility and review are separate rights; granting review alone does not expose all team records. Concurrent blocking/promotion prevents delegation from overwriting the account state.
 
@@ -37,6 +37,7 @@ pnpm test -- components/employee-workspace.test.tsx
 pnpm test -- components/manager-workspace.test.tsx app/api/review/route.test.ts
 pnpm test -- components/admin-workspace.test.tsx components/timesheet-app.test.tsx
 pnpm test -- components/role-navigation.test.tsx
+pnpm test -- app/api/delegation/route.test.ts app/api/messages/route.test.ts lib/permissions.test.ts
 ```
 
 For each role branch: stop the running server, `git switch employee` (or `manager` / `admin`), run `pnpm build`, then `pnpm start` and visit `http://localhost:3000/timelog`. Rebuild after switching branches so production output matches the checkout. Tests use fixtures and mocked AI; testing real AI review requires configured AI Gateway credentials.
@@ -44,3 +45,5 @@ For each role branch: stop the running server, `git switch employee` (or `manage
 Employee checklist: extract notes, review drafts, submit, recall, filter corrections, resubmit, and verify other employees' records/admin screens are unavailable. Manager checklist: prepare AI review, inspect suggestions, cancel without mutation, approve explicitly, reject with a reason, and verify team reports remain available. Admin checklist: open the directory, edit without saving, save explicitly, inspect compact audit rows/full details, and open stored AI security reports.
 
 `employee`, `manager`, and `admin` are retained local branches, integrated into local `Development`. Changes have not been pushed. Future feature pull requests target `Development`; releases go from `Development` to `main`.
+
+Additional manual checks: keep an employee session open while an admin grants/revokes a control; verify the button appears/disappears after refresh. Verify server requests fail after revocation even before UI refresh. Delegate approval plus team visibility and confirm employee review appears without technical-admin access. Send one private message and one broadcast; sign in as a different employee and confirm only the broadcast is visible. Automated tests mock database and AI responses; live Neon/Azure/AI integration still requires authorized test accounts.

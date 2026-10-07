@@ -27,3 +27,8 @@ it("rejects a private message to an ineligible recipient",async()=>{
   expect((await POST(new Request("http://localhost/timelog/api/messages",{method:"POST",body:JSON.stringify({recipient:"admin@example.com",body:"Hello"})}))).status).toBe(400)
   expect(sendMessage).not.toHaveBeenCalled()
 })
+it("denies sending immediately after manager sending rights are revoked",async()=>{
+  vi.mocked(getEffectivePermissions).mockResolvedValue({role:"manager",permissions:resolvePermissions("manager",{send_messages:false})})
+  expect((await POST(new Request("http://localhost/timelog/api/messages",{method:"POST",body:JSON.stringify({recipient:null,body:"Announcement"})}))).status).toBe(403)
+  expect(sendMessage).not.toHaveBeenCalled()
+})

@@ -8,7 +8,6 @@
 import { z } from "zod"
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
-import { getEffectiveUserRole } from "@/lib/access"
 import { getAuditContext } from "@/lib/audit"
 import {
   clearTimeEntries,

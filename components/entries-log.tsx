@@ -17,7 +17,7 @@ import {
   Trash2,
   XCircle,
 } from "lucide-react"
-import { useState } from "react"
+import { useEffect,useState } from "react"
 import { EntryReviewDialog } from "@/components/manager-workspace"
 import { Button } from "@/components/ui/button"
 import type { EntryStatus, TimeEntry } from "@/lib/types"
@@ -119,6 +119,7 @@ export function EntriesLog({
   const [query, setQuery] = useState("")
   const [status, setStatus] = useState<EntryStatus | "all">("all")
   const [review, setReview] = useState<{ entry: TimeEntry; decision: "approved" | "rejected" } | null>(null)
+  useEffect(()=>{if(!canReview)setReview(null)},[canReview])
   const visibleEntries = entries.filter(entry =>
     (status === "all" || entry.status === status) &&
     [entry.contractor, entry.project, entry.description, entry.date].join(" ").toLowerCase().includes(query.trim().toLowerCase()),
