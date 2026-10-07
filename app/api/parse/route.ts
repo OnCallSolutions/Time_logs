@@ -7,6 +7,8 @@
  */
 import { generateText, Output } from "ai"
 import { z } from "zod"
+import { auth } from "@/auth"
+import { getEffectivePermissions } from "@/lib/effective-permissions"
 
 export const maxDuration = 30
 
@@ -50,6 +52,9 @@ const schema = z.object({
  */
 export async function POST(req: Request) {
   try {
+    const email = (await auth())?.user?.email
+    if (!email || !(await getEffectivePermissions(email)).permissions.create_entries)
+      return Response.json({error:"Forbidden."},{status:403})
     const { notes } = (await req.json()) as { notes?: string }
 
     if (!notes || !notes.trim()) {

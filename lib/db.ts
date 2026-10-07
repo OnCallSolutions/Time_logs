@@ -8,6 +8,7 @@
 import "server-only"
 
 import { neon } from "@neondatabase/serverless"
+import type { PermissionOverrides } from "@/lib/permissions"
 import type {
   AccessStatus,
   EntryStatus,
@@ -70,6 +71,8 @@ export type KnownUserSummary = {
 }
 
 export type ManagedAccessUser = {
+  /** Explicit administrator overrides for individual controls. */
+  permissions?: PermissionOverrides
   /** Normalized email controlled by the admin access table. */
   email: string
   /** Role assigned by an administrator. */
@@ -99,6 +102,7 @@ type KnownUserSummaryRow = {
 }
 
 type ManagedAccessUserRow = {
+  permissions: PermissionOverrides | null
   email: string
   role: UserRole
   access_status: AccessStatus
@@ -219,6 +223,7 @@ function toAuditEvent(row: AuditEventRow): AuditEvent {
  */
 function toManagedAccessUser(row: ManagedAccessUserRow): ManagedAccessUser {
   return {
+    permissions: row.permissions ?? {},
     email: row.email,
     role: row.role,
     accessStatus: row.access_status,
@@ -406,6 +411,7 @@ export function ensureManagedAccessTable() {
       CREATE INDEX IF NOT EXISTS managed_user_access_status_idx
       ON managed_user_access (access_status, role)
     `
+    await sql`ALTER TABLE managed_user_access ADD COLUMN IF NOT EXISTS permissions jsonb NOT NULL DEFAULT '{}'::jsonb`
   })()
 
   return accessSchemaReady
@@ -585,7 +591,7 @@ export async function getManagedAccessUser(email: string) {
   await ensureManagedAccessTable()
 
   const rows = await sql`
-    SELECT email, role, access_status, note, updated_by, created_at, updated_at
+    SELECT email, role, access_status, note, permissions, updated_by, created_at, updated_at
     FROM managed_user_access
     WHERE email = ${email.toLowerCase()}
   `
@@ -606,7 +612,7 @@ export async function listManagedAccessUsers() {
   await ensureManagedAccessTable()
 
   const rows = await sql`
-    SELECT email, role, access_status, note, updated_by, created_at, updated_at
+    SELECT email, role, access_status, note, permissions, updated_by, created_at, updated_at
     FROM managed_user_access
     ORDER BY email ASC
   `
@@ -630,6 +636,7 @@ export async function listManagedAccessUsers() {
  * @returns The saved managed access assignment.
  */
 export async function upsertManagedAccessUser(assignment: {
+  permissions?: PermissionOverrides
   email: string
   role: UserRole
   accessStatus: AccessStatus
@@ -644,6 +651,7 @@ export async function upsertManagedAccessUser(assignment: {
       role,
       access_status,
       note,
+      permissions,
       updated_by
     )
     VALUES (
@@ -651,6 +659,7 @@ export async function upsertManagedAccessUser(assignment: {
       ${assignment.role},
       ${assignment.accessStatus},
       ${assignment.note ?? ""},
+      ${JSON.stringify(assignment.permissions ?? {})}::jsonb,
       ${assignment.updatedBy}
     )
     ON CONFLICT (email)
@@ -658,9 +667,10 @@ export async function upsertManagedAccessUser(assignment: {
       role = EXCLUDED.role,
       access_status = EXCLUDED.access_status,
       note = EXCLUDED.note,
+      permissions = EXCLUDED.permissions,
       updated_by = EXCLUDED.updated_by,
       updated_at = now()
-    RETURNING email, role, access_status, note, updated_by, created_at, updated_at
+    RETURNING email, role, access_status, note, permissions, updated_by, created_at, updated_at
   `
 
   return toManagedAccessUser((rows as ManagedAccessUserRow[])[0])
