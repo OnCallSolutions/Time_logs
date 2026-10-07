@@ -86,6 +86,8 @@ function StatusBadge({ status }: { status: EntryStatus }) {
  * @returns An editable entries table or empty-state panel.
  */
 export function EntriesLog({
+  canEdit = true,
+  canDelete = true,
   canClear = false,
   canReview = false,
   canSubmit = false,
@@ -97,6 +99,8 @@ export function EntriesLog({
   onClear,
   title = "Time entries",
 }: {
+  canEdit?: boolean
+  canDelete?: boolean
   canClear?: boolean
   canReview?: boolean
   canSubmit?: boolean
@@ -188,10 +192,10 @@ export function EntriesLog({
           <tbody>
             {visibleEntries.map((entry) => {
               const canEditEntry =
-                canReview ||
+                canEdit && (canReview ||
                 entry.status === "draft" ||
-                entry.status === "rejected"
-              const canDeleteEntry = canEditEntry
+                entry.status === "rejected")
+              const canDeleteEntry = canDelete && (canReview || entry.status === "draft" || entry.status === "rejected")
 
               return (
                 <tr

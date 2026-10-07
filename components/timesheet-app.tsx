@@ -11,6 +11,7 @@
 import { useEffect, useState } from "react"
 import { EmployeeWorkspace } from "@/components/employee-workspace"
 import { EntryReviewDialog, ManagerWorkspace } from "@/components/manager-workspace"
+import { permissionLabels, resolvePermissions, type Permission, type PermissionOverrides } from "@/lib/permissions"
 import { AdminWorkspace } from "@/components/admin-workspace"
 import { SecurityRiskWindow } from "@/components/security-risk-window"
 import { useDialogFocus } from "@/components/use-dialog-focus"
@@ -58,6 +59,7 @@ const manageableStatuses: AccessStatus[] = ["active", "denied", "blocked"]
  * timesheet activity so admins can audit both permission state and product usage.
  */
 type AdminDirectoryUser = {
+  permissions?: PermissionOverrides
   /** Normalized user email shown as the stable identity. */
   email: string
   /** Effective role from environment-backed access policy. */
@@ -99,6 +101,7 @@ type AdminDirectoryUser = {
  * persisted until the Save button calls the user-management API.
  */
 type AccessEditorState = {
+  permissions?: PermissionOverrides
   /** Whether the editor is creating a new row or changing an existing user. */
   mode: "add" | "edit"
   /** Email being created or edited. */
@@ -154,7 +157,7 @@ type AdminAuditEvent = {
  * @returns The interactive timesheet application shell.
  */
 export function TimesheetApp({
-  role,
+  role: initialRole,
   userName,
   userEmail,
 }: {
@@ -162,6 +165,9 @@ export function TimesheetApp({
   userName?: string | null
   userEmail?: string | null
 }) {
+  const [role,setRole] = useState(initialRole)
+  const [permissions,setPermissions] = useState(() => resolvePermissions(null))
+  const [accessDenied,setAccessDenied] = useState(false)
   const [entries, setEntries] = useState<TimeEntry[]>([])
   const [view, setView] = useState<View>(role === "admin" ? "admin" : role === "manager" ? "approvals" : "log")
   const [loadingEntries, setLoadingEntries] = useState(true)
@@ -171,6 +177,29 @@ export function TimesheetApp({
   const [technologyReports,setTechnologyReports] = useState(false)
 
   useEffect(() => {
+    const controller = new AbortController()
+    /**
+     * Refreshes server rights and role after admin saves or browser focus changes.
+     * @returns Promise<void> after live authorization state is applied.
+     */
+    async function refreshPermissions(): Promise<void> {
+      try {
+        const response = await fetch(apiPath("/api/permissions"),{cache:"no-store",signal:controller.signal})
+        const data = await response.json()
+        if (!response.ok || !data.role) {
+          setAccessDenied(true); setPermissions(resolvePermissions(null)); setEntries([]); return
+        }
+        setAccessDenied(false); setRole(data.role); setPermissions(data.permissions)
+      } catch { if (!controller.signal.aborted) { setAccessDenied(true); setEntries([]); setPermissions(resolvePermissions(null)) } }
+    }
+    void refreshPermissions()
+    const timer = window.setInterval(refreshPermissions,15000)
+    window.addEventListener("focus",refreshPermissions)
+    return () => { controller.abort(); window.clearInterval(timer); window.removeEventListener("focus",refreshPermissions) }
+  },[])
+
+  useEffect(() => {
+    if (accessDenied) return
     let active = true
 
     /**
@@ -204,13 +233,16 @@ export function TimesheetApp({
     return () => {
       active = false
     }
-  }, [])
+  }, [role,permissions.view_team,accessDenied])
 
-  const canViewTeamReports = role === "admin" || role === "manager"
-  const canViewAdmin = role === "admin"
-  const canClearVisibleEntries = role === "admin" || role === "manager"
-  const canReviewEntries = role === "admin" || role === "manager"
-  const canSubmitEntries = role === "employee" || role === "user"
+  const canViewTeamReports = permissions.view_reports
+  const canViewAdmin = role === "admin" && !accessDenied
+  const canClearVisibleEntries = permissions.delete_entries && permissions.view_team
+  const canReviewEntries = permissions.review_entries
+  const canSubmitEntries = permissions.submit_entries
+  useEffect(() => {
+    if (!canReviewEntries) setSuggestedReview(null)
+  },[canReviewEntries])
   const roleLabel = {
     admin: "Administrator",
     manager: "Manager",
@@ -423,13 +455,14 @@ export function TimesheetApp({
         role={role}
       />
 
-      <NoteInput onParsed={addParsed} />
+      {permissions.create_entries && <NoteInput onParsed={addParsed} />}
       {canSubmitEntries && <EmployeeWorkspace entries={entries} selected={personalStatus} onSelect={setPersonalStatus} />}
-      {canReviewEntries && <ManagerWorkspace pending={pendingEntries.length} entries={pendingEntries} onApprovals={() => setView("approvals")} onReports={() => setView("report")} onRecommendation={(entry,decision,reason) => setSuggestedReview({entry,decision,reason})} />}
+      {!accessDenied && (canReviewEntries || permissions.ai_review || canViewTeamReports) && <ManagerWorkspace canReview={canReviewEntries} canReports={canViewTeamReports} canAI={permissions.ai_review} pending={pendingEntries.length} entries={pendingEntries} onApprovals={() => setView("approvals")} onReports={() => setView("report")} onRecommendation={(entry,decision,reason) => setSuggestedReview({entry,decision,reason})} />}
       {suggestedReview && <EntryReviewDialog entry={suggestedReview.entry} decision={suggestedReview.decision} initialNote={suggestedReview.reason} onCancel={() => setSuggestedReview(null)} onConfirm={note => {
         changeEntryStatus(suggestedReview.entry.id,suggestedReview.decision,note || undefined)
         setSuggestedReview(null)
       }} />}
+      {accessDenied && <p role="alert">Access is unavailable. Contact your administrator.</p>}
 
       {(loadingEntries || syncError) && (
         <div
@@ -496,6 +529,8 @@ export function TimesheetApp({
           canClear={canClearVisibleEntries}
           canReview={canReviewEntries}
           canSubmit={canSubmitEntries}
+          canEdit={permissions.edit_entries}
+          canDelete={permissions.delete_entries}
           description={
             canViewTeamReports
               ? "Review, edit, and manage team entries for your role."
@@ -521,6 +556,8 @@ export function TimesheetApp({
             canClear={false}
             canReview={canReviewEntries}
             canSubmit={false}
+            canEdit={permissions.edit_entries}
+            canDelete={permissions.delete_entries}
             description="Approve or reject submitted time after review."
             title="Pending approvals"
           />
@@ -749,6 +786,7 @@ function AdminPanel({ role }: { role: UserRole }) {
    * @returns Nothing; directory state is updated as a side effect.
    */
   function applyManagedAccessUser(managedUser: {
+    permissions?: PermissionOverrides
     email: string
     role: UserRole
     accessStatus: AccessStatus
@@ -766,6 +804,7 @@ function AdminPanel({ role }: { role: UserRole }) {
         accessSource: "managed",
         accessConfigured: true,
         note: managedUser.note,
+        permissions: managedUser.permissions ?? {},
         updatedBy: managedUser.updatedBy,
         updatedAt: managedUser.updatedAt,
         displayName: existing?.displayName ?? "",
@@ -792,6 +831,7 @@ function AdminPanel({ role }: { role: UserRole }) {
    * @returns True when the assignment is saved, otherwise false.
    */
   async function saveManagedUserAccess(payload: {
+    permissions?: PermissionOverrides
     email: string
     role: UserRole
     accessStatus: AccessStatus
@@ -856,6 +896,7 @@ function AdminPanel({ role }: { role: UserRole }) {
       accessStatus:
         user.accessStatus === "observed" ? "active" : user.accessStatus,
       note: user.note,
+      permissions: user.permissions ?? {},
     })
   }
 
@@ -875,6 +916,7 @@ function AdminPanel({ role }: { role: UserRole }) {
       role: accessEditor.role,
       accessStatus: accessEditor.accessStatus,
       note: accessEditor.note.trim(),
+      permissions: accessEditor.permissions,
     })
 
     if (saved) {
@@ -1315,6 +1357,14 @@ function AdminUserAccessEditor({
               className="mt-1 min-h-24 w-full resize-y rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-100 disabled:text-slate-500"
             />
           </label>
+
+          <fieldset className="grid gap-2">
+            <legend className="mb-2 text-sm font-semibold">Control permissions</legend>
+            {(Object.entries(permissionLabels) as [Permission,string][]).map(([permission,label]) => <label key={permission} className="flex items-center gap-2 text-sm">
+              <input type="checkbox" disabled={saving} checked={resolvePermissions(editor.role,editor.permissions)[permission]} onChange={event => onChange({...editor,permissions:{...editor.permissions,[permission]:event.target.checked}})} />{label}
+            </label>)}
+            <Button variant="outline" disabled={saving} onClick={() => onChange({...editor,permissions:{}})}>Use role defaults</Button>
+          </fieldset>
 
           {error && (
             <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">

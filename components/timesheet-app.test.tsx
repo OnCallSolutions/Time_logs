@@ -8,6 +8,7 @@ import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { TimesheetApp } from "@/components/timesheet-app"
+import { resolvePermissions } from "@/lib/permissions"
 
 vi.mock("@/components/account-profile", () => ({
   AccountProfile: () => <div data-testid="account-profile" />,
@@ -120,6 +121,7 @@ function mockTimesheetFetch() {
     const url = String(input)
     const method = init?.method ?? "GET"
     const body = init?.body ? JSON.parse(String(init.body)) : null
+    if (url === "/timelog/api/permissions") return jsonResponse({role:"admin",permissions:resolvePermissions("admin")})
     fetchCalls.push({ url, method, body })
 
     if (url === "/timelog/api/entries") {
@@ -249,6 +251,7 @@ describe("TimesheetApp admin directory", () => {
       role: "manager",
       accessStatus: "blocked",
       note: "Needs review",
+      permissions: {},
     })
   })
 })

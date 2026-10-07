@@ -7,6 +7,7 @@
  */
 import { z } from "zod"
 import { auth } from "@/auth"
+import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { getEffectiveUserRole } from "@/lib/access"
 import {
   auditActionForStatus,
@@ -49,7 +50,7 @@ const patchSchema = z
 async function getAccess() {
   const session = await auth()
   const email = session?.user?.email ?? null
-  const role = await getEffectiveUserRole(email)
+  const {role,permissions} = await getEffectivePermissions(email)
 
   if (!email || !role) {
     return null
@@ -58,8 +59,9 @@ async function getAccess() {
   return {
     email,
     role,
-    includeAll: role === "admin" || role === "manager",
-    canReview: role === "admin" || role === "manager",
+    includeAll: permissions.view_team,
+    canReview: permissions.review_entries,
+    permissions,
   }
 }
 
@@ -170,7 +172,11 @@ export async function PATCH(
 
     const { id } = await params
     const patch = patchSchema.parse(await req.json())
-    if (patch.reviewNote !== undefined && patch.status !== "rejected") {
+    if ((hasEntryFieldPatch(patch) && !access.permissions.edit_entries) ||
+      ((patch.status === "approved" || patch.status === "rejected") && !access.permissions.review_entries) ||
+      ((patch.status === "draft" || patch.status === "submitted") && !access.permissions.submit_entries && !access.permissions.review_entries))
+      return Response.json({error:"Forbidden."},{status:403})
+    if (patch.reviewNote !== undefined && patch.status !== "rejected" && patch.status !== "approved") {
       return Response.json(
         { error: "A review note can only be saved when rejecting an entry." },
         { status: 400 },
@@ -268,6 +274,7 @@ export async function DELETE(
     if (!access) {
       return Response.json({ error: "Unauthorized." }, { status: 401 })
     }
+    if (!access.permissions.delete_entries) return Response.json({error:"Forbidden."},{status:403})
 
     const { id } = await params
     const current = await getTimeEntry(access.email, id, access.includeAll)

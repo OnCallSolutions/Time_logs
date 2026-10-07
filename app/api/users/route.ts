@@ -20,10 +20,12 @@ import {
   upsertManagedAccessUser,
 } from "@/lib/db"
 import type { AccessStatus, UserRole } from "@/lib/types"
+import { permissionLabels, type PermissionOverrides } from "@/lib/permissions"
 
 export const runtime = "nodejs"
 
 type DirectoryUser = {
+  permissions?: PermissionOverrides
   /** Normalized user email used as the directory identity key. */
   email: string
   /** Effective environment-backed role, or none for observed unconfigured users. */
@@ -59,6 +61,7 @@ type DirectoryUser = {
 }
 
 const accessUpdateSchema = z.object({
+  permissions: z.record(z.enum(Object.keys(permissionLabels) as [keyof typeof permissionLabels, ...(keyof typeof permissionLabels)[]]), z.boolean()).optional(),
   email: z.string().trim().email(),
   role: z.enum(["admin", "manager", "employee", "user"]),
   accessStatus: z.enum(["active", "denied", "blocked"]).default("active"),
@@ -186,6 +189,7 @@ export async function GET() {
         accessSource: "managed",
         accessConfigured: true,
         note: user.note,
+        permissions: user.permissions,
         updatedBy: user.updatedBy,
         updatedAt: user.updatedAt,
         displayName: existing?.displayName ?? "",
@@ -265,6 +269,7 @@ async function saveManagedAccess(req: Request) {
       role: body.role,
       accessStatus: body.accessStatus,
       note: body.note,
+      permissions: body.permissions ?? existing?.permissions ?? {},
       updatedBy: adminEmail,
     })
 
@@ -279,6 +284,7 @@ async function saveManagedAccess(req: Request) {
         fromStatus: existing?.accessStatus ?? null,
         toStatus: user.accessStatus,
         noteChanged: existing?.note !== user.note,
+        permissionsChanged: JSON.stringify(existing?.permissions ?? {}) !== JSON.stringify(user.permissions),
       },
       ...getAuditContext(req),
     })

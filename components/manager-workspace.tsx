@@ -20,7 +20,8 @@ import type { TimeEntry } from "@/lib/types"
  * @param props.onRecommendation - Callback opening a human decision dialog.
  * @returns JSX.Element containing manager navigation controls.
  */
-export function ManagerWorkspace({ pending, entries, onApprovals, onReports, onRecommendation }: {
+export function ManagerWorkspace({ pending, entries, canReview = true, canReports = true, canAI = true, onApprovals, onReports, onRecommendation }: {
+  canReview?: boolean; canReports?: boolean; canAI?: boolean;
   pending: number; entries: TimeEntry[]; onApprovals: () => void; onReports: () => void;
   onRecommendation: (entry: TimeEntry, decision: "approved" | "rejected", reason: string) => void
 }) {
@@ -43,19 +44,19 @@ export function ManagerWorkspace({ pending, entries, onApprovals, onReports, onR
   }
   return <section aria-label="Manager workflow" className="space-y-3">
     <div className="flex flex-wrap gap-2">
-    <Button disabled={loading || !pending} onClick={prepareReview}><Sparkles className="size-4" />{loading ? "Preparing review..." : "Prepare AI review"}</Button>
-    <Button onClick={onApprovals}><CheckCircle2 className="size-4" />Review queue <span>{pending}</span></Button>
-    <Button variant="outline" onClick={onReports}><BarChart3 className="size-4" />Team report</Button>
+    {canAI && <Button disabled={loading || !pending} onClick={prepareReview}><Sparkles className="size-4" />{loading ? "Preparing review..." : "Prepare AI review"}</Button>}
+    {canReview && <Button onClick={onApprovals}><CheckCircle2 className="size-4" />Review queue <span>{pending}</span></Button>}
+    {canReports && <Button variant="outline" onClick={onReports}><BarChart3 className="size-4" />Team report</Button>}
     </div>
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     {recommendations.filter(item => entries.some(entry => entry.id === item.entryId && entry.status === "submitted")).map(item => {
       const entry = entries.find(entry => entry.id === item.entryId)!
       return <div key={item.entryId} className="flex flex-wrap items-center justify-between gap-3 border-b border-border py-3">
         <div className="min-w-0 flex-1"><p className="text-sm font-medium">{entry.contractor} - {entry.date} - {entry.hours}h</p><p className="text-sm">Suggested: {item.decision.replace("_"," ")}</p><p className="break-words text-sm text-muted-foreground">{item.reason}</p></div>
-        {item.decision === "needs_review" ? <div className="flex flex-wrap gap-2">
+        {canReview && (item.decision === "needs_review" ? <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={() => onRecommendation(entry,"approved",item.reason)}>Review for approval</Button>
           <Button variant="outline" onClick={() => onRecommendation(entry,"rejected",item.reason)}>Review for rejection</Button>
-        </div> : <Button variant="outline" onClick={() => onRecommendation(entry,item.decision as "approved"|"rejected",item.reason)}>Review suggestion</Button>}
+        </div> : <Button variant="outline" onClick={() => onRecommendation(entry,item.decision as "approved"|"rejected",item.reason)}>Review suggestion</Button>)}
       </div>
     })}
   </section>

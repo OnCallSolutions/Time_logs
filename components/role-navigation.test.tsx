@@ -6,6 +6,10 @@ import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, expect, it, vi } from "vitest"
 import { TimesheetApp } from "./timesheet-app"
+import { resolvePermissions, type PermissionOverrides } from "@/lib/permissions"
+import type { UserRole } from "@/lib/types"
+let testRole: UserRole = "employee"
+let overrides: PermissionOverrides = {}
 vi.mock("@/components/account-profile",()=>({AccountProfile:()=>null}))
 vi.mock("@/components/sign-out-button",()=>({SignOutButton:()=>null}))
 vi.mock("@/components/note-input",()=>({NoteInput:()=> <p>Note extraction</p>}))
@@ -15,7 +19,9 @@ const entries = [
   {id:"rejected",contractor:"Employee B",date:"2026-10-07",hours:4,project:"Review",description:"Corrections",status:"rejected"},
 ]
 beforeEach(()=>{
+  testRole = "employee"; overrides = {}
   vi.stubGlobal("fetch",vi.fn(async (url:string,init?:RequestInit)=> {
+    if(url.endsWith("/api/permissions")) return Response.json({role:testRole,permissions:resolvePermissions(testRole,overrides)})
     if(url.endsWith("/api/review")) return Response.json({recommendations:[{entryId:"submitted",decision:"approved",reason:"No obvious inconsistency"}]})
     if(init?.method === "PATCH") return Response.json({entry:{...entries[0],status:"approved"}})
     if(url.endsWith("/api/entries")) return Response.json({entries})
@@ -32,6 +38,7 @@ it("gives employees personal corrections without privileged controls",async()=>{
   expect(screen.getByDisplayValue("Employee B")).toBeInTheDocument()
 })
 it("keeps AI recommendations advisory until a manager confirms",async()=>{
+  testRole = "manager"
   render(<TimesheetApp role="manager" userEmail="manager@example.com" />)
   await screen.findByRole("heading",{name:"Pending approvals"})
   await userEvent.click(screen.getByRole("button",{name:"Prepare AI review"}))
@@ -45,6 +52,7 @@ it("keeps AI recommendations advisory until a manager confirms",async()=>{
   expect(screen.getByRole("button",{name:"Reports"})).toBeInTheDocument()
 })
 it("opens technology management and preserves admin approvals and reporting",async()=>{
+  testRole = "admin"
   render(<TimesheetApp role="admin" userEmail="admin@example.com" />)
   await screen.findByRole("heading",{name:"Admin user directory"})
   expect(screen.getByRole("button",{name:"Employee access"})).toBeInTheDocument()

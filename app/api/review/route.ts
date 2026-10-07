@@ -4,7 +4,7 @@
  * Every suggested decision remains subject to explicit human review and API checks.
  */
 import { auth } from "@/auth"
-import { getEffectiveUserRole } from "@/lib/access"
+import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { listTimeEntries } from "@/lib/db"
 import { generateText, Output } from "ai"
 import { z } from "zod"
@@ -22,9 +22,9 @@ const schema = z.object({ recommendations: z.array(z.object({
 export async function POST(): Promise<Response> {
   try {
     const email = (await auth())?.user?.email
-    const role = await getEffectiveUserRole(email)
-    if (!email || (role !== "admin" && role !== "manager")) return Response.json({error:"Forbidden."},{status:403})
-    const pending = (await listTimeEntries(email,true)).filter(entry => entry.status === "submitted")
+    const access = await getEffectivePermissions(email)
+    if (!email || !access.permissions.ai_review) return Response.json({error:"Forbidden."},{status:403})
+    const pending = (await listTimeEntries(email,access.permissions.view_team)).filter(entry => entry.status === "submitted")
     const entries = pending.slice(0,50)
     if (!entries.length) return Response.json({recommendations:[],reviewedCount:0,totalPending:0})
     const {output} = await generateText({model:"openai/gpt-4.1-mini",output:Output.object({schema}),

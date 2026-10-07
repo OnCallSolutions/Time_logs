@@ -7,6 +7,7 @@
  */
 import { z } from "zod"
 import { auth } from "@/auth"
+import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { getEffectiveUserRole } from "@/lib/access"
 import { getAuditContext } from "@/lib/audit"
 import {
@@ -42,7 +43,7 @@ const createSchema = z.object({
 async function getAccess() {
   const session = await auth()
   const email = session?.user?.email ?? null
-  const role = await getEffectiveUserRole(email)
+  const {role,permissions} = await getEffectivePermissions(email)
 
   if (!email || !role) {
     return null
@@ -50,7 +51,8 @@ async function getAccess() {
 
   return {
     email,
-    includeAll: role === "admin" || role === "manager",
+    includeAll: permissions.view_team,
+    permissions,
   }
 }
 
@@ -97,6 +99,7 @@ export async function POST(req: Request) {
     if (!access) {
       return Response.json({ error: "Unauthorized." }, { status: 401 })
     }
+    if (!access.permissions.create_entries) return Response.json({error:"Forbidden."},{status:403})
 
     const body = createSchema.parse(await req.json())
     const entries = await createTimeEntries(access.email, body.entries)
@@ -144,6 +147,7 @@ export async function DELETE(req: Request) {
     if (!access) {
       return Response.json({ error: "Unauthorized." }, { status: 401 })
     }
+    if (!access.permissions.delete_entries) return Response.json({error:"Forbidden."},{status:403})
 
     await clearTimeEntries(access.email, access.includeAll)
     await recordAuditEvent({
