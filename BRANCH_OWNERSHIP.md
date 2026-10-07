@@ -1,13 +1,16 @@
 # Branch Responsibilities
 
+`Development` is the shared source of truth for integrated work. Create future feature branches from its latest commit and open feature pull requests targeting `Development`. After review and testing, release changes through a pull request from `Development` to `main`. Keep feature branches after integration; do not merge feature branches directly into `main`.
+
 - `audit_logging_security`: employee administration, audit capture, white admin activity views, and event details. IP addresses appear only in selected event details.
 - `security`: builds on the admin branch; advisory AI assessments and future server-side cybersecurity controls. Assessments never automatically grant, revoke, or block access.
 - `Per_user_entries`: employee time-entry ownership and business workflows.
 - `ui_widescreen_layout`: shared appearance and responsive layout.
 - `testing_framework`: external testing tools and automation.
 - `main`: reviewed releases.
+- `Development`: integrated UI, employee workflows, administration, security monitoring, and testing tools.
 
-Apply individual shared commits to branches that need them. Keep security-specific controls and assessment storage in `security` until reviewed for release.
+Keep feature-specific work on its owning branch, then integrate it into `Development`. Synchronize active feature branches with `Development` when they need shared changes. The remote rebrand branch is excluded so the application remains at `/timelog`.
 
 # Storage and Configuration
 
