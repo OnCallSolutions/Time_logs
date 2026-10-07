@@ -1422,7 +1422,6 @@ function AdminActivityWindow({
                   <th className="px-4 py-2 font-medium">Actor</th>
                   <th className="px-4 py-2 font-medium">Action</th>
                   <th className="px-4 py-2 font-medium">Target</th>
-                  <th className="px-4 py-2 font-medium">IP</th>
                   <th className="px-4 py-2 font-medium">User agent</th>
                   <th className="px-4 py-2 font-medium">Metadata</th>
                 </tr>
@@ -1457,18 +1456,13 @@ function AdminActivityWindow({
                         {event.targetId ?? "No target id"}
                       </p>
                     </td>
-                    <td className="px-4 py-3 text-xs text-slate-600">
-                      {event.ipAddress ?? "Unknown"}
-                    </td>
                     <td className="max-w-sm px-4 py-3 text-xs text-slate-600">
-                      <span className="line-clamp-3">
+                      <span className="line-clamp-1">
                         {event.userAgent ?? "Unknown"}
                       </span>
                     </td>
-                    <td className="max-w-md px-4 py-3">
-                      <pre className="whitespace-pre-wrap break-words rounded-lg border border-slate-200 bg-slate-50 p-2 font-mono text-[0.7rem] leading-relaxed text-slate-700">
-                        {formatAuditMetadataBlock(event)}
-                      </pre>
+                    <td className="max-w-xs px-4 py-3 text-xs text-slate-600">
+                      <p className="truncate">{formatAuditMetadata(event)}</p>
                     </td>
                   </tr>
                 ))}
@@ -1787,15 +1781,12 @@ function formatAuditMetadata(event: AdminAuditEvent) {
     parts.push(`fields: ${fields.join(", ")}`)
   }
 
-  if (event.ipAddress) {
-    parts.push(`ip: ${event.ipAddress}`)
-  }
-
-  return parts.join(" · ") || "Recorded"
+  const summary = parts.join(" · ") || `${Object.keys(event.metadata).length} metadata fields`
+  return summary.length > 100 ? `${summary.slice(0, 97)}...` : summary
 }
 
 /**
- * Formats audit metadata as readable JSON for the full activity window.
+ * Formats full audit metadata as readable JSON for the selected entry detail.
  *
  * The audit API already sanitizes metadata, so this formatter focuses on making
  * nested context easy to inspect in a fixed-width block.
