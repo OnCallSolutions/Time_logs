@@ -18,6 +18,7 @@ import {
   XCircle,
 } from "lucide-react"
 import { useState } from "react"
+import { EntryReviewDialog } from "@/components/manager-workspace"
 import { Button } from "@/components/ui/button"
 import type { EntryStatus, TimeEntry } from "@/lib/types"
 
@@ -113,6 +114,7 @@ export function EntriesLog({
 }) {
   const [query, setQuery] = useState("")
   const [status, setStatus] = useState<EntryStatus | "all">("all")
+  const [review, setReview] = useState<{ entry: TimeEntry; decision: "approved" | "rejected" } | null>(null)
   const visibleEntries = entries.filter(entry =>
     (status === "all" || entry.status === status) &&
     [entry.contractor, entry.project, entry.description, entry.date].join(" ").toLowerCase().includes(query.trim().toLowerCase()),
@@ -136,6 +138,10 @@ export function EntriesLog({
 
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+      {review && <EntryReviewDialog entry={review.entry} decision={review.decision} onCancel={() => setReview(null)} onConfirm={note => {
+        onStatusChange(review.entry.id, review.decision, note || undefined)
+        setReview(null)
+      }} />}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
         <div>
           <h2 className="text-sm font-semibold">{title}</h2>
@@ -304,7 +310,7 @@ export function EntriesLog({
                             size="icon-sm"
                             aria-label="Approve entry"
                             title="Approve entry"
-                            onClick={() => onStatusChange(entry.id, "approved")}
+                            onClick={() => setReview({entry, decision: "approved"})}
                           >
                             <CheckCircle2
                               className="size-3.5"
@@ -316,12 +322,7 @@ export function EntriesLog({
                             size="icon-sm"
                             aria-label="Reject entry"
                             title="Reject entry"
-                            onClick={() => {
-                              const note = window.prompt("Reason for rejection")
-                              if (note?.trim()) {
-                                onStatusChange(entry.id, "rejected", note)
-                              }
-                            }}
+                            onClick={() => setReview({entry, decision: "rejected"})}
                           >
                             <XCircle className="size-3.5" aria-hidden="true" />
                           </Button>
