@@ -37,7 +37,7 @@ export async function GET(req: Request) {
 
     return Response.json({ events })
   } catch (err) {
-    console.error("[audit] list failed:", err)
+    console.error("[audit] list failed")
     return Response.json(
       { error: "Failed to load audit events." },
       { status: 500 },

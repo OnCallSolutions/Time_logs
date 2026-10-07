@@ -240,7 +240,7 @@ export async function PATCH(
 
     return Response.json({ entry })
   } catch (err) {
-    console.error("[entries] update failed:", err)
+    console.error("[entries] update failed")
     return Response.json(
       { error: "Failed to update entry." },
       { status: 400 },
@@ -306,7 +306,7 @@ export async function DELETE(
 
     return Response.json({ ok: true })
   } catch (err) {
-    console.error("[entries] delete failed:", err)
+    console.error("[entries] delete failed")
     return Response.json(
       { error: "Failed to delete entry." },
       { status: 500 },

@@ -203,7 +203,7 @@ export async function GET() {
       users: sortDirectoryUsers(Array.from(directory.values())),
     })
   } catch (err) {
-    console.error("[users] directory failed:", err)
+    console.error("[users] directory failed")
     return Response.json(
       { error: "Failed to load user directory." },
       { status: 500 },
@@ -285,7 +285,7 @@ async function saveManagedAccess(req: Request) {
 
     return Response.json({ user })
   } catch (err) {
-    console.error("[users] access save failed:", err)
+    console.error("[users] access save failed")
     return Response.json(
       { error: "Failed to save user access." },
       { status: 400 },

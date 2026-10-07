@@ -67,7 +67,7 @@ export async function GET() {
     const profile = await getUserProfile(access.email)
     return Response.json({ profile })
   } catch (err) {
-    console.error("[profile] load failed:", err)
+    console.error("[profile] load failed")
     return Response.json(
       { error: "Failed to load profile." },
       { status: 500 },
@@ -109,7 +109,7 @@ export async function PUT(req: Request) {
 
     return Response.json({ profile: savedProfile })
   } catch (err) {
-    console.error("[profile] save failed:", err)
+    console.error("[profile] save failed")
     return Response.json(
       { error: "Failed to save profile." },
       { status: 400 },
