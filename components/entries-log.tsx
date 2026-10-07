@@ -9,12 +9,15 @@
  * should be available.
  */
 import {
+  FilterX,
+  Search,
   CheckCircle2,
   ClipboardList,
   Send,
   Trash2,
   XCircle,
 } from "lucide-react"
+import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import type { EntryStatus, TimeEntry } from "@/lib/types"
 
@@ -108,6 +111,12 @@ export function EntriesLog({
   onClear: () => void
   title?: string
 }) {
+  const [query, setQuery] = useState("")
+  const [status, setStatus] = useState<EntryStatus | "all">("all")
+  const visibleEntries = entries.filter(entry =>
+    (status === "all" || entry.status === status) &&
+    [entry.contractor, entry.project, entry.description, entry.date].join(" ").toLowerCase().includes(query.trim().toLowerCase()),
+  )
   if (entries.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card/50 px-6 py-16 text-center">
@@ -123,7 +132,7 @@ export function EntriesLog({
     )
   }
 
-  const total = entries.reduce((sum, e) => sum + (Number(e.hours) || 0), 0)
+  const total = visibleEntries.reduce((sum, e) => sum + (Number(e.hours) || 0), 0)
 
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
@@ -144,6 +153,19 @@ export function EntriesLog({
       </div>
 
       <div className="overflow-x-auto">
+        <div className="flex flex-wrap items-center gap-2 border-b border-border p-3">
+          <label className="flex min-w-0 flex-1 items-center gap-2">
+            <Search className="size-4 shrink-0" aria-hidden="true" />
+            <input aria-label="Search entries" placeholder="Search entries" value={query} onChange={event => setQuery(event.target.value)} className="w-full min-w-0 rounded-md border border-border bg-background px-3 py-2 text-sm" />
+          </label>
+          <select aria-label="Filter entry status" value={status} onChange={event => setStatus(event.target.value as EntryStatus | "all")} className="rounded-md border border-border bg-background px-3 py-2 text-sm">
+            <option value="all">All statuses</option>
+            {(["draft", "submitted", "approved", "rejected"] as const).map(value => <option key={value} value={value}>{statusLabel(value)}</option>)}
+          </select>
+          <Button variant="outline" size="icon-sm" title="Reset filters" aria-label="Reset filters" disabled={!query && status === "all"} onClick={() => { setQuery(""); setStatus("all") }}><FilterX className="size-4" /></Button>
+          <span className="text-xs text-muted-foreground">{visibleEntries.length} of {entries.length}</span>
+        </div>
+        {visibleEntries.length === 0 && <p role="status" className="p-4 text-sm text-muted-foreground">No matching entries.</p>}
         <table className="w-full border-collapse text-left">
           <thead>
             <tr className="border-b border-border text-xs uppercase tracking-wide text-muted-foreground">
@@ -157,7 +179,7 @@ export function EntriesLog({
             </tr>
           </thead>
           <tbody>
-            {entries.map((entry) => {
+            {visibleEntries.map((entry) => {
               const canEditEntry =
                 canReview ||
                 entry.status === "draft" ||
