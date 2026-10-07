@@ -2,7 +2,7 @@
  * Exercises integrated role navigation and the AI-to-human approval boundary.
  * API responses are fixtures so no real entries, identities, or model calls change.
  */
-import { render, screen, within } from "@testing-library/react"
+import { fireEvent,render, screen, waitFor,within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, expect, it, vi } from "vitest"
 import { TimesheetApp } from "./timesheet-app"
@@ -60,4 +60,21 @@ it("opens technology management and preserves admin approvals and reporting",asy
   expect(screen.getByRole("button",{name:/approvals/i})).toBeInTheDocument()
   expect(screen.getByRole("button",{name:"Reports"})).toBeInTheDocument()
   expect(screen.getByText("Note extraction")).toBeInTheDocument()
+})
+it("removes manager approval controls when rights are revoked in an open session",async()=>{
+  testRole="manager"
+  render(<TimesheetApp role="manager" userEmail="manager@example.com" />)
+  await screen.findByRole("heading",{name:"Pending approvals"})
+  overrides={review_entries:false,ai_review:false}
+  fireEvent(window,new Event("focus"))
+  await waitFor(()=>expect(screen.queryByRole("button",{name:/^approvals/i})).not.toBeInTheDocument())
+  expect(screen.queryByRole("button",{name:"Prepare AI review"})).not.toBeInTheDocument()
+})
+it("adds approval controls when an employee receives a delegated review right",async()=>{
+  render(<TimesheetApp role="employee" userEmail="employee@example.com" />)
+  await screen.findByDisplayValue("Employee A")
+  overrides={review_entries:true,view_team:true}
+  fireEvent(window,new Event("focus"))
+  await screen.findByRole("button",{name:/^approvals/i})
+  expect(screen.queryByRole("button",{name:"Admin"})).not.toBeInTheDocument()
 })

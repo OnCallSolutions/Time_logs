@@ -10,6 +10,7 @@
  */
 import { useEffect, useState } from "react"
 import { EmployeeWorkspace } from "@/components/employee-workspace"
+import { EmployeeRightsPanel, MessagesPanel } from "@/components/collaboration-panel"
 import { EntryReviewDialog, ManagerWorkspace } from "@/components/manager-workspace"
 import { permissionLabels, resolvePermissions, type Permission, type PermissionOverrides } from "@/lib/permissions"
 import { AdminWorkspace } from "@/components/admin-workspace"
@@ -21,6 +22,8 @@ import {
   CheckCircle2,
   Clock3,
   ListChecks,
+  MessageSquare,
+  KeyRound,
   Maximize2,
   Minimize2,
   Pencil,
@@ -47,7 +50,7 @@ import type {
   UserRole,
 } from "@/lib/types"
 
-type View = "log" | "approvals" | "report" | "admin"
+type View = "log" | "approvals" | "report" | "admin" | "messages" | "permissions"
 
 const manageableRoles: UserRole[] = ["admin", "manager", "employee", "user"]
 const manageableStatuses: AccessStatus[] = ["active", "denied", "blocked"]
@@ -168,6 +171,7 @@ export function TimesheetApp({
   const [role,setRole] = useState(initialRole)
   const [permissions,setPermissions] = useState(() => resolvePermissions(null))
   const [accessDenied,setAccessDenied] = useState(false)
+  const [permissionsLoaded,setPermissionsLoaded] = useState(false)
   const [entries, setEntries] = useState<TimeEntry[]>([])
   const [view, setView] = useState<View>(role === "admin" ? "admin" : role === "manager" ? "approvals" : "log")
   const [loadingEntries, setLoadingEntries] = useState(true)
@@ -187,9 +191,9 @@ export function TimesheetApp({
         const response = await fetch(apiPath("/api/permissions"),{cache:"no-store",signal:controller.signal})
         const data = await response.json()
         if (!response.ok || !data.role) {
-          setAccessDenied(true); setPermissions(resolvePermissions(null)); setEntries([]); return
+          setPermissionsLoaded(true); setAccessDenied(true); setPermissions(resolvePermissions(null)); setEntries([]); return
         }
-        setAccessDenied(false); setRole(data.role); setPermissions(data.permissions)
+        setPermissionsLoaded(true); setAccessDenied(false); setRole(data.role); setPermissions(data.permissions)
       } catch { if (!controller.signal.aborted) { setAccessDenied(true); setEntries([]); setPermissions(resolvePermissions(null)) } }
     }
     void refreshPermissions()
@@ -251,10 +255,13 @@ export function TimesheetApp({
   }[role]
 
   useEffect(() => {
+    if (!permissionsLoaded) return
     if (view === "report" && !canViewTeamReports) setView("log")
     if (view === "approvals" && !canReviewEntries) setView("log")
     if (view === "admin" && !canViewAdmin) setView("log")
-  }, [canReviewEntries, canViewAdmin, canViewTeamReports, view])
+    if (view === "permissions" && (!permissions.delegate_permissions || (role !== "admin" && role !== "manager"))) setView("log")
+    if (accessDenied && view === "messages") setView("log")
+  }, [canReviewEntries, canViewAdmin, canViewTeamReports, view,permissionsLoaded,permissions.delegate_permissions,role,accessDenied])
 
   /**
    * Persists newly parsed entries and prepends them to the local view.
@@ -400,7 +407,7 @@ export function TimesheetApp({
   const tabs: { key: View; label: string; icon: typeof ListChecks }[] = [
     {
       key: "log",
-      label: canViewTeamReports ? "Team entries" : "My entries",
+      label: permissions.view_team ? "Team entries" : "My entries",
       icon: ListChecks,
     },
     ...(canReviewEntries
@@ -412,6 +419,8 @@ export function TimesheetApp({
     ...(canViewAdmin
       ? [{ key: "admin" as const, label: "Admin", icon: ShieldCheck }]
       : []),
+    ...(!accessDenied ? [{key:"messages" as const,label:"Messages",icon:MessageSquare}] : []),
+    ...(permissions.delegate_permissions && (role === "admin" || role === "manager") ? [{key:"permissions" as const,label:"Employee rights",icon:KeyRound}] : []),
   ]
 
   return (
@@ -456,7 +465,7 @@ export function TimesheetApp({
       />
 
       {permissions.create_entries && <NoteInput onParsed={addParsed} />}
-      {canSubmitEntries && <EmployeeWorkspace entries={entries} selected={personalStatus} onSelect={setPersonalStatus} />}
+      {(role === "employee" || role === "user") && <EmployeeWorkspace entries={entries} selected={personalStatus} onSelect={setPersonalStatus} />}
       {!accessDenied && (canReviewEntries || permissions.ai_review || canViewTeamReports) && <ManagerWorkspace canReview={canReviewEntries} canReports={canViewTeamReports} canAI={permissions.ai_review} pending={pendingEntries.length} entries={pendingEntries} onApprovals={() => setView("approvals")} onReports={() => setView("report")} onRecommendation={(entry,decision,reason) => setSuggestedReview({entry,decision,reason})} />}
       {suggestedReview && <EntryReviewDialog entry={suggestedReview.entry} decision={suggestedReview.decision} initialNote={suggestedReview.reason} onCancel={() => setSuggestedReview(null)} onConfirm={note => {
         changeEntryStatus(suggestedReview.entry.id,suggestedReview.decision,note || undefined)
@@ -521,7 +530,7 @@ export function TimesheetApp({
 
       {view === "log" ? (
         <EntriesLog
-          entries={canSubmitEntries && personalStatus !== "all" ? entries.filter(entry => entry.status === personalStatus) : entries}
+          entries={(role === "employee" || role === "user") && personalStatus !== "all" ? entries.filter(entry => entry.status === personalStatus) : entries}
           onUpdate={updateEntry}
           onStatusChange={changeEntryStatus}
           onDelete={deleteEntry}
@@ -532,11 +541,11 @@ export function TimesheetApp({
           canEdit={permissions.edit_entries}
           canDelete={permissions.delete_entries}
           description={
-            canViewTeamReports
+            permissions.view_team
               ? "Review, edit, and manage team entries for your role."
               : "Review, edit, and submit your own saved time entries."
           }
-          title={canViewTeamReports ? "Team entries" : "My time entries"}
+          title={permissions.view_team ? "Team entries" : "My time entries"}
         />
       ) : view === "approvals" ? (
         pendingEntries.length === 0 ? (
@@ -573,6 +582,10 @@ export function TimesheetApp({
         ) : (
           <ManagerReport entries={entries} />
         )
+      ) : view === "messages" ? (
+        <MessagesPanel canSend={permissions.send_messages && (role === "admin" || role === "manager")} />
+      ) : view === "permissions" ? (
+        <EmployeeRightsPanel permissions={permissions} />
       ) : (
         <AdminPanel role={role} />
       )}

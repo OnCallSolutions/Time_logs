@@ -13,6 +13,8 @@ export const permissionLabels = {
   view_team: "View team entries",
   view_reports: "View team reports",
   ai_review: "Prepare AI review",
+  delegate_permissions: "Delegate employee workflow rights",
+  send_messages: "Send employee messages",
 } as const
 export type Permission = keyof typeof permissionLabels
 export type PermissionOverrides = Partial<Record<Permission, boolean>>
@@ -28,7 +30,8 @@ export function resolvePermissions(role: UserRole | null, overrides: PermissionO
   const elevated = role === "admin" || role === "manager"
   const personal = role === "employee" || role === "user"
   const defaults: Permissions = {create_entries:!!role,edit_entries:!!role,delete_entries:!!role,
-    submit_entries:personal,review_entries:elevated,view_team:elevated,view_reports:elevated,ai_review:elevated}
+    submit_entries:personal,review_entries:elevated,view_team:elevated,view_reports:elevated,ai_review:elevated,
+    delegate_permissions:elevated,send_messages:elevated}
   for (const key of Object.keys(permissionLabels) as Permission[]) {
     if (role && typeof overrides[key] === "boolean") defaults[key] = overrides[key]!
   }

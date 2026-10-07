@@ -113,6 +113,7 @@ type ManagedAccessUserRow = {
 }
 
 export type AuditAction =
+  | "message_sent"
   | "entry_created"
   | "entries_cleared"
   | "entry_updated"
@@ -673,6 +674,27 @@ export async function upsertManagedAccessUser(assignment: {
     RETURNING email, role, access_status, note, permissions, updated_by, created_at, updated_at
   `
 
+  return toManagedAccessUser((rows as ManagedAccessUserRow[])[0])
+}
+
+/**
+ * Delegates rights atomically without changing an existing account's role/status.
+ * Concurrent admin blocking or promotion prevents the delegation from applying.
+ * @param email - Validated employee identity.
+ * @param role - Employee baseline used only when creating an environment-backed row.
+ * @param permissions - Explicit workflow-right changes to merge with existing rights.
+ * @param updatedBy - Authenticated delegator identity for audit attribution.
+ * @returns Promise<ManagedAccessUser> containing the saved assignment.
+ */
+export async function delegateEmployeePermissions(email:string,role:"employee"|"user",permissions:PermissionOverrides,updatedBy:string):Promise<ManagedAccessUser> {
+  await ensureManagedAccessTable()
+  const rows = await sql`INSERT INTO managed_user_access (email,role,access_status,permissions,updated_by)
+    VALUES (${email.toLowerCase()},${role},'active',${JSON.stringify(permissions)}::jsonb,${updatedBy})
+    ON CONFLICT (email) DO UPDATE SET permissions = managed_user_access.permissions || EXCLUDED.permissions,
+      updated_by = EXCLUDED.updated_by, updated_at = NOW()
+    WHERE managed_user_access.access_status = 'active' AND managed_user_access.role IN ('employee','user')
+    RETURNING email,role,access_status,note,permissions,updated_by,created_at,updated_at`
+  if (!rows.length) throw new Error("Employee access changed before delegation")
   return toManagedAccessUser((rows as ManagedAccessUserRow[])[0])
 }
 
