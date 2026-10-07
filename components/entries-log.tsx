@@ -136,7 +136,7 @@ export function EntriesLog({
 
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
-      <div className="flex items-center justify-between border-b border-border px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
         <div>
           <h2 className="text-sm font-semibold">{title}</h2>
           <p className="text-xs text-muted-foreground">
@@ -152,9 +152,9 @@ export function EntriesLog({
         )}
       </div>
 
-      <div className="overflow-x-auto">
+      <div>
         <div className="flex flex-wrap items-center gap-2 border-b border-border p-3">
-          <label className="flex min-w-0 flex-1 items-center gap-2">
+          <label className="flex min-w-0 basis-full items-center gap-2 sm:flex-1 sm:basis-auto">
             <Search className="size-4 shrink-0" aria-hidden="true" />
             <input aria-label="Search entries" placeholder="Search entries" value={query} onChange={event => setQuery(event.target.value)} className="w-full min-w-0 rounded-md border border-border bg-background px-3 py-2 text-sm" />
           </label>
@@ -166,8 +166,9 @@ export function EntriesLog({
           <span className="text-xs text-muted-foreground">{visibleEntries.length} of {entries.length}</span>
         </div>
         {visibleEntries.length === 0 && <p role="status" className="p-4 text-sm text-muted-foreground">No matching entries.</p>}
-        <table className="w-full border-collapse text-left">
-          <thead>
+        <div tabIndex={0} aria-label="Scrollable time entries" className="max-h-[65dvh] overflow-auto overscroll-contain">
+        <table className="w-full min-w-[900px] border-collapse text-left">
+          <thead className="sticky top-0 z-[1] bg-card">
             <tr className="border-b border-border text-xs uppercase tracking-wide text-muted-foreground">
               <th className="px-4 py-2 font-medium">Contractor</th>
               <th className="px-4 py-2 font-medium">Date</th>
@@ -175,7 +176,7 @@ export function EntriesLog({
               <th className="px-4 py-2 font-medium">Description</th>
               <th className="px-4 py-2 font-medium">Status</th>
               <th className="px-4 py-2 text-right font-medium">Hours</th>
-              <th className="w-10 px-2 py-2" aria-label="Actions" />
+              <th className="sticky right-0 z-[2] w-10 bg-card px-2 py-2" aria-label="Actions" />
             </tr>
           </thead>
           <tbody>
@@ -268,7 +269,7 @@ export function EntriesLog({
                       }
                     />
                   </td>
-                  <td className="px-2 py-1.5">
+                  <td className="sticky right-0 bg-card px-2 py-1.5">
                     <div className="flex justify-end gap-1">
                       {canSubmit &&
                         (entry.status === "draft" ||
@@ -346,7 +347,7 @@ export function EntriesLog({
               )
             })}
           </tbody>
-          <tfoot>
+          <tfoot className="sticky bottom-0 bg-card">
             <tr className="bg-muted/40">
               <td
                 className="px-4 py-2.5 text-xs font-medium uppercase tracking-wide text-muted-foreground"
@@ -361,6 +362,7 @@ export function EntriesLog({
             </tr>
           </tfoot>
         </table>
+        </div>
       </div>
     </div>
   )

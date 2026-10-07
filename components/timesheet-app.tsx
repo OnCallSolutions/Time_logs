@@ -9,12 +9,15 @@
  * the permissions enforced by the API routes.
  */
 import { useEffect, useState } from "react"
+import { useDialogFocus } from "@/components/use-dialog-focus"
 import {
   Activity,
   BarChart3,
   CheckCircle2,
   Clock3,
   ListChecks,
+  Maximize2,
+  Minimize2,
   Pencil,
   Save,
   Send,
@@ -382,7 +385,7 @@ export function TimesheetApp({
               Timesheet
             </span>
           </div>
-          <div className="flex items-center justify-end gap-3">
+          <div className="flex min-w-0 items-center justify-end gap-3">
             <AccountProfile
               email={userEmail}
               fallbackName={userName}
@@ -427,14 +430,14 @@ export function TimesheetApp({
       )}
 
       {/* View switch */}
-      <div className="flex items-center gap-1 rounded-lg border border-border bg-card p-1 shadow-sm">
+      <div aria-label="Workspace views" className="sticky top-0 z-10 grid grid-cols-2 gap-1 rounded-lg border border-border bg-card p-1 shadow-sm sm:flex sm:items-center">
         {tabs.map(({ key, label, icon: Icon }) => (
           <button
             key={key}
             type="button"
             onClick={() => setView(key)}
             aria-pressed={view === key}
-            className={`flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+            className={`flex min-w-0 flex-1 items-center justify-center gap-2 rounded-md px-2 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
               view === key
                 ? "bg-primary text-primary-foreground"
                 : "text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -1183,14 +1186,17 @@ function AdminUserAccessEditor({
 }) {
   const title =
     editor.mode === "add" ? "Add employee access" : "Edit employee access"
+  const dialogRef = useDialogFocus(onClose, !saving)
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-3 sm:p-6">
       <section
+        ref={dialogRef}
+        tabIndex={-1}
         aria-label={title}
         aria-modal="true"
         role="dialog"
-        className="w-full max-w-2xl overflow-hidden rounded-xl border border-slate-200 bg-white text-slate-950 shadow-2xl"
+        className="flex max-h-[calc(100dvh-1.5rem)] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-slate-200 bg-white text-slate-950 shadow-2xl sm:max-h-[calc(100dvh-3rem)]"
       >
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 bg-white px-4 py-3">
           <div>
@@ -1217,7 +1223,7 @@ function AdminUserAccessEditor({
           </Button>
         </div>
 
-        <div className="grid gap-4 p-4">
+        <div className="grid min-h-0 gap-4 overflow-y-auto overscroll-contain p-4">
           <label className="text-xs font-medium text-slate-600">
             Employee email
             <input
@@ -1302,7 +1308,7 @@ function AdminUserAccessEditor({
           )}
         </div>
 
-        <div className="flex justify-end gap-2 border-t border-slate-200 bg-slate-50 px-4 py-3">
+        <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-slate-200 bg-slate-50 px-4 py-3">
           <Button
             type="button"
             variant="outline"
@@ -1356,15 +1362,20 @@ function AdminActivityWindow({
   const [selectedEvent, setSelectedEvent] = useState<AdminAuditEvent | null>(
     null,
   )
+  const [expanded, setExpanded] = useState(false)
+  const dialogRef = useDialogFocus(onClose)
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/60 p-3 sm:p-6">
-      <section className="mx-auto flex max-h-[calc(100svh-1.5rem)] max-w-7xl flex-col overflow-hidden rounded-xl border border-slate-200 bg-white text-slate-950 shadow-2xl sm:max-h-[calc(100svh-3rem)]">
-        <div className="flex items-start justify-between gap-4 border-b border-slate-200 bg-white px-4 py-3">
+      <section ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="All app activity" className={`mx-auto flex h-[calc(100dvh-1.5rem)] min-h-0 max-h-[calc(100dvh-1.5rem)] max-w-full flex-col overflow-hidden rounded-lg border border-slate-200 bg-white text-slate-950 shadow-2xl sm:h-[80dvh] sm:min-h-80 sm:min-w-[min(640px,calc(100vw-3rem))] sm:max-h-[calc(100dvh-3rem)] ${expanded ? "w-full sm:!h-[calc(100dvh-3rem)]" : "w-full sm:w-[90%] sm:max-w-7xl sm:resize"}`}>
+        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 bg-white px-4 py-3">
           <div>
             <div className="flex items-center gap-2">
               <Activity className="size-4 text-blue-700" aria-hidden="true" />
               <h2 className="text-base font-semibold">All app activity</h2>
+              <Button variant="outline" size="icon-sm" title={expanded ? "Restore window" : "Expand window"} aria-label={expanded ? "Restore window" : "Expand window"} onClick={() => setExpanded(!expanded)}>
+                {expanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+              </Button>
             </div>
             <p className="mt-1 text-xs text-slate-600">
               Full admin view of recent audited actions across entries, profiles,
@@ -1403,7 +1414,7 @@ function AdminActivityWindow({
             </p>
           </div>
         ) : (
-          <div className="min-h-0 flex-1 overflow-auto">
+          <div tabIndex={0} aria-label="Activity table" className="min-h-0 flex-1 overflow-auto overscroll-contain">
             <table className="w-full min-w-[1200px] border-collapse text-left text-sm">
               <thead className="sticky top-0 bg-white">
                 <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
@@ -1507,8 +1518,8 @@ function AdminActivityEventDetails({
   ]
 
   return (
-    <aside className="border-t border-slate-200 bg-white p-4">
-      <div className="mb-3 flex items-start justify-between gap-4">
+    <aside className="max-h-[40dvh] shrink-0 overflow-y-auto overscroll-contain border-t border-slate-200 bg-white p-4">
+      <div className="sticky top-0 z-[1] mb-3 flex items-start justify-between gap-4 bg-white pb-2">
         <div>
           <h3 className="text-sm font-semibold">Activity detail</h3>
           <p className="mt-1 text-xs text-slate-600">
