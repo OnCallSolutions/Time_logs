@@ -231,7 +231,7 @@ export function TimesheetApp({
   ]
 
   return (
-    <main className="mx-auto flex min-h-svh max-w-4xl flex-col gap-6 px-4 py-8 md:py-12">
+    <main className="mx-auto flex min-h-svh w-full max-w-[1600px] flex-col gap-6 px-4 py-8 md:px-8 md:py-12">
       <header className="flex flex-col gap-1">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex items-center gap-2 text-primary">
