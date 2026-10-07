@@ -5,11 +5,21 @@
  * match the public Next.js base path and Azure redirect URI. The route handler
  * wrapper re-adds that public base path before requests reach Auth.js locally.
  */
+import "server-only"
 import NextAuth from "next-auth"
 import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id"
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
-  debug: process.env.NODE_ENV !== "production",
+  debug: false,
+  logger: {
+    /**
+     * Records authentication failures without provider payloads or credentials.
+     * @returns void after a fixed diagnostic message is written.
+     */
+    error() {
+      console.error("[auth] Authentication failed; verify server configuration.")
+    },
+  },
   trustHost: true,
   basePath: "/timelog/api/auth",
   providers: [

@@ -73,7 +73,7 @@ export async function POST(req: Request) {
     return Response.json({ entries: output.entries })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    console.log("[v0] parse error:", message)
+    console.error("[parse] AI extraction failed")
     const isAuth = /unauthenticat|api key|gateway/i.test(message)
     return Response.json(
       {

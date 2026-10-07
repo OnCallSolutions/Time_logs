@@ -73,7 +73,7 @@ export async function GET() {
     const entries = await listTimeEntries(access.email, access.includeAll)
     return Response.json({ entries })
   } catch (err) {
-    console.error("[entries] list failed:", err)
+    console.error("[entries] list failed")
     return Response.json(
       { error: "Failed to load saved entries." },
       { status: 500 },
@@ -121,7 +121,7 @@ export async function POST(req: Request) {
 
     return Response.json({ entries }, { status: 201 })
   } catch (err) {
-    console.error("[entries] create failed:", err)
+    console.error("[entries] create failed")
     return Response.json(
       { error: "Failed to save entries." },
       { status: 400 },
@@ -157,7 +157,7 @@ export async function DELETE(req: Request) {
 
     return Response.json({ ok: true })
   } catch (err) {
-    console.error("[entries] clear failed:", err)
+    console.error("[entries] clear failed")
     return Response.json(
       { error: "Failed to clear entries." },
       { status: 500 },
