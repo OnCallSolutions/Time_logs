@@ -16,6 +16,10 @@ node_modules
 tsconfig.tsbuildinfo
 .DS_Store
 *.pdf
+AUTH.docx
+coverage/
+playwright-report/
+test-results/
 
 # Local testing helpers and generated records
 /scripts/
