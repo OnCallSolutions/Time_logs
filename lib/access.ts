@@ -1,12 +1,13 @@
 /**
  * Centralizes role and allowlist resolution for authenticated users.
  *
- * The app stores access policy in comma-separated environment variables rather
- * than in the database. Keeping the parsing and precedence rules in this module
+ * The app supports both environment-backed recovery access and database-backed
+ * admin-managed access. Keeping the parsing and precedence rules in this module
  * lets server pages and API routes make the same authorization decision.
  */
 import "server-only"
 
+import { getManagedAccessUser } from "@/lib/db"
 import type { UserRole } from "@/lib/types"
 
 /**
@@ -52,8 +53,61 @@ export function getAllowedEmails() {
 function getRoleEmails(role: UserRole) {
   if (role === "admin") return parseEmailList(process.env.ADMIN_EMAILS)
   if (role === "manager") return parseEmailList(process.env.MANAGER_EMAILS)
-  if (role === "worker") return parseEmailList(process.env.WORKER_EMAILS)
+  if (role === "employee") {
+    return [
+      ...parseEmailList(process.env.EMPLOYEE_EMAILS),
+      // Backward compatibility for deployments configured before the rename.
+      ...parseEmailList(process.env.WORKER_EMAILS),
+    ]
+  }
   return []
+}
+
+/**
+ * Lists every email explicitly configured in environment-backed access policy.
+ *
+ * The result is intended for administrator visibility screens. It applies the
+ * same role precedence as getUserRole so duplicate emails appear once with the
+ * highest configured access level.
+ *
+ * @returns Configured emails with their effective environment-backed role.
+ */
+export function getConfiguredAccessUsers() {
+  const users = new Map<string, UserRole>()
+
+  for (const role of ["admin", "manager", "employee"] as const) {
+    for (const email of getRoleEmails(role)) {
+      if (!users.has(email)) {
+        users.set(email, role)
+      }
+    }
+  }
+
+  for (const email of getAllowedEmails()) {
+    if (!users.has(email)) {
+      users.set(email, "user")
+    }
+  }
+
+  return Array.from(users.entries()).map(([email, role]) => ({ email, role }))
+}
+
+/**
+ * Checks whether any environment-backed access lists are configured.
+ *
+ * When no environment lists and no managed rows are relevant, the app can remain
+ * open to authenticated users. Once env policy exists, it acts as an explicit
+ * allowlist unless a managed active assignment grants access.
+ *
+ * @returns True when at least one environment access list has entries.
+ */
+function hasEnvironmentAccessPolicy() {
+  return (
+    getAllowedEmails().length > 0 ||
+    getRoleEmails("admin").length > 0 ||
+    getRoleEmails("manager").length > 0 ||
+    getRoleEmails("employee").length > 0
+  )
 }
 
 /**
@@ -73,7 +127,7 @@ export function getUserRole(email?: string | null): UserRole | null {
 
   if (getRoleEmails("admin").includes(normalizedEmail)) return "admin"
   if (getRoleEmails("manager").includes(normalizedEmail)) return "manager"
-  if (getRoleEmails("worker").includes(normalizedEmail)) return "worker"
+  if (getRoleEmails("employee").includes(normalizedEmail)) return "employee"
   if (getAllowedEmails().includes(normalizedEmail)) return "user"
 
   return null
@@ -89,8 +143,31 @@ export function getUserRole(email?: string | null): UserRole | null {
  * @param email - Signed-in user's email address.
  * @returns The effective role for the email, or null when access is denied.
  */
-export function getEffectiveUserRole(email?: string | null): UserRole | null {
-  return getUserRole(email) ?? (isAllowedEmail(email) ? "user" : null)
+export async function getEffectiveUserRole(
+  email?: string | null,
+): Promise<UserRole | null> {
+  if (!email) return null
+
+  const normalizedEmail = email.toLowerCase()
+  const environmentRole = getUserRole(normalizedEmail)
+
+  if (environmentRole === "admin") {
+    return "admin"
+  }
+
+  const managedAccess = await getManagedAccessUser(normalizedEmail)
+
+  if (managedAccess) {
+    return managedAccess.accessStatus === "active"
+      ? managedAccess.role
+      : null
+  }
+
+  if (environmentRole) {
+    return environmentRole
+  }
+
+  return hasEnvironmentAccessPolicy() ? null : "user"
 }
 
 /**
@@ -103,16 +180,6 @@ export function getEffectiveUserRole(email?: string | null): UserRole | null {
  * @param email - Signed-in user's email address.
  * @returns True when the email is allowed or no allowlists are configured.
  */
-export function isAllowedEmail(email?: string | null) {
-  const accessConfigured =
-    getAllowedEmails().length > 0 ||
-    getRoleEmails("admin").length > 0 ||
-    getRoleEmails("manager").length > 0 ||
-    getRoleEmails("worker").length > 0
-
-  if (!accessConfigured) {
-    return true
-  }
-
-  return getUserRole(email) !== null
+export async function isAllowedEmail(email?: string | null) {
+  return (await getEffectiveUserRole(email)) !== null
 }

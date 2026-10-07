@@ -11,7 +11,7 @@ import { signIn, auth } from "@/auth"
 import { Button } from "@/components/ui/button"
 import { SignOutButton } from "@/components/sign-out-button"
 import { TimesheetApp } from "@/components/timesheet-app"
-import { getEffectiveUserRole, isAllowedEmail } from "@/lib/access"
+import { getEffectiveUserRole } from "@/lib/access"
 
 /**
  * Renders the authenticated timesheet app or the Microsoft sign-in screen.
@@ -62,7 +62,9 @@ export default async function Page() {
     )
   }
 
-  if (!isAllowedEmail(session.user.email)) {
+  const role = await getEffectiveUserRole(session.user.email)
+
+  if (!role) {
     return (
       <main className="mx-auto flex min-h-svh max-w-4xl flex-col justify-center gap-6 px-4 py-8 md:py-12">
         <section className="rounded-xl border border-border bg-card p-6 shadow-sm">
@@ -89,7 +91,7 @@ export default async function Page() {
 
   return (
     <TimesheetApp
-      role={getEffectiveUserRole(session.user.email) ?? "user"}
+      role={role ?? "user"}
       userName={session.user.name}
       userEmail={session.user.email}
     />

@@ -8,10 +8,12 @@
 import { z } from "zod"
 import { auth } from "@/auth"
 import { getEffectiveUserRole } from "@/lib/access"
+import { getAuditContext } from "@/lib/audit"
 import {
   clearTimeEntries,
   createTimeEntries,
   listTimeEntries,
+  recordAuditEvent,
 } from "@/lib/db"
 
 export const runtime = "nodejs"
@@ -40,7 +42,7 @@ const createSchema = z.object({
 async function getAccess() {
   const session = await auth()
   const email = session?.user?.email ?? null
-  const role = getEffectiveUserRole(email)
+  const role = await getEffectiveUserRole(email)
 
   if (!email || !role) {
     return null
@@ -55,7 +57,7 @@ async function getAccess() {
 /**
  * Returns the entries visible to the signed-in user's role.
  *
- * Workers and base users receive only entries owned by their email. Managers and
+ * Employees and base users receive only entries owned by their email. Managers and
  * administrators receive all entries so the team report can aggregate across the
  * organization.
  *
@@ -98,6 +100,25 @@ export async function POST(req: Request) {
 
     const body = createSchema.parse(await req.json())
     const entries = await createTimeEntries(access.email, body.entries)
+    const auditContext = getAuditContext(req)
+
+    await Promise.all(
+      entries.map((entry) =>
+        recordAuditEvent({
+          actorEmail: access.email,
+          action: "entry_created",
+          targetType: "time_entry",
+          targetId: entry.id,
+          metadata: {
+            status: entry.status,
+            hours: entry.hours,
+            date: entry.date,
+          },
+          ...auditContext,
+        }),
+      ),
+    )
+
     return Response.json({ entries }, { status: 201 })
   } catch (err) {
     console.error("[entries] create failed:", err)
@@ -117,7 +138,7 @@ export async function POST(req: Request) {
  *
  * @returns JSON response confirming deletion or reporting an error.
  */
-export async function DELETE() {
+export async function DELETE(req: Request) {
   try {
     const access = await getAccess()
     if (!access) {
@@ -125,6 +146,15 @@ export async function DELETE() {
     }
 
     await clearTimeEntries(access.email, access.includeAll)
+    await recordAuditEvent({
+      actorEmail: access.email,
+      action: "entries_cleared",
+      targetType: "time_entries",
+      targetId: null,
+      metadata: { scope: access.includeAll ? "all_visible" : "own_entries" },
+      ...getAuditContext(req),
+    })
+
     return Response.json({ ok: true })
   } catch (err) {
     console.error("[entries] clear failed:", err)

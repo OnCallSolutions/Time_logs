@@ -8,7 +8,18 @@
 import { z } from "zod"
 import { auth } from "@/auth"
 import { getEffectiveUserRole } from "@/lib/access"
-import { deleteTimeEntry, updateTimeEntry } from "@/lib/db"
+import {
+  auditActionForStatus,
+  changedFieldMetadata,
+  getAuditContext,
+} from "@/lib/audit"
+import {
+  deleteTimeEntry,
+  getTimeEntry,
+  recordAuditEvent,
+  updateTimeEntry,
+} from "@/lib/db"
+import type { EntryStatus, TimeEntry } from "@/lib/types"
 
 export const runtime = "nodejs"
 
@@ -19,6 +30,8 @@ const patchSchema = z
     hours: z.number().min(0).optional(),
     project: z.string().trim().min(1).optional(),
     description: z.string().optional(),
+    status: z.enum(["draft", "submitted", "approved", "rejected"]).optional(),
+    reviewNote: z.string().trim().max(500).optional(),
   })
   .refine((patch) => Object.keys(patch).length > 0, {
     message: "At least one field is required.",
@@ -36,7 +49,7 @@ const patchSchema = z
 async function getAccess() {
   const session = await auth()
   const email = session?.user?.email ?? null
-  const role = getEffectiveUserRole(email)
+  const role = await getEffectiveUserRole(email)
 
   if (!email || !role) {
     return null
@@ -44,8 +57,94 @@ async function getAccess() {
 
   return {
     email,
+    role,
     includeAll: role === "admin" || role === "manager",
+    canReview: role === "admin" || role === "manager",
   }
+}
+
+/**
+ * Checks whether a patch changes editable time-entry fields.
+ *
+ * Status changes are handled separately because they follow workflow transition
+ * rules. Core field edits are locked for employees once an entry is submitted or
+ * approved.
+ *
+ * @param patch - Parsed entry patch from the request body.
+ * @returns True when the patch changes core entry data.
+ */
+function hasEntryFieldPatch(patch: z.infer<typeof patchSchema>) {
+  return (
+    patch.contractor !== undefined ||
+    patch.date !== undefined ||
+    patch.hours !== undefined ||
+    patch.project !== undefined ||
+    patch.description !== undefined
+  )
+}
+
+/**
+ * Validates a requested status change against current entry state.
+ *
+ * Managers and administrators can make every approval decision. Employees and base
+ * users can submit drafts or rejected rows, and recall submitted rows back to
+ * draft. Rejections require a manager/admin-provided reason.
+ *
+ * @param current - Current database-backed entry state.
+ * @param status - Requested entry status, if the patch includes one.
+ * @param canReview - Whether the caller is a manager or administrator.
+ * @param reviewNote - Optional rejection reason supplied by the reviewer.
+ * @returns Null when allowed, otherwise a user-facing validation message.
+ */
+function validateStatusChange(
+  current: TimeEntry,
+  status: EntryStatus | undefined,
+  canReview: boolean,
+  reviewNote?: string,
+) {
+  if (!status || status === current.status) return null
+
+  if (status === "rejected" && !reviewNote?.trim()) {
+    return "A rejection reason is required."
+  }
+
+  if (canReview) {
+    if (
+      current.status === "submitted" &&
+      (status === "approved" || status === "rejected" || status === "draft")
+    ) {
+      return null
+    }
+
+    if (
+      (current.status === "draft" || current.status === "rejected") &&
+      status === "submitted"
+    ) {
+      return null
+    }
+
+    if (
+      (current.status === "approved" || current.status === "rejected") &&
+      status === "draft"
+    ) {
+      return null
+    }
+
+    return `Cannot move an entry from ${current.status} to ${status}.`
+  }
+
+  if (
+    (current.status === "draft" || current.status === "rejected") &&
+    status === "submitted"
+  ) {
+    return null
+  }
+
+  if (current.status === "submitted" && status === "draft") {
+    return null
+  }
+
+  return "You do not have permission to set that status."
 }
 
 /**
@@ -71,16 +170,73 @@ export async function PATCH(
 
     const { id } = await params
     const patch = patchSchema.parse(await req.json())
+    if (patch.reviewNote !== undefined && patch.status !== "rejected") {
+      return Response.json(
+        { error: "A review note can only be saved when rejecting an entry." },
+        { status: 400 },
+      )
+    }
+
+    const current = await getTimeEntry(access.email, id, access.includeAll)
+
+    if (!current) {
+      return Response.json({ error: "Entry not found." }, { status: 404 })
+    }
+
+    if (
+      !access.canReview &&
+      hasEntryFieldPatch(patch) &&
+      current.status !== "draft" &&
+      current.status !== "rejected"
+    ) {
+      return Response.json(
+        {
+          error:
+            "Submitted and approved entries cannot be edited by employees.",
+        },
+        { status: 409 },
+      )
+    }
+
+    const statusError = validateStatusChange(
+      current,
+      patch.status,
+      access.canReview,
+      patch.reviewNote,
+    )
+    if (statusError) {
+      return Response.json(
+        { error: statusError },
+        { status: statusError.includes("permission") ? 403 : 400 },
+      )
+    }
+
     const entry = await updateTimeEntry(
       access.email,
       id,
       patch,
       access.includeAll,
+      access.canReview ? access.email : undefined,
     )
 
     if (!entry) {
       return Response.json({ error: "Entry not found." }, { status: 404 })
     }
+
+    await recordAuditEvent({
+      actorEmail: access.email,
+      action: patch.status
+        ? auditActionForStatus(patch.status)
+        : "entry_updated",
+      targetType: "time_entry",
+      targetId: id,
+      metadata: {
+        fromStatus: current.status,
+        toStatus: entry.status,
+        ...changedFieldMetadata(patch),
+      },
+      ...getAuditContext(req),
+    })
 
     return Response.json({ entry })
   } catch (err) {
@@ -104,7 +260,7 @@ export async function PATCH(
  * @returns JSON response confirming deletion or reporting an error.
  */
 export async function DELETE(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
@@ -114,7 +270,40 @@ export async function DELETE(
     }
 
     const { id } = await params
+    const current = await getTimeEntry(access.email, id, access.includeAll)
+
+    if (!current) {
+      return Response.json({ error: "Entry not found." }, { status: 404 })
+    }
+
+    if (
+      !access.canReview &&
+      current.status !== "draft" &&
+      current.status !== "rejected"
+    ) {
+      return Response.json(
+        {
+          error:
+            "Submitted and approved entries cannot be deleted by employees.",
+        },
+        { status: 409 },
+      )
+    }
+
     await deleteTimeEntry(access.email, id, access.includeAll)
+    await recordAuditEvent({
+      actorEmail: access.email,
+      action: "entry_deleted",
+      targetType: "time_entry",
+      targetId: id,
+      metadata: {
+        status: current.status,
+        hours: current.hours,
+        date: current.date,
+      },
+      ...getAuditContext(req),
+    })
+
     return Response.json({ ok: true })
   } catch (err) {
     console.error("[entries] delete failed:", err)
