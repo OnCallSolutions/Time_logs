@@ -9,6 +9,7 @@
  * the permissions enforced by the API routes.
  */
 import { useEffect, useState } from "react"
+import { AdminWorkspace } from "@/components/admin-workspace"
 import { SecurityRiskWindow } from "@/components/security-risk-window"
 import { useDialogFocus } from "@/components/use-dialog-focus"
 import {
@@ -160,9 +161,10 @@ export function TimesheetApp({
   userEmail?: string | null
 }) {
   const [entries, setEntries] = useState<TimeEntry[]>([])
-  const [view, setView] = useState<View>("log")
+  const [view, setView] = useState<View>(role === "admin" ? "admin" : "log")
   const [loadingEntries, setLoadingEntries] = useState(true)
   const [syncError, setSyncError] = useState<string | null>(null)
+  const [technologyReports,setTechnologyReports] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -406,6 +408,8 @@ export function TimesheetApp({
       </header>
 
       <RoleOverview role={role} />
+      {canViewAdmin && <AdminWorkspace onDirectory={() => setView("admin")} onSecurity={() => setTechnologyReports(true)} />}
+      {canViewAdmin && technologyReports && <SecurityRiskWindow onClose={() => setTechnologyReports(false)} />}
 
       <WorkflowOverview
         approvedCount={approvedEntries.length}

@@ -7,6 +7,7 @@
 import { useEffect, useState } from "react"
 import { X } from "lucide-react"
 import { apiPath } from "@/lib/paths"
+import { useDialogFocus } from "@/components/use-dialog-focus"
 
 type Report = { run_day: string; status: string; event_count: number; possibly_truncated: boolean;
   completed_at: string | null; assessment: { severity: string; summary: string;
@@ -19,6 +20,7 @@ type Report = { run_day: string; status: string; event_count: number; possibly_t
  * @returns JSX.Element containing the risk summary dialog.
  */
 export function SecurityRiskWindow({ onClose }: { onClose: () => void }) {
+  const dialogRef = useDialogFocus<HTMLDivElement>(onClose)
   const [reports, setReports] = useState<Report[]>([])
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -33,7 +35,7 @@ export function SecurityRiskWindow({ onClose }: { onClose: () => void }) {
       .finally(() => { if (!controller.signal.aborted) setLoading(false) })
     return () => controller.abort()
   }, [])
-  return <div className="fixed inset-0 z-[60] bg-black/50 p-4" role="dialog" aria-modal="true" aria-label="Security risks" onKeyDown={event => { if (event.key === "Escape") onClose() }}>
+  return <div ref={dialogRef} tabIndex={-1} className="fixed inset-0 z-[60] bg-black/50 p-4" role="dialog" aria-modal="true" aria-label="Security risks">
     <section className="mx-auto max-h-[90svh] max-w-5xl overflow-auto rounded-lg bg-white p-6 text-black">
       <div className="flex items-center justify-between"><h2 className="text-lg font-semibold">Security risks</h2>
         <button autoFocus onClick={onClose} title="Close security risks" aria-label="Close security risks"><X /></button></div>

@@ -12,8 +12,8 @@ import { useEffect, useRef } from "react"
  * @param dismissible - Whether dismissal is allowed during the current operation.
  * @returns React.RefObject<HTMLElement | null> assigned to the dialog container.
  */
-export function useDialogFocus(onClose: () => void, dismissible = true) {
-  const ref = useRef<HTMLElement>(null)
+export function useDialogFocus<T extends HTMLElement = HTMLElement>(onClose: () => void, dismissible = true) {
+  const ref = useRef<T>(null)
   const state = useRef({ onClose, dismissible })
   state.current = { onClose, dismissible }
   useEffect(() => {
@@ -37,6 +37,7 @@ export function useDialogFocus(onClose: () => void, dismissible = true) {
      * @returns void.
      */
     function handleKey(event: KeyboardEvent): void {
+      if ((event.target as HTMLElement).closest('[role="dialog"]') !== element) return
       if (event.key === "Escape" && state.current.dismissible) {
         event.preventDefault()
         state.current.onClose()
