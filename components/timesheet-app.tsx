@@ -9,6 +9,7 @@
  * the permissions enforced by the API routes.
  */
 import { useEffect, useState } from "react"
+import { EntryReviewDialog, ManagerWorkspace } from "@/components/manager-workspace"
 import { SecurityRiskWindow } from "@/components/security-risk-window"
 import { useDialogFocus } from "@/components/use-dialog-focus"
 import {
@@ -160,9 +161,10 @@ export function TimesheetApp({
   userEmail?: string | null
 }) {
   const [entries, setEntries] = useState<TimeEntry[]>([])
-  const [view, setView] = useState<View>("log")
+  const [view, setView] = useState<View>(role === "manager" ? "approvals" : "log")
   const [loadingEntries, setLoadingEntries] = useState(true)
   const [syncError, setSyncError] = useState<string | null>(null)
+  const [suggestedReview,setSuggestedReview] = useState<{entry:TimeEntry;decision:"approved"|"rejected";reason:string}|null>(null)
 
   useEffect(() => {
     let active = true
@@ -416,6 +418,11 @@ export function TimesheetApp({
       />
 
       <NoteInput onParsed={addParsed} />
+      {canReviewEntries && <ManagerWorkspace pending={pendingEntries.length} entries={pendingEntries} onApprovals={() => setView("approvals")} onReports={() => setView("report")} onRecommendation={(entry,decision,reason) => setSuggestedReview({entry,decision,reason})} />}
+      {suggestedReview && <EntryReviewDialog entry={suggestedReview.entry} decision={suggestedReview.decision} initialNote={suggestedReview.reason} onCancel={() => setSuggestedReview(null)} onConfirm={note => {
+        changeEntryStatus(suggestedReview.entry.id,suggestedReview.decision,note || undefined)
+        setSuggestedReview(null)
+      }} />}
 
       {(loadingEntries || syncError) && (
         <div
