@@ -1,0 +1,3 @@
+{
+  "crons": [{ "path": "/timelog/api/security?scheduled=1", "schedule": "0 6 * * *" }]
+}
