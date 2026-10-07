@@ -75,7 +75,7 @@ export function NoteInput({
 
   return (
     <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
-      <div className="mb-3 flex items-center justify-between gap-3">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <span className="flex size-7 items-center justify-center rounded-md bg-accent text-accent-foreground">
             <Sparkles className="size-4" aria-hidden="true" />
@@ -118,10 +118,10 @@ export function NoteInput({
         }}
         rows={6}
         placeholder="e.g. Maria worked Mon 9-5 on Acme, Tue a half day. Deepak did two full days on the Northwind API…"
-        className="w-full resize-y rounded-lg border border-input bg-background px-3 py-2.5 font-mono text-[0.8rem] leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/30"
+        className="max-h-[50dvh] min-h-32 w-full resize-y rounded-lg border border-input bg-background px-3 py-2.5 font-mono text-[0.8rem] leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/30"
       />
 
-      <div className="mt-3 flex items-center justify-between gap-3">
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
         <p className="text-xs text-muted-foreground" aria-live="polite">
           {error ? (
             <span className="text-destructive">{error}</span>

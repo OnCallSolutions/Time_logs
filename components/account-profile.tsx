@@ -169,9 +169,9 @@ export function AccountProfile({
   const currentImage = profile.imageDataUrl
 
   return (
-    <div className="relative flex items-center justify-end gap-3">
+    <div className="relative flex min-w-0 items-center justify-end gap-3">
       <div className="min-w-0 text-right">
-        <p className="truncate text-sm font-medium text-foreground">
+        <p title={email ?? undefined} className="truncate text-sm font-medium text-foreground">
           {email ?? "Signed in"}
         </p>
         <p className="truncate text-xs text-muted-foreground">
@@ -197,7 +197,7 @@ export function AccountProfile({
       </button>
 
       {menuOpen && (
-        <div className="absolute right-0 top-12 z-20 w-72 rounded-lg border border-border bg-popover p-3 text-left shadow-lg">
+        <div className="fixed inset-x-3 top-20 z-30 max-h-[calc(100dvh-6rem)] overflow-y-auto overscroll-contain rounded-lg border border-border bg-popover p-3 text-left shadow-lg sm:absolute sm:inset-x-auto sm:right-0 sm:top-12 sm:w-72" onKeyDown={event => { if (event.key === "Escape") setMenuOpen(false) }}>
           <div className="flex items-center justify-between gap-3">
             <p className="text-sm font-medium">Profile</p>
             <button
