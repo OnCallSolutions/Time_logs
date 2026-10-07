@@ -9,6 +9,7 @@
  * the permissions enforced by the API routes.
  */
 import { useEffect, useState } from "react"
+import { SecurityRiskWindow } from "@/components/security-risk-window"
 import {
   Activity,
   BarChart3,
@@ -1356,6 +1357,7 @@ function AdminActivityWindow({
   const [selectedEvent, setSelectedEvent] = useState<AdminAuditEvent | null>(
     null,
   )
+  const [showSecurity, setShowSecurity] = useState(false)
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/60 p-3 sm:p-6">
@@ -1365,6 +1367,7 @@ function AdminActivityWindow({
             <div className="flex items-center gap-2">
               <Activity className="size-4 text-blue-700" aria-hidden="true" />
               <h2 className="text-base font-semibold">All app activity</h2>
+              <Button variant="outline" onClick={() => setShowSecurity(true)}>Security risks</Button>
             </div>
             <p className="mt-1 text-xs text-slate-600">
               Full admin view of recent audited actions across entries, profiles,
@@ -1384,6 +1387,7 @@ function AdminActivityWindow({
           </Button>
         </div>
 
+        {showSecurity && <SecurityRiskWindow onClose={() => setShowSecurity(false)} />}
         {loading || error ? (
           <div
             className={`m-4 rounded-lg border px-4 py-3 text-sm ${
@@ -1464,6 +1468,7 @@ function AdminActivityWindow({
 
         {selectedEvent && (
           <AdminActivityEventDetails
+            key={selectedEvent.id}
             event={selectedEvent}
             onClose={() => setSelectedEvent(null)}
           />
