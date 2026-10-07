@@ -1411,7 +1411,6 @@ function AdminActivityWindow({
                   <th className="px-4 py-2 font-medium">Actor</th>
                   <th className="px-4 py-2 font-medium">Action</th>
                   <th className="px-4 py-2 font-medium">Target</th>
-                  <th className="px-4 py-2 font-medium">IP</th>
                   <th className="px-4 py-2 font-medium">User agent</th>
                   <th className="px-4 py-2 font-medium">Metadata</th>
                 </tr>
@@ -1445,9 +1444,6 @@ function AdminActivityWindow({
                       <p className="mt-1 break-all font-mono">
                         {event.targetId ?? "No target id"}
                       </p>
-                    </td>
-                    <td className="px-4 py-3 text-xs text-slate-600">
-                      {event.ipAddress ?? "Unknown"}
                     </td>
                     <td className="max-w-sm px-4 py-3 text-xs text-slate-600">
                       <span className="line-clamp-3">
@@ -1776,9 +1772,6 @@ function formatAuditMetadata(event: AdminAuditEvent) {
     parts.push(`fields: ${fields.join(", ")}`)
   }
 
-  if (event.ipAddress) {
-    parts.push(`ip: ${event.ipAddress}`)
-  }
 
   return parts.join(" · ") || "Recorded"
 }
