@@ -8,7 +8,12 @@
 import { z } from "zod"
 import { auth } from "@/auth"
 import { getEffectiveUserRole } from "@/lib/access"
-import { getUserProfile, upsertUserProfile } from "@/lib/db"
+import { getAuditContext } from "@/lib/audit"
+import {
+  getUserProfile,
+  recordAuditEvent,
+  upsertUserProfile,
+} from "@/lib/db"
 
 export const runtime = "nodejs"
 
@@ -35,7 +40,7 @@ const profileSchema = z.object({
 async function getProfileAccess() {
   const session = await auth()
   const email = session?.user?.email ?? null
-  const role = getEffectiveUserRole(email)
+  const role = await getEffectiveUserRole(email)
 
   if (!email || !role) {
     return null
@@ -87,7 +92,21 @@ export async function PUT(req: Request) {
     }
 
     const profile = profileSchema.parse(await req.json())
+    const previousProfile = await getUserProfile(access.email)
     const savedProfile = await upsertUserProfile(access.email, profile)
+    await recordAuditEvent({
+      actorEmail: access.email,
+      action: "profile_updated",
+      targetType: "user_profile",
+      targetId: access.email,
+      metadata: {
+        displayNameChanged:
+          previousProfile.displayName !== savedProfile.displayName,
+        imageChanged: previousProfile.imageDataUrl !== savedProfile.imageDataUrl,
+      },
+      ...getAuditContext(req),
+    })
+
     return Response.json({ profile: savedProfile })
   } catch (err) {
     console.error("[profile] save failed:", err)

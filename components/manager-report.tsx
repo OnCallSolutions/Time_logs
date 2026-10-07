@@ -1,16 +1,24 @@
 "use client"
 
 /**
- * Provides the manager-facing report, filters, summaries, and CSV export.
+ * Provides the manager-facing report, approval filters, summaries, and CSV export.
  *
  * The report turns visible time entries into contractor totals, project counts,
- * date ranges, and exportable detail rows. It expects authorization to have
- * already happened upstream through the API response.
+ * approval status counts, date ranges, and exportable detail rows. It expects
+ * authorization to have already happened upstream through the API response.
  */
 import { useMemo, useState } from "react"
 import { Download, Users, Clock, FolderKanban } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import type { TimeEntry } from "@/lib/types"
+import type { EntryStatus, TimeEntry } from "@/lib/types"
+
+const statusOptions: { value: "all" | EntryStatus; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "draft", label: "Draft" },
+  { value: "submitted", label: "Submitted" },
+  { value: "approved", label: "Approved" },
+  { value: "rejected", label: "Rejected" },
+]
 
 /**
  * Formats decimal hours for display without unnecessary trailing digits.
@@ -59,6 +67,7 @@ function fmtDate(iso: string) {
 export function ManagerReport({ entries }: { entries: TimeEntry[] }) {
   const [contractor, setContractor] = useState("all")
   const [project, setProject] = useState("all")
+  const [status, setStatus] = useState<"all" | EntryStatus>("approved")
 
   const contractors = useMemo(
     () => Array.from(new Set(entries.map((e) => e.contractor))).sort(),
@@ -72,11 +81,12 @@ export function ManagerReport({ entries }: { entries: TimeEntry[] }) {
   const filtered = useMemo(
     () =>
       entries.filter(
-        (e) =>
-          (contractor === "all" || e.contractor === contractor) &&
-          (project === "all" || e.project === project),
+          (e) =>
+            (contractor === "all" || e.contractor === contractor) &&
+            (project === "all" || e.project === project) &&
+            (status === "all" || e.status === status),
       ),
-    [entries, contractor, project],
+    [entries, contractor, project, status],
   )
 
   const totalHours = filtered.reduce((s, e) => s + (Number(e.hours) || 0), 0)
@@ -122,12 +132,22 @@ export function ManagerReport({ entries }: { entries: TimeEntry[] }) {
    */
   function exportCsv() {
     const rows = [
-      ["Contractor", "Date", "Project", "Description", "Hours"],
+      [
+        "Contractor",
+        "Date",
+        "Project",
+        "Description",
+        "Status",
+        "Review note",
+        "Hours",
+      ],
       ...filtered.map((e) => [
         e.contractor,
         e.date,
         e.project,
         e.description,
+        e.status,
+        e.reviewNote ?? "",
         String(e.hours),
       ]),
     ]
@@ -150,6 +170,13 @@ export function ManagerReport({ entries }: { entries: TimeEntry[] }) {
     { label: "Contractors", value: String(byContractor.length), icon: Users },
     { label: "Projects", value: String(new Set(filtered.map((e) => e.project)).size), icon: FolderKanban },
   ]
+
+  const statusCounts = statusOptions
+    .filter((option) => option.value !== "all")
+    .map((option) => ({
+      label: option.label,
+      count: entries.filter((entry) => entry.status === option.value).length,
+    }))
 
   return (
     <div className="flex flex-col gap-4">
@@ -192,11 +219,42 @@ export function ManagerReport({ entries }: { entries: TimeEntry[] }) {
               ))}
             </select>
           </div>
+          <div className="flex items-center gap-2">
+            <label htmlFor="f-status" className="text-xs text-muted-foreground">
+              Status
+            </label>
+            <select
+              id="f-status"
+              className={selectCls}
+              value={status}
+              onChange={(e) => setStatus(e.target.value as "all" | EntryStatus)}
+            >
+              {statusOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
         <Button variant="outline" size="sm" onClick={exportCsv}>
           <Download className="size-3.5" aria-hidden="true" />
           Export CSV
         </Button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {statusCounts.map(({ label, count }) => (
+          <div
+            key={label}
+            className="rounded-lg border border-border bg-card px-3 py-2 shadow-sm"
+          >
+            <p className="text-xs text-muted-foreground">{label}</p>
+            <p className="mt-1 font-mono text-lg font-semibold tabular-nums">
+              {count}
+            </p>
+          </div>
+        ))}
       </div>
 
       {/* Stat tiles */}
@@ -263,6 +321,8 @@ export function ManagerReport({ entries }: { entries: TimeEntry[] }) {
                 <th className="px-4 py-2 font-medium">Date</th>
                 <th className="px-4 py-2 font-medium">Project</th>
                 <th className="px-4 py-2 font-medium">Description</th>
+                <th className="px-4 py-2 font-medium">Status</th>
+                <th className="px-4 py-2 font-medium">Review note</th>
                 <th className="px-4 py-2 text-right font-medium">Hours</th>
               </tr>
             </thead>
@@ -282,6 +342,10 @@ export function ManagerReport({ entries }: { entries: TimeEntry[] }) {
                     <td className="px-4 py-2">{e.project}</td>
                     <td className="px-4 py-2 text-muted-foreground">
                       {e.description || "—"}
+                    </td>
+                    <td className="px-4 py-2 capitalize">{e.status}</td>
+                    <td className="px-4 py-2 text-muted-foreground">
+                      {e.reviewNote || "—"}
                     </td>
                     <td className="px-4 py-2 text-right font-mono tabular-nums">
                       {fmtHours(Number(e.hours) || 0)}
