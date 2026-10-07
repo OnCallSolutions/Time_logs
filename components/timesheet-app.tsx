@@ -9,6 +9,7 @@
  * the permissions enforced by the API routes.
  */
 import { useEffect, useState } from "react"
+import { EmployeeWorkspace } from "@/components/employee-workspace"
 import { SecurityRiskWindow } from "@/components/security-risk-window"
 import { useDialogFocus } from "@/components/use-dialog-focus"
 import {
@@ -163,6 +164,7 @@ export function TimesheetApp({
   const [view, setView] = useState<View>("log")
   const [loadingEntries, setLoadingEntries] = useState(true)
   const [syncError, setSyncError] = useState<string | null>(null)
+  const [personalStatus, setPersonalStatus] = useState<EntryStatus | "all">("all")
 
   useEffect(() => {
     let active = true
@@ -416,6 +418,7 @@ export function TimesheetApp({
       />
 
       <NoteInput onParsed={addParsed} />
+      {canSubmitEntries && <EmployeeWorkspace entries={entries} selected={personalStatus} onSelect={setPersonalStatus} />}
 
       {(loadingEntries || syncError) && (
         <div
@@ -474,7 +477,7 @@ export function TimesheetApp({
 
       {view === "log" ? (
         <EntriesLog
-          entries={entries}
+          entries={canSubmitEntries && personalStatus !== "all" ? entries.filter(entry => entry.status === personalStatus) : entries}
           onUpdate={updateEntry}
           onStatusChange={changeEntryStatus}
           onDelete={deleteEntry}
