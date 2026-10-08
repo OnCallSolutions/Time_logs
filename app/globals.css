@@ -229,3 +229,12 @@
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; }
 }
+
+/* Expanded windows fill the viewport; only their content areas scroll. */
+.window-surface[data-window-expanded='true'] > .window-content > section {
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: none;
+  border-radius: 0;
+}

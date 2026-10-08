@@ -5,9 +5,10 @@
  */
 "use client"
 import { useEffect, useState } from "react"
-import { X } from "lucide-react"
+import { RefreshCw, ShieldCheck, AlertTriangle } from "lucide-react"
 import { apiPath } from "@/lib/paths"
-import { useDialogFocus } from "@/components/use-dialog-focus"
+import { WindowSurface } from "@/components/window-surface"
+import { Button } from "@/components/ui/button"
 
 type Report = { run_day: string; status: string; event_count: number; possibly_truncated: boolean;
   completed_at: string | null; assessment: { severity: string; summary: string;
@@ -20,11 +21,14 @@ type Report = { run_day: string; status: string; event_count: number; possibly_t
  * @returns JSX.Element containing the risk summary dialog.
  */
 export function SecurityRiskWindow({ onClose }: { onClose: () => void }) {
-  const dialogRef = useDialogFocus<HTMLDivElement>(onClose)
+  const [refresh, setRefresh] = useState(0)
+  const [severity, setSeverity] = useState("all")
   const [reports, setReports] = useState<Report[]>([])
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   useEffect(() => {
+    setLoading(true)
+    setError(null)
     const controller = new AbortController()
     fetch(apiPath("/api/security"), { cache: "no-store", signal: controller.signal })
       .then(async response => {
@@ -34,24 +38,40 @@ export function SecurityRiskWindow({ onClose }: { onClose: () => void }) {
       }).catch(error => { if (!controller.signal.aborted) setError(error.message) })
       .finally(() => { if (!controller.signal.aborted) setLoading(false) })
     return () => controller.abort()
-  }, [])
-  return <div ref={dialogRef} tabIndex={-1} className="fixed inset-0 z-[60] bg-black/50 p-4" role="dialog" aria-modal="true" aria-label="Security risks">
-    <section className="tech-surface mx-auto max-h-[90svh] max-w-5xl overflow-auto rounded-lg bg-white p-6 text-black">
-      <div className="flex items-center justify-between"><h2 className="text-lg font-semibold">Security risks</h2>
-        <button autoFocus onClick={onClose} title="Close security risks" aria-label="Close security risks"><X /></button></div>
+  }, [refresh])
+  const visibleReports = reports.filter(report => severity === "all" || report.assessment?.severity.toLowerCase() === severity)
+  const latest = reports[0]
+  return <WindowSurface title="Security risks" onBack={onClose}>
+    <section className="tech-surface flex min-h-0 w-full max-w-5xl flex-col overflow-hidden bg-white text-foreground">
+      <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
+        <div className="flex items-center gap-2"><ShieldCheck className="size-5 text-primary" /><h2 className="text-lg font-semibold">Security risks</h2></div>
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="text-sm">Severity <select value={severity} onChange={event => setSeverity(event.target.value)} className="rounded-md border border-input bg-white px-2 py-2"><option value="all">All severities</option>{["critical","high","medium","low"].map(value => <option key={value} value={value}>{value}</option>)}</select></label>
+          <Button variant="outline" size="icon-sm" aria-label="Refresh security reports" title="Refresh security reports" disabled={loading} onClick={() => setRefresh(value => value + 1)}><RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} /></Button>
+        </div>
+      </header>
+      <div className="min-h-0 flex-1 overflow-auto overscroll-contain p-4 md:p-6">
+      {!loading && !error && latest && <div className="mb-4 grid gap-3 border-b border-border pb-4 sm:grid-cols-3">
+        <div><p className="text-xs text-muted-foreground">Latest assessment</p><p className="font-semibold">{latest.assessment?.severity.toUpperCase() ?? latest.status}</p></div>
+        <div><p className="text-xs text-muted-foreground">Events reviewed</p><p className="font-semibold">{latest.event_count}</p></div>
+        <div><p className="text-xs text-muted-foreground">Completed</p><p className="text-sm">{latest.completed_at ? new Date(latest.completed_at).toLocaleString() : "Pending"}</p></div>
+      </div>}
       {loading && <p role="status">Loading reports...</p>}
-      {error && <p role="alert" className="text-red-700">{error}</p>}
+      {error && <div role="alert" className="flex items-center gap-2 border-l-2 border-destructive bg-red-50 p-3 text-red-700"><AlertTriangle className="size-4" />{error}</div>}
       {!loading && !error && !reports.length && <p>No monitoring reports yet.</p>}
-      {reports.map(report => <article key={report.run_day} className="border-b py-4">
+      {!loading && !error && reports.length > 0 && !visibleReports.length && <p className="text-sm text-muted-foreground">No reports match this severity.</p>}
+      {visibleReports.map(report => <article key={report.run_day} className="border-b py-4">
         <h3 className="font-semibold">{String(report.run_day).slice(0,10)} - {report.assessment?.severity.toUpperCase() ?? report.status}</h3>
         <p className="text-sm text-gray-600">{report.event_count} recorded events; past 24 hours. {report.possibly_truncated ? "Coverage may be truncated at 250 events." : ""}</p>
         <p className="text-sm">Completed: {report.completed_at ? new Date(report.completed_at).toLocaleString() : "Pending"}</p>
         {report.status === "failed" && <p className="text-red-700">Monitoring failed. Review service configuration.</p>}
         <p>{report.assessment?.summary}</p>
-        {report.assessment?.findings.map((finding,index) => <div key={index} className="mt-3 border-l-2 border-primary pl-3">
-          <p>{finding.explanation}</p><p>{finding.recommendation}</p><p className="break-all text-xs">Evidence: {finding.eventIds.join(", ")}</p>
-        </div>)}
+        {report.assessment?.findings.map((finding,index) => <details key={index} className="mt-3 border-l-2 border-primary pl-3">
+          <summary className="cursor-pointer text-sm font-medium">Finding {index + 1}: {finding.explanation}</summary>
+          <p className="mt-2 text-sm">{finding.recommendation}</p><p className="mt-2 break-all text-xs text-muted-foreground">Evidence: {finding.eventIds.join(", ") || "No linked events"}</p>
+        </details>)}
       </article>)}
+      </div>
     </section>
-  </div>
+  </WindowSurface>
 }

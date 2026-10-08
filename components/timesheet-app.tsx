@@ -17,7 +17,7 @@ import { EntryReviewDialog, ManagerWorkspace } from "@/components/manager-worksp
 import { permissionLabels, resolvePermissions, type Permission, type PermissionOverrides } from "@/lib/permissions"
 import { AdminWorkspace } from "@/components/admin-workspace"
 import { SecurityRiskWindow } from "@/components/security-risk-window"
-import { useDialogFocus } from "@/components/use-dialog-focus"
+import { WindowSurface } from "@/components/window-surface"
 import {
   Activity,
   BarChart3,
@@ -26,8 +26,6 @@ import {
   ListChecks,
   MessageSquare,
   KeyRound,
-  Maximize2,
-  Minimize2,
   Pencil,
   Save,
   Send,
@@ -1260,16 +1258,11 @@ function AdminUserAccessEditor({
 }) {
   const title =
     editor.mode === "add" ? "Add employee access" : "Edit employee access"
-  const dialogRef = useDialogFocus(onClose, !saving)
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-3 sm:p-6">
+    <WindowSurface title={title} onBack={onClose} disabled={saving}>
       <section
-        ref={dialogRef}
         tabIndex={-1}
-        aria-label={title}
-        aria-modal="true"
-        role="dialog"
         className="tech-surface flex max-h-[calc(100dvh-1.5rem)] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-slate-200 bg-white text-slate-950 shadow-2xl sm:max-h-[calc(100dvh-3rem)]"
       >
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 bg-white px-4 py-3">
@@ -1411,7 +1404,7 @@ function AdminUserAccessEditor({
           </Button>
         </div>
       </section>
-    </div>
+    </WindowSurface>
   )
 }
 
@@ -1445,21 +1438,16 @@ function AdminActivityWindow({
     null,
   )
   const [showSecurity, setShowSecurity] = useState(false)
-  const [expanded, setExpanded] = useState(false)
-  const dialogRef = useDialogFocus(onClose)
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/60 p-3 sm:p-6">
-      <section ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="All app activity" className={`tech-surface mx-auto flex h-[calc(100dvh-1.5rem)] min-h-0 max-h-[calc(100dvh-1.5rem)] max-w-full flex-col overflow-hidden rounded-lg border border-slate-200 bg-white text-slate-950 shadow-2xl sm:h-[80dvh] sm:min-h-80 sm:min-w-[min(640px,calc(100vw-3rem))] sm:max-h-[calc(100dvh-3rem)] ${expanded ? "w-full sm:!h-[calc(100dvh-3rem)]" : "w-full sm:w-[90%] sm:max-w-7xl sm:resize"}`}>
+    <WindowSurface title="All app activity" onBack={onClose}>
+      <section className="tech-surface flex min-h-0 w-full max-w-7xl flex-col overflow-hidden rounded-lg border border-slate-200 bg-white text-slate-950">
         <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 bg-white px-4 py-3">
           <div>
             <div className="flex items-center gap-2">
               <Activity className="size-4 text-primary" aria-hidden="true" />
               <h2 className="text-base font-semibold">All app activity</h2>
               <Button variant="outline" onClick={() => setShowSecurity(true)}>Security risks</Button>
-              <Button variant="outline" size="icon-sm" title={expanded ? "Restore window" : "Expand window"} aria-label={expanded ? "Restore window" : "Expand window"} onClick={() => setExpanded(!expanded)}>
-                {expanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
-              </Button>
             </div>
             <p className="mt-1 text-xs text-slate-600">
               Full admin view of recent audited actions across entries, profiles,
@@ -1564,7 +1552,7 @@ function AdminActivityWindow({
           />
         )}
       </section>
-    </div>
+    </WindowSurface>
   )
 }
 
@@ -1598,7 +1586,8 @@ function AdminActivityEventDetails({
   ]
 
   return (
-    <aside className="max-h-[40dvh] shrink-0 overflow-y-auto overscroll-contain border-t border-slate-200 bg-white p-4">
+    <WindowSurface title="Activity detail" onBack={onClose}>
+    <section className="w-full max-w-5xl overflow-y-auto overscroll-contain bg-white p-4">
       <div className="sticky top-0 z-[1] mb-3 flex items-start justify-between gap-4 bg-white pb-2">
         <div>
           <h3 className="text-sm font-semibold">Activity detail</h3>
@@ -1645,7 +1634,8 @@ function AdminActivityEventDetails({
           </pre>
         </div>
       </div>
-    </aside>
+    </section>
+    </WindowSurface>
   )
 }
 

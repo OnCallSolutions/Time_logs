@@ -21,6 +21,8 @@ Keep employee logging immediately available. Manager/admin note extraction remai
 
 Navigation must wrap on narrow screens without losing labels. Table overflow should remain inside its scroll area, with sticky headers and visible actions. Dialogs need bounded heights, accessible focus, scrollable content, and persistent confirmation/close controls.
 
+Application windows use `WindowSurface` and open full screen by default. Restore offers a smaller view. Each active window is portaled outside its parent; previous windows are hidden and inert, not destroyed. Back and Escape return to the immediate previous view with its draft and scroll state intact. Save-in-progress prevents dismissal. Security reports remain read-only and refresh stored assessments without initiating an AI run.
+
 ## Authentication
 
 Microsoft Entra ID remains the only sign-in provider. Do not add password collection to the application. Keep existing provider identifiers, reauthentication parameters, cookie cleanup, and `/timelog` routes.

@@ -8,7 +8,7 @@ import { useState } from "react"
 import { BarChart3, CheckCircle2, Sparkles, XCircle } from "lucide-react"
 import { apiPath } from "@/lib/paths"
 import { Button } from "@/components/ui/button"
-import { useDialogFocus } from "@/components/use-dialog-focus"
+import { WindowSurface } from "@/components/window-surface"
 import type { TimeEntry } from "@/lib/types"
 
 /**
@@ -78,11 +78,10 @@ export function EntryReviewDialog({ entry, decision, initialNote = "", onCancel,
   entry: TimeEntry; decision: "approved" | "rejected"; initialNote?: string; onCancel: () => void; onConfirm: (note: string) => void
 }) {
   const [note, setNote] = useState(initialNote)
-  const ref = useDialogFocus(onCancel)
   const rejecting = decision === "rejected"
   const title = rejecting ? "Reject entry" : "Approve entry"
-  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3">
-    <section ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title} className="flex max-h-[calc(100dvh-1.5rem)] w-full max-w-lg flex-col overflow-hidden rounded-lg border border-border bg-card text-foreground shadow-xl">
+  return <WindowSurface title={title} onBack={onCancel}>
+    <section className="flex w-full max-w-lg flex-col overflow-hidden rounded-lg border border-border bg-card text-foreground shadow-xl">
       <h2 className="shrink-0 border-b p-4 text-base font-semibold">{title}</h2>
       <div className="min-h-0 overflow-auto p-4">
         <p className="font-medium">{entry.contractor}</p><p>{entry.date} - {entry.hours}h - {entry.project}</p>
@@ -98,5 +97,5 @@ export function EntryReviewDialog({ entry, decision, initialNote = "", onCancel,
         </Button>
       </div>
     </section>
-  </div>
+  </WindowSurface>
 }

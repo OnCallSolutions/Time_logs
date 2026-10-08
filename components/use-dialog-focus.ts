@@ -10,13 +10,15 @@ import { useEffect, useRef } from "react"
  * Locks page scrolling, handles Escape, and cycles Tab through visible controls.
  * @param onClose - Callback invoked when Escape dismisses the dialog.
  * @param dismissible - Whether dismissal is allowed during the current operation.
+ * @param enabled - Whether the dialog has mounted its portal content.
  * @returns React.RefObject<HTMLElement | null> assigned to the dialog container.
  */
-export function useDialogFocus<T extends HTMLElement = HTMLElement>(onClose: () => void, dismissible = true) {
+export function useDialogFocus<T extends HTMLElement = HTMLElement>(onClose: () => void, dismissible = true, enabled = true) {
   const ref = useRef<T>(null)
   const state = useRef({ onClose, dismissible })
   state.current = { onClose, dismissible }
   useEffect(() => {
+    if (!enabled) return
     const element = ref.current
     if (!element) return
     const previousFocus = document.activeElement as HTMLElement | null
@@ -59,6 +61,6 @@ export function useDialogFocus<T extends HTMLElement = HTMLElement>(onClose: () 
       element.removeEventListener("keydown", handleKey)
       if (previousFocus?.isConnected) previousFocus.focus()
     }
-  }, [])
+  }, [enabled])
   return ref
 }
