@@ -114,6 +114,9 @@ type ManagedAccessUserRow = {
 
 export type AuditAction =
   | "message_sent"
+  | "message_edited"
+  | "message_deleted"
+  | "message_encryption_initialized"
   | "entry_created"
   | "entries_cleared"
   | "entry_updated"

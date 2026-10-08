@@ -12,6 +12,8 @@ import { useEffect, useState } from "react"
 import { Brand } from "@/components/brand"
 import { EmployeeWorkspace } from "@/components/employee-workspace"
 import { EmployeeRightsPanel, MessagesPanel } from "@/components/collaboration-panel"
+import { useMessageInbox } from "@/components/use-message-inbox"
+import { MessageNotifications } from "@/components/message-notifications"
 import { notifyPermissionsChanged } from "@/lib/permission-events"
 import { EntryReviewDialog, ManagerWorkspace } from "@/components/manager-workspace"
 import { permissionLabels, resolvePermissions, type Permission, type PermissionOverrides } from "@/lib/permissions"
@@ -172,6 +174,7 @@ export function TimesheetApp({
   const [permissions,setPermissions] = useState(() => resolvePermissions(null))
   const [accessDenied,setAccessDenied] = useState(false)
   const [permissionsLoaded,setPermissionsLoaded] = useState(false)
+  const messageInbox=useMessageInbox(permissionsLoaded&&!accessDenied)
   const [entries, setEntries] = useState<TimeEntry[]>([])
   const [view, setView] = useState<View>(role === "admin" ? "admin" : role === "manager" ? "approvals" : "log")
   const [loadingEntries, setLoadingEntries] = useState(true)
@@ -440,6 +443,7 @@ export function TimesheetApp({
             <SignOutButton />
           </div>
         </div>
+        {!accessDenied&&<MessageNotifications inbox={messageInbox} onOpen={()=>setView("messages")}/>}
         <h1 className="text-2xl font-semibold text-balance">
           {role === "admin" ? "Technology management" : role === "manager" ? "Team workspace" : "My timesheet"}
         </h1>
@@ -504,6 +508,7 @@ export function TimesheetApp({
           >
             <Icon className="size-4" aria-hidden="true" />
             {label}
+            {key==="messages"&&messageInbox.unread>0&&<span className="rounded-full bg-primary px-1.5 text-xs text-white" aria-label={`${messageInbox.unread} unread messages`}>{messageInbox.unread}</span>}
             {key === "log" && entries.length > 0 && (
               <span
                 className={`ml-1 rounded-full px-1.5 text-xs tabular-nums ${
@@ -585,7 +590,7 @@ export function TimesheetApp({
           <ManagerReport entries={entries} />
         )
       ) : view === "messages" ? (
-        <MessagesPanel canSend={permissions.send_messages && (role === "admin" || role === "manager")} />
+        <MessagesPanel inbox={messageInbox} canSend={permissions.send_messages && (role === "admin" || role === "manager")} />
       ) : view === "permissions" ? (
         <EmployeeRightsPanel permissions={permissions} />
       ) : (

@@ -175,6 +175,8 @@ The manager AI review endpoint processes up to 50 submitted records per request.
 
 ## Security and Troubleshooting
 
+The local `user_Interface` messaging update adds one-hour sender editing, confirmed deletion, delivery/read receipts, unread badges, optional in-app popups/sound, and client-side encryption with passphrase-protected multi-device recovery. New sends require every recipient to initialize encryption. Existing plaintext is explicitly labeled legacy. See [MESSAGING_SECURITY.md](MESSAGING_SECURITY.md) for the protocol, storage changes, operating limits, recovery warnings, and required independent security review before production use. This feature is not yet merged into `Development` or released on `main`.
+
 - Keep secrets server-side and `.env.local` untracked. Rotate any credential that has been exposed; hiding a file later does not remove it from Git history.
 - Technical audit/security tools remain admin-only. IP addresses and full audit JSON appear in selected-event details rather than compact activity rows.
 - Local IP values such as `::1` or `127.0.0.1` represent loopback, not a missing address.
