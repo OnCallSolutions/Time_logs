@@ -16,10 +16,24 @@ let messageSchema:Promise<void>|undefined
  * @returns Promise of email and role pairs, excluding managers and administrators.
  */
 export async function employeeRoster() {
+  return (await actorRoster()).filter(user=>user.accessStatus === "active" && (user.role === "employee" || user.role === "user")).map(user=>({email:user.email,role:user.role}))
+}
+/**
+ * Lists every configured, managed, or observed actor without security-log data.
+ * Assigned roles stay visible for blocked accounts, but their rights remain denied.
+ * @returns Promise containing public directory identity, role, and access summaries.
+ */
+export async function actorRoster() {
   const [known,managed] = await Promise.all([listKnownUsers(),listManagedAccessUsers()])
-  const emails = new Set([...known,...managed,...getConfiguredAccessUsers()].map(user=>user.email))
-  const users = await Promise.all([...emails].map(async email=>({email,role:await getEffectiveUserRole(email)})))
-  return users.filter(user=>user.role === "employee" || user.role === "user").sort((a,b)=>a.email.localeCompare(b.email))
+  const configured=getConfiguredAccessUsers()
+  const emails = new Set([...known,...managed,...configured].map(user=>user.email.toLowerCase()))
+  const users = await Promise.all([...emails].map(async email=>{
+    const effective=await getEffectiveUserRole(email)
+    const assignment=managed.find(user=>user.email.toLowerCase()===email)
+    return {email,role:effective??assignment?.role??configured.find(user=>user.email.toLowerCase()===email)?.role??"none",accessStatus:effective?"active":assignment?.accessStatus??"observed",displayName:known.find(user=>user.email.toLowerCase()===email)?.displayName??""}
+  }))
+  const rank:Record<string,number>={admin:4,manager:3,employee:2,user:1,none:0}
+  return users.sort((a,b)=>(rank[b.role]??0)-(rank[a.role]??0)||a.email.localeCompare(b.email))
 }
 /**
  * Creates message storage and its recipient/date index without changing records.

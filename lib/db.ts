@@ -6,6 +6,7 @@
  * visibility flag, and these helpers enforce that scope in every query.
  */
 import "server-only"
+import { LastAdministratorError } from "@/lib/admin-policy"
 
 import { neon } from "@neondatabase/serverless"
 import type { PermissionOverrides } from "@/lib/permissions"
@@ -637,9 +638,11 @@ export async function listManagedAccessUsers() {
  * @param assignment.accessStatus - Access state to apply.
  * @param assignment.note - Optional admin note for the decision.
  * @param assignment.updatedBy - Email of the administrator making the change.
+ * @param assignment.environmentAdmins - Recovery admins supplied by server configuration.
  * @returns The saved managed access assignment.
  */
 export async function upsertManagedAccessUser(assignment: {
+  environmentAdmins?: string[]
   permissions?: PermissionOverrides
   email: string
   role: UserRole
@@ -649,7 +652,7 @@ export async function upsertManagedAccessUser(assignment: {
 }) {
   await ensureManagedAccessTable()
 
-  const rows = await sql`
+  const results = await sql.transaction([sql`
     INSERT INTO managed_user_access (
       email,
       role,
@@ -658,14 +661,25 @@ export async function upsertManagedAccessUser(assignment: {
       permissions,
       updated_by
     )
-    VALUES (
+    SELECT
       ${assignment.email.toLowerCase()},
       ${assignment.role},
       ${assignment.accessStatus},
       ${assignment.note ?? ""},
       ${JSON.stringify(assignment.permissions ?? {})}::jsonb,
       ${assignment.updatedBy}
-    )
+    WHERE ((${assignment.role} = 'admin' AND ${assignment.accessStatus} = 'active')
+      OR ${(assignment.environmentAdmins?.length ?? 0) > 0}
+      OR EXISTS (
+        SELECT 1 FROM managed_user_access
+        WHERE role = 'admin' AND access_status = 'active'
+          AND email <> ${assignment.email.toLowerCase()}
+      ))
+      AND (${assignment.environmentAdmins?.includes(assignment.updatedBy.toLowerCase()) ?? false}
+        OR EXISTS (
+          SELECT 1 FROM managed_user_access WHERE email = ${assignment.updatedBy.toLowerCase()}
+            AND role = 'admin' AND access_status = 'active'
+        ))
     ON CONFLICT (email)
     DO UPDATE SET
       role = EXCLUDED.role,
@@ -675,7 +689,10 @@ export async function upsertManagedAccessUser(assignment: {
       updated_by = EXCLUDED.updated_by,
       updated_at = now()
     RETURNING email, role, access_status, note, permissions, updated_by, created_at, updated_at
-  `
+  `], { isolationLevel: "Serializable" })
+
+  const rows = results[0]
+  if (!rows.length) throw new LastAdministratorError()
 
   return toManagedAccessUser((rows as ManagedAccessUserRow[])[0])
 }

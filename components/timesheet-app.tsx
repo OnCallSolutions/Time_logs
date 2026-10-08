@@ -64,6 +64,7 @@ const manageableStatuses: AccessStatus[] = ["active", "denied", "blocked"]
  * timesheet activity so admins can audit both permission state and product usage.
  */
 type AdminDirectoryUser = {
+  environmentAdmin?: boolean
   permissions?: PermissionOverrides
   /** Normalized user email shown as the stable identity. */
   email: string
@@ -106,6 +107,8 @@ type AdminDirectoryUser = {
  * persisted until the Save button calls the user-management API.
  */
 type AccessEditorState = {
+  protectedAdmin?: boolean
+  environmentAdmin?: boolean
   permissions?: PermissionOverrides
   /** Whether the editor is creating a new row or changing an existing user. */
   mode: "add" | "edit"
@@ -182,6 +185,8 @@ export function TimesheetApp({
   const [personalStatus, setPersonalStatus] = useState<EntryStatus | "all">("all")
   const [suggestedReview,setSuggestedReview] = useState<{entry:TimeEntry;decision:"approved"|"rejected";reason:string}|null>(null)
   const [technologyReports,setTechnologyReports] = useState(false)
+  const [directoryRequest,setDirectoryRequest] = useState(0)
+  const [workspaceWindow,setWorkspaceWindow] = useState<"overview"|"workflow"|"notes"|null>(null)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -449,28 +454,23 @@ export function TimesheetApp({
         </h1>
       </header>
 
-      <details open={role !== "admin"} className="border-b border-border pb-2">
-        <summary className="cursor-pointer text-sm font-medium">Workspace overview</summary>
-        <RoleOverview role={role} />
-      </details>
-      {canViewAdmin && <AdminWorkspace onDirectory={() => setView("admin")} onSecurity={() => setTechnologyReports(true)} />}
+      <div className="flex flex-wrap items-center gap-2">
+        <Button variant="outline" size="sm" onClick={()=>setWorkspaceWindow("overview")}><Users className="size-4"/>Workspace overview</Button>
+        <Button variant="outline" size="sm" onClick={()=>setWorkspaceWindow("workflow")}><BarChart3 className="size-4"/>Workflow totals</Button>
+        {permissions.create_entries&&<Button variant="outline" size="sm" onClick={()=>setWorkspaceWindow("notes")}><Pencil className="size-4"/>Log time notes</Button>}
+      </div>
+      {canViewAdmin && <AdminWorkspace onDirectory={() => {setView("admin");setDirectoryRequest(value=>value+1)}} onSecurity={() => setTechnologyReports(true)} />}
       {canViewAdmin && technologyReports && <SecurityRiskWindow onClose={() => setTechnologyReports(false)} />}
 
-      <details open={role !== "admin"} className="border-b border-border pb-2">
-      <summary className="cursor-pointer text-sm font-medium">Workflow totals</summary>
-      <WorkflowOverview
+      {workspaceWindow&&<WindowSurface title={workspaceWindow==="notes"?"Log time notes":workspaceWindow==="overview"?"Workspace overview":"Workflow totals"} onBack={()=>setWorkspaceWindow(null)}><section className="flex min-h-0 w-full max-w-6xl flex-col bg-white"><div className="min-h-0 flex-1 overflow-auto p-4">
+      {workspaceWindow==="overview"?<RoleOverview role={role}/>:workspaceWindow==="notes"?<NoteInput onParsed={parsed=>{addParsed(parsed);setWorkspaceWindow(null);setView("log")}}/>:<WorkflowOverview
         approvedCount={approvedEntries.length}
         draftCount={draftEntries.length}
         pendingCount={pendingEntries.length}
         rejectedCount={rejectedEntries.length}
         role={role}
-      />
-
-      </details>
-      {permissions.create_entries && <details open={role === "employee" || role === "user"} className="border-y border-border bg-card">
-        <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-primary focus-visible:outline-2 focus-visible:outline-primary">Log time notes</summary>
-        <NoteInput onParsed={addParsed} />
-      </details>}
+      />}
+      </div></section></WindowSurface>}
       {(role === "employee" || role === "user") && <EmployeeWorkspace entries={entries} selected={personalStatus} onSelect={setPersonalStatus} />}
       {!accessDenied && (canReviewEntries || permissions.ai_review || canViewTeamReports) && <ManagerWorkspace canReview={canReviewEntries} canReports={canViewTeamReports} canAI={permissions.ai_review} pending={pendingEntries.length} entries={pendingEntries} onApprovals={() => setView("approvals")} onReports={() => setView("report")} onRecommendation={(entry,decision,reason) => setSuggestedReview({entry,decision,reason})} />}
       {suggestedReview && <EntryReviewDialog entry={suggestedReview.entry} decision={suggestedReview.decision} initialNote={suggestedReview.reason} onCancel={() => setSuggestedReview(null)} onConfirm={note => {
@@ -592,9 +592,9 @@ export function TimesheetApp({
       ) : view === "messages" ? (
         <MessagesPanel inbox={messageInbox} canSend={permissions.send_messages && (role === "admin" || role === "manager")} />
       ) : view === "permissions" ? (
-        <EmployeeRightsPanel permissions={permissions} />
+        role === "admin" ? <AdminPanel role={role} rightsOnly openRequest={directoryRequest} /> : <EmployeeRightsPanel permissions={permissions} />
       ) : (
-        <AdminPanel role={role} />
+        <AdminPanel role={role} openRequest={directoryRequest} />
       )}
 
       <footer className="mt-auto pt-4 text-center text-xs text-muted-foreground">
@@ -715,11 +715,13 @@ function WorkflowOverview({
  * @param props.role - Effective role for the signed-in user.
  * @returns The administrator user directory panel, or null for non-admin roles.
  */
-function AdminPanel({ role }: { role: UserRole }) {
+function AdminPanel({ role, rightsOnly = false,openRequest = 0 }: { role: UserRole; rightsOnly?: boolean;openRequest?:number }) {
   const [users, setUsers] = useState<AdminDirectoryUser[]>([])
   const [auditEvents, setAuditEvents] = useState<AdminAuditEvent[]>([])
   const [allActivityEvents, setAllActivityEvents] = useState<AdminAuditEvent[]>([])
   const [activityWindowOpen, setActivityWindowOpen] = useState(false)
+  const [directoryOpen,setDirectoryOpen] = useState(rightsOnly)
+  const [totalsOpen,setTotalsOpen] = useState(false)
   const [activityLoading, setActivityLoading] = useState(false)
   const [activityError, setActivityError] = useState<string | null>(null)
   const [accessEditor, setAccessEditor] = useState<AccessEditorState | null>(
@@ -729,6 +731,9 @@ function AdminPanel({ role }: { role: UserRole }) {
   const [managementError, setManagementError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(()=>{if(rightsOnly)setDirectoryOpen(true)},[rightsOnly])
+  useEffect(()=>{if(openRequest)setDirectoryOpen(true)},[openRequest])
 
   useEffect(() => {
     let active = true
@@ -752,7 +757,7 @@ function AdminPanel({ role }: { role: UserRole }) {
       try {
         const [usersRes, auditRes] = await Promise.all([
           fetch(apiPath("/api/users"), { cache: "no-store" }),
-          fetch(apiPath("/api/audit?limit=25"), { cache: "no-store" }),
+          rightsOnly ? Promise.resolve(Response.json({events:[]})) : fetch(apiPath("/api/audit?limit=25"), { cache: "no-store" }),
         ])
         const usersData = await usersRes.json()
         const auditData = await auditRes.json()
@@ -782,7 +787,7 @@ function AdminPanel({ role }: { role: UserRole }) {
     return () => {
       active = false
     }
-  }, [role])
+  }, [role,rightsOnly])
 
   if (role !== "admin") {
     return null
@@ -818,6 +823,7 @@ function AdminPanel({ role }: { role: UserRole }) {
       const normalizedEmail = managedUser.email.toLowerCase()
       const existing = previous.find((user) => user.email === normalizedEmail)
       const nextUser: AdminDirectoryUser = {
+        environmentAdmin: existing?.environmentAdmin ?? false,
         email: normalizedEmail,
         role: managedUser.role,
         accessStatus: managedUser.accessStatus,
@@ -918,6 +924,8 @@ function AdminPanel({ role }: { role: UserRole }) {
         user.accessStatus === "observed" ? "active" : user.accessStatus,
       note: user.note,
       permissions: user.permissions ?? {},
+      environmentAdmin: user.environmentAdmin,
+      protectedAdmin: user.environmentAdmin || (user.role === "admin" && user.accessStatus === "active" && users.filter(person=>person.role === "admin" && person.accessStatus === "active").length <= 1),
     })
   }
 
@@ -983,25 +991,21 @@ function AdminPanel({ role }: { role: UserRole }) {
 
   return (
     <div className="tech-surface flex flex-col gap-4 bg-white text-slate-950">
-      <section className="overflow-hidden border-y border-slate-200 bg-white">
+      <div className="flex flex-wrap items-center gap-2 border-y border-border py-2">
+        <Button variant="outline" size="sm" onClick={()=>setDirectoryOpen(true)}><Users className="size-4"/>{rightsOnly?"Actor rights":"User directory"}</Button>
+        <Button variant="outline" size="sm" onClick={()=>setTotalsOpen(true)}><BarChart3 className="size-4"/>Directory totals</Button>
+        {!rightsOnly&&<Button variant="outline" size="sm" onClick={openActivityWindow}><Activity className="size-4"/>View all app activity</Button>}
+        <span className="text-xs text-muted-foreground">{users.length} actors · {users.filter(user=>user.role==="admin"&&user.accessStatus==="active").length} active admins</span>
+      </div>
+      {directoryOpen&&<WindowSurface title={rightsOnly?"Employee rights":"User directory"} onBack={()=>setDirectoryOpen(false)}>
+      <section className="flex min-h-0 w-full flex-col overflow-hidden bg-white">
         <div className="border-b border-slate-200 bg-white px-4 py-3">
         <div className="flex items-center gap-2">
           <ShieldCheck className="size-4 text-primary" aria-hidden="true" />
           <h2 className="text-sm font-semibold">Admin user directory</h2>
         </div>
-        <p className="mt-1 text-xs text-slate-600">
-          Admins, managers, employees, and users are ordered by seniority. Use
-          Edit to change a person's role or permission state.
-        </p>
       </div>
 
-        <details className="border-b border-slate-200 px-4 py-2"><summary className="cursor-pointer text-xs font-medium">Directory totals ({users.length} users)</summary>
-        <div className="grid grid-cols-1 gap-3 bg-white py-2 sm:grid-cols-3">
-        <AdminStat icon={Users} label="Directory users" value={users.length} />
-        <AdminStat icon={ShieldCheck} label="Configured access" value={configuredCount} />
-        <AdminStat icon={CheckCircle2} label="Awaiting review" value={submittedCount} />
-        </div>
-        </details>
 
         <div className="flex flex-col gap-3 border-b border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -1041,9 +1045,9 @@ function AdminPanel({ role }: { role: UserRole }) {
           </p>
         </div>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-left text-sm">
-            <thead>
+        <div className="min-h-0 flex-1 overflow-auto overscroll-contain">
+          <table className="w-full min-w-[1050px] border-collapse text-left text-sm">
+            <thead className="sticky top-0 bg-white">
               <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
                 <th className="px-4 py-2 font-medium">User</th>
                 <th className="px-4 py-2 font-medium">Role</th>
@@ -1052,7 +1056,7 @@ function AdminPanel({ role }: { role: UserRole }) {
                 <th className="px-4 py-2 text-right font-medium">Entries</th>
                 <th className="px-4 py-2 text-right font-medium">Review</th>
                 <th className="px-4 py-2 font-medium">Last entry</th>
-                <th className="px-4 py-2 text-right font-medium">Actions</th>
+                <th className="sticky right-0 bg-white px-4 py-2 text-right font-medium">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -1089,7 +1093,7 @@ function AdminPanel({ role }: { role: UserRole }) {
                     </div>
                   </td>
                   <td className="px-4 py-2 text-xs text-slate-600">
-                    {roleRights(user.role).join(" · ")}
+                    {Object.values(resolvePermissions(user.role==="none"||user.accessStatus!=="active"?null:user.role,user.permissions)).filter(Boolean).length} allowed
                   </td>
                   <td className="px-4 py-2 text-right font-mono tabular-nums">
                     {user.totalEntries}
@@ -1100,7 +1104,7 @@ function AdminPanel({ role }: { role: UserRole }) {
                   <td className="px-4 py-2 text-xs text-slate-500">
                     {user.lastEntryAt ? formatAdminDate(user.lastEntryAt) : "—"}
                   </td>
-                  <td className="px-4 py-2 text-right">
+                  <td className="sticky right-0 bg-white px-4 py-2 text-right">
                     <Button
                       type="button"
                       variant="outline"
@@ -1120,91 +1124,8 @@ function AdminPanel({ role }: { role: UserRole }) {
         </div>
       )}
       </section>
-
-      <section className="overflow-hidden border-y border-slate-200 bg-white">
-        <div className="border-b border-slate-200 bg-white px-4 py-3">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <div className="flex items-center gap-2">
-                <ShieldCheck className="size-4 text-primary" aria-hidden="true" />
-                <h2 className="text-sm font-semibold">Security audit log</h2>
-              </div>
-              <p className="mt-1 text-xs text-slate-600">
-                Recent sensitive actions are recorded with actor, target, time,
-                and request context.
-              </p>
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="border-slate-300 bg-white text-slate-900 hover:bg-slate-50"
-              onClick={openActivityWindow}
-            >
-              <Activity className="size-3.5" aria-hidden="true" />
-              View all app activity
-            </Button>
-          </div>
-        </div>
-
-      {loading || error ? (
-        <div
-          className={`m-4 rounded-lg border px-4 py-3 text-sm ${
-            error
-              ? "border-red-200 bg-red-50 text-red-700"
-              : "border-slate-200 bg-slate-50 text-slate-600"
-          }`}
-          role={error ? "alert" : "status"}
-        >
-          {error ?? "Loading audit events..."}
-        </div>
-      ) : auditEvents.length === 0 ? (
-        <div className="px-6 py-10 text-center">
-          <p className="text-sm font-medium">No audit events yet</p>
-          <p className="mt-1 text-xs text-slate-600">
-            Entry, approval, deletion, and profile actions will appear here.
-          </p>
-        </div>
-      ) : (
-        <details className="px-4 py-2"><summary className="cursor-pointer text-sm font-medium">Recent activity ({auditEvents.length})</summary>
-        <div className="max-h-[40dvh] overflow-auto overscroll-contain">
-          <table className="w-full border-collapse text-left text-sm">
-            <thead>
-              <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
-                <th className="px-4 py-2 font-medium">Time</th>
-                <th className="px-4 py-2 font-medium">Actor</th>
-                <th className="px-4 py-2 font-medium">Action</th>
-                <th className="px-4 py-2 font-medium">Target</th>
-                <th className="px-4 py-2 font-medium">Context</th>
-              </tr>
-            </thead>
-            <tbody>
-              {auditEvents.map((event) => (
-                <tr
-                  key={event.id}
-                  className="border-b border-slate-200 last:border-0"
-                >
-                  <td className="px-4 py-2 text-xs text-slate-500">
-                    {formatAdminDateTime(event.occurredAt)}
-                  </td>
-                  <td className="px-4 py-2 font-medium">{event.actorEmail}</td>
-                  <td className="px-4 py-2">
-                    {formatAuditAction(event.action)}
-                  </td>
-                  <td className="px-4 py-2 text-xs text-slate-500">
-                    {event.targetType}
-                    {event.targetId ? ` · ${shortId(event.targetId)}` : ""}
-                  </td>
-                  <td className="px-4 py-2 text-xs text-slate-500">
-                    {formatAuditMetadata(event)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div></details>
-      )}
-      </section>
+      </WindowSurface>}
+      {totalsOpen&&<WindowSurface title="Directory totals" onBack={()=>setTotalsOpen(false)}><section className="w-full bg-white p-4"><h2 className="mb-4 font-semibold">Directory totals</h2><div className="grid gap-3 sm:grid-cols-3"><AdminStat icon={Users} label="Directory users" value={users.length}/><AdminStat icon={ShieldCheck} label="Configured access" value={configuredCount}/><AdminStat icon={CheckCircle2} label="Awaiting review" value={submittedCount}/></div></section></WindowSurface>}
 
       {activityWindowOpen && (
         <AdminActivityWindow
@@ -1295,7 +1216,7 @@ function AdminUserAccessEditor({
           </Button>
         </div>
 
-        <div className="grid min-h-0 gap-4 overflow-y-auto overscroll-contain p-4">
+        <div className="grid min-h-0 content-start gap-4 overflow-y-auto overscroll-contain p-4 lg:grid-cols-2">
           <label className="text-xs font-medium text-slate-600">
             Employee email
             <input
@@ -1318,7 +1239,8 @@ function AdminUserAccessEditor({
                   key={roleOption}
                   type="button"
                   onClick={() => onChange({ ...editor, role: roleOption })}
-                  disabled={saving}
+                  aria-pressed={editor.role === roleOption}
+                  disabled={saving || editor.protectedAdmin}
                   className={`rounded-md border px-3 py-2 text-sm font-medium capitalize transition ${
                     editor.role === roleOption
                       ? "border-primary bg-primary text-white"
@@ -1332,6 +1254,7 @@ function AdminUserAccessEditor({
             <p className="mt-2 text-xs text-slate-500">
               {roleRights(editor.role).join(" · ")}
             </p>
+            {editor.protectedAdmin&&<p className="mt-2 text-xs text-primary">{editor.environmentAdmin?"Recovery administrators are managed in deployment settings.":"At least one active admin is required. Add another admin before changing this role or access state."}</p>}
           </div>
 
           <div>
@@ -1346,7 +1269,8 @@ function AdminUserAccessEditor({
                   onClick={() =>
                     onChange({ ...editor, accessStatus: statusOption })
                   }
-                  disabled={saving}
+                  aria-pressed={editor.accessStatus === statusOption}
+                  disabled={saving || editor.protectedAdmin}
                   className={`rounded-md border px-3 py-2 text-sm font-medium capitalize transition ${
                     editor.accessStatus === statusOption
                       ? accessStatusClass(statusOption)
@@ -1373,7 +1297,7 @@ function AdminUserAccessEditor({
             />
           </label>
 
-          <fieldset className="grid gap-2">
+          <fieldset className="grid gap-2 sm:grid-cols-2 lg:col-span-2 lg:grid-cols-3">
             <legend className="mb-2 text-sm font-semibold">Control permissions</legend>
             {(Object.entries(permissionLabels) as [Permission,string][]).map(([permission,label]) => <label key={permission} className="flex items-center gap-2 text-sm">
               <input type="checkbox" disabled={saving} checked={resolvePermissions(editor.role,editor.permissions)[permission]} onChange={event => onChange({...editor,permissions:{...editor.permissions,[permission]:event.target.checked}})} />{label}

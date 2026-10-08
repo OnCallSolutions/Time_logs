@@ -23,6 +23,7 @@ type Report = { run_day: string; status: string; event_count: number; possibly_t
 export function SecurityRiskWindow({ onClose }: { onClose: () => void }) {
   const [refresh, setRefresh] = useState(0)
   const [severity, setSeverity] = useState("all")
+  const [finding,setFinding]=useState<{eventIds:string[];explanation:string;recommendation:string}|null>(null)
   const [reports, setReports] = useState<Report[]>([])
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -66,12 +67,10 @@ export function SecurityRiskWindow({ onClose }: { onClose: () => void }) {
         <p className="text-sm">Completed: {report.completed_at ? new Date(report.completed_at).toLocaleString() : "Pending"}</p>
         {report.status === "failed" && <p className="text-red-700">Monitoring failed. Review service configuration.</p>}
         <p>{report.assessment?.summary}</p>
-        {report.assessment?.findings.map((finding,index) => <details key={index} className="mt-3 border-l-2 border-primary pl-3">
-          <summary className="cursor-pointer text-sm font-medium">Finding {index + 1}: {finding.explanation}</summary>
-          <p className="mt-2 text-sm">{finding.recommendation}</p><p className="mt-2 break-all text-xs text-muted-foreground">Evidence: {finding.eventIds.join(", ") || "No linked events"}</p>
-        </details>)}
+        {report.assessment?.findings.map((item,index) => <button type="button" key={index} className="mt-3 block w-full border-l-2 border-primary pl-3 text-left text-sm font-medium" onClick={()=>setFinding(item)}>Finding {index + 1}: {item.explanation}</button>)}
       </article>)}
       </div>
     </section>
+    {finding&&<WindowSurface title="Security finding" onBack={()=>setFinding(null)}><section className="w-full overflow-auto bg-white p-4"><h2 className="font-semibold">Security finding</h2><p className="mt-3 text-sm">{finding.explanation}</p><h3 className="mt-4 text-sm font-semibold">Recommendation</h3><p className="mt-2 text-sm">{finding.recommendation}</p><p className="mt-4 break-all text-xs text-muted-foreground">Evidence: {finding.eventIds.join(", ")||"No linked events"}</p></section></WindowSurface>}
   </WindowSurface>
 }

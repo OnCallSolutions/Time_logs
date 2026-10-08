@@ -12,7 +12,8 @@ vi.mock("@/lib/db", () => ({
   recordAuditEvent: vi.fn(), upsertManagedAccessUser: vi.fn(),
 }))
 import { auth } from "@/auth"
-import { getEffectiveUserRole } from "@/lib/access"
+import { getEffectiveUserRole,getConfiguredAccessUsers } from "@/lib/access"
+import { LastAdministratorError } from "@/lib/admin-policy"
 import { getManagedAccessUser, recordAuditEvent, upsertManagedAccessUser } from "@/lib/db"
 import { PATCH } from "./route"
 
@@ -20,6 +21,7 @@ beforeEach(() => {
   vi.resetAllMocks()
   vi.mocked(auth).mockResolvedValue({ user: { email: "admin@example.com" } } as never)
   vi.mocked(getEffectiveUserRole).mockResolvedValue("admin")
+  vi.mocked(getConfiguredAccessUsers).mockReturnValue([])
   vi.mocked(getManagedAccessUser).mockResolvedValue(null)
   vi.mocked(upsertManagedAccessUser).mockImplementation(async assignment => ({
     ...assignment, note: assignment.note ?? "", createdAt: "2026-10-08T12:00:00Z", updatedAt: "2026-10-08T12:00:00Z",
@@ -74,4 +76,22 @@ it("distinguishes storage failures from input validation", async () => {
   expect((await PATCH(request({ review_entries: true }))).status).toBe(500)
   expect(log).toHaveBeenCalledWith("[users] access save failed")
   log.mockRestore()
+})
+it("returns a policy conflict when storage rejects removing the last admin",async()=>{
+  vi.mocked(upsertManagedAccessUser).mockRejectedValue(new LastAdministratorError())
+  const response=await PATCH(request({}))
+  expect(response.status).toBe(409)
+  expect((await response.json()).error).toContain("At least one active administrator")
+  expect(recordAuditEvent).not.toHaveBeenCalled()
+})
+it("keeps recovery administrators active and displays a safe conflict",async()=>{
+  vi.mocked(getConfiguredAccessUsers).mockReturnValue([{email:"admin@example.com",role:"admin"}])
+  const response=await PATCH(new Request("http://localhost/timelog/api/users",{method:"PATCH",body:JSON.stringify({email:"admin@example.com",role:"manager",accessStatus:"active"})}))
+  expect(response.status).toBe(409)
+  expect(upsertManagedAccessUser).not.toHaveBeenCalled()
+})
+it("returns a retryable conflict for concurrent administrator changes",async()=>{
+  vi.mocked(upsertManagedAccessUser).mockRejectedValue(Object.assign(new Error("Serialization failure"),{code:"40001"}))
+  expect((await PATCH(request({}))).status).toBe(409)
+  expect(recordAuditEvent).not.toHaveBeenCalled()
 })

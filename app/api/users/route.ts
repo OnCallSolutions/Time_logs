@@ -21,10 +21,12 @@ import {
 } from "@/lib/db"
 import type { AccessStatus, UserRole } from "@/lib/types"
 import { permissionLabels, type PermissionOverrides } from "@/lib/permissions"
+import { LastAdministratorError } from "@/lib/admin-policy"
 
 export const runtime = "nodejs"
 
 type DirectoryUser = {
+  environmentAdmin?: boolean
   permissions?: PermissionOverrides
   /** Normalized user email used as the directory identity key. */
   email: string
@@ -165,6 +167,7 @@ export async function GET() {
         accessStatus: "active",
         accessSource: "environment",
         accessConfigured: true,
+        environmentAdmin: user.role === "admin",
         note: existing?.note ?? "",
         updatedBy: existing?.updatedBy ?? null,
         updatedAt: existing?.updatedAt ?? null,
@@ -184,8 +187,9 @@ export async function GET() {
       const existing = directory.get(normalizedEmail)
       directory.set(normalizedEmail, {
         email: normalizedEmail,
-        role: user.role,
-        accessStatus: user.accessStatus,
+        role: existing?.environmentAdmin ? "admin" : user.role,
+        accessStatus: existing?.environmentAdmin ? "active" : user.accessStatus,
+        environmentAdmin: existing?.environmentAdmin ?? false,
         accessSource: "managed",
         accessConfigured: true,
         note: user.note,
@@ -256,6 +260,10 @@ async function saveManagedAccess(req: Request) {
 
     const body = accessUpdateSchema.parse(await req.json())
     const email = body.email.toLowerCase()
+    const environmentAdmins = (getConfiguredAccessUsers() ?? []).filter(user => user.role === "admin").map(user => user.email.toLowerCase())
+    if (environmentAdmins.includes(email) && (body.role !== "admin" || body.accessStatus !== "active")) {
+      return Response.json({ error: "Recovery administrators are controlled by deployment settings and must remain active admins." }, { status: 409 })
+    }
     if (email === adminEmail.toLowerCase() && body.accessStatus !== "active") {
       return Response.json(
         { error: "Admins cannot deny or block their own account." },
@@ -265,6 +273,7 @@ async function saveManagedAccess(req: Request) {
 
     const existing = await getManagedAccessUser(email)
     const user = await upsertManagedAccessUser({
+      environmentAdmins,
       email,
       role: body.role,
       accessStatus: body.accessStatus,
@@ -291,6 +300,8 @@ async function saveManagedAccess(req: Request) {
 
     return Response.json({ user })
   } catch (err) {
+    if (err instanceof LastAdministratorError) return Response.json({ error: err.message }, { status: 409 })
+    if (err instanceof Error && "code" in err && err.code === "40001") return Response.json({ error: "User access changed during this save. Refresh and try again." }, { status: 409 })
     if (err instanceof z.ZodError) {
       return Response.json(
         { error: "Invalid access settings. Use valid roles, permission names, and boolean permission values." },

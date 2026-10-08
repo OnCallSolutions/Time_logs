@@ -6,20 +6,21 @@
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { delegateEmployeePermissions,recordAuditEvent } from "@/lib/db"
-import { employeeRoster } from "@/lib/collaboration"
+import { actorRoster,employeeRoster } from "@/lib/collaboration"
 import { permissionLabels, type Permission } from "@/lib/permissions"
 import { getAuditContext } from "@/lib/audit"
 import { z } from "zod"
 /**
- * Returns employee identities and permissions to authorized delegators only.
- * @returns Promise<Response> with eligible employees or a forbidden response.
+ * Returns all actor identities to authorized delegators without expanding edits.
+ * Managers still modify only active employee workflow rights through PATCH.
+ * @returns Promise<Response> with actor summaries or a forbidden response.
  */
 export async function GET(): Promise<Response> {
   const email = (await auth())?.user?.email
   const access = await getEffectivePermissions(email)
   if (!email || !(access.role === "admin" || access.role === "manager") ||
       (!access.permissions.delegate_permissions && !access.permissions.send_messages)) return Response.json({error:"Forbidden."},{status:403})
-  const users = await Promise.all((await employeeRoster()).map(async user=>({...user,...await getEffectivePermissions(user.email)})))
+  const users = await Promise.all((await actorRoster()).map(async user=>({...user,permissions:(await getEffectivePermissions(user.email)).permissions})))
   return Response.json({users},{headers:{"Cache-Control":"no-store"}})
 }
 /**

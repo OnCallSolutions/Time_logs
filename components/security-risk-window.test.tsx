@@ -22,6 +22,7 @@ it("filters severity and refreshes stored reports without starting analysis", as
   expect(screen.getByRole("dialog")).toHaveAttribute("data-window-expanded", "true")
   await user.click(screen.getByText("Finding 1: Repeated failed sign-ins"))
   expect(screen.getByText("Evidence: event-one")).toBeVisible()
+  await user.click(screen.getByRole("button",{name:"Back"}))
   await user.selectOptions(screen.getByRole("combobox"), "low")
   expect(screen.getByText("No reports match this severity.")).toBeInTheDocument()
   await user.click(screen.getByRole("button", { name: "Refresh security reports" }))

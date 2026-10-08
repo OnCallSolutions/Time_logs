@@ -23,7 +23,8 @@ it("does not save edits until Save is clicked",async()=>{
   await user.clear(screen.getByRole("textbox"));await user.type(screen.getByRole("textbox"),"Updated message")
   expect(fetchMock.mock.calls.filter(call=>call[0].endsWith("/api/messages"))).toHaveLength(0)
   await user.click(screen.getByRole("button",{name:"Save message"}))
-  await waitFor(()=>expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+  await waitFor(()=>expect(screen.queryByRole("dialog",{name:"Edit message"})).not.toBeInTheDocument())
+  expect(screen.getByRole("dialog",{name:"Message detail"})).toBeVisible()
   expect(fetchMock).toHaveBeenCalledWith("/timelog/api/messages",expect.objectContaining({method:"PATCH",body:expect.stringContaining("Updated message")}))
 })
 it("hides expired sender edits but retains an admin exemption",async()=>{

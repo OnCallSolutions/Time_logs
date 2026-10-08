@@ -6,19 +6,25 @@ import { beforeEach,expect,it,vi } from "vitest"
 vi.mock("@/auth",()=>({auth:vi.fn()}))
 vi.mock("@/lib/effective-permissions",()=>({getEffectivePermissions:vi.fn()}))
 vi.mock("@/lib/db",()=>({recordAuditEvent:vi.fn(),delegateEmployeePermissions:vi.fn()}))
-vi.mock("@/lib/collaboration",()=>({employeeRoster:vi.fn()}))
+vi.mock("@/lib/collaboration",()=>({employeeRoster:vi.fn(),actorRoster:vi.fn()}))
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
-import { employeeRoster } from "@/lib/collaboration"
+import { employeeRoster,actorRoster } from "@/lib/collaboration"
 import { delegateEmployeePermissions } from "@/lib/db"
 import { resolvePermissions } from "@/lib/permissions"
-import { PATCH } from "./route"
+import { GET,PATCH } from "./route"
 beforeEach(()=>{
   vi.resetAllMocks()
   vi.mocked(auth).mockResolvedValue({user:{email:"manager@example.com"}} as never)
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"manager",permissions:resolvePermissions("manager")})
   vi.mocked(employeeRoster).mockResolvedValue([{email:"employee@example.com",role:"employee"}])
   vi.mocked(delegateEmployeePermissions).mockResolvedValue({email:"employee@example.com",role:"employee"} as never)
+})
+it("lists every actor without permitting manager edits to higher roles",async()=>{
+  vi.mocked(actorRoster).mockResolvedValue([{email:"admin@example.com",role:"admin",accessStatus:"active",displayName:"Admin"},{email:"manager@example.com",role:"manager",accessStatus:"active",displayName:"Manager"},{email:"employee@example.com",role:"employee",accessStatus:"active",displayName:"Employee"}])
+  const response=await GET()
+  expect((await response.json()).users.map((user:{email:string})=>user.email)).toEqual(["admin@example.com","manager@example.com","employee@example.com"])
+  expect(delegateEmployeePermissions).not.toHaveBeenCalled()
 })
 /**
  * Builds a delegation request with only workflow-right overrides.

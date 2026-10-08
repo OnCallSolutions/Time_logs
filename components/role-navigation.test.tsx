@@ -54,11 +54,12 @@ it("keeps AI recommendations advisory until a manager confirms",async()=>{
 it("opens technology management and preserves admin approvals and reporting",async()=>{
   testRole = "admin"
   render(<TimesheetApp role="admin" userEmail="admin@example.com" />)
-  await screen.findByRole("heading",{name:"Admin user directory"})
+  await screen.findByRole("button",{name:"User directory"})
   expect(screen.getByRole("button",{name:"Employee access"})).toBeInTheDocument()
   expect(screen.getByRole("button",{name:"AI security reports"})).toBeInTheDocument()
   expect(screen.getByRole("button",{name:/approvals/i})).toBeInTheDocument()
   expect(screen.getByRole("button",{name:"Reports"})).toBeInTheDocument()
+  await userEvent.click(screen.getByRole("button",{name:"Log time notes"}))
   expect(screen.getByText("Note extraction")).toBeInTheDocument()
 })
 it("removes manager approval controls when rights are revoked in an open session",async()=>{

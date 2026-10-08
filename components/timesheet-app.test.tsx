@@ -173,6 +173,7 @@ async function renderAdminPanel() {
   )
 
   await user.click(await screen.findByRole("button", { name: /admin/i }))
+  await user.click(await screen.findByRole("button", { name: "User directory" }))
   await screen.findByRole("heading", { name: /admin user directory/i })
 
   return user

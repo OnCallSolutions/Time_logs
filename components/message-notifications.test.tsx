@@ -26,6 +26,7 @@ it("plays sound only after opt-in and suppresses duplicate alerts",async()=>{
   expect(start).not.toHaveBeenCalled()
   const user=userEvent.setup();await user.click(screen.getByText("Notifications"));await user.click(screen.getByRole("checkbox",{name:/Message sound/}))
   await waitFor(()=>expect(resume).toHaveBeenCalledOnce())
+  await user.click(screen.getByRole("button",{name:"Back"}))
   const received={id:"new",sender_email:"manager@example.com",recipient_email:state.email,body:"Private message content",created_at:new Date().toISOString()}
   rerender(<MessageNotifications inbox={{...state,notification:received}} onOpen={onOpen}/>)
   await waitFor(()=>expect(start).toHaveBeenCalledOnce())

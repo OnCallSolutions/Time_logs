@@ -33,6 +33,10 @@ export function MessagesPanel({canSend,inbox}:{canSend:boolean;inbox?:MessageInb
   const [editing,setEditing] = useState<AppMessage|null>(null)
   const [draft,setDraft] = useState("")
   const [deleting,setDeleting] = useState<AppMessage|null>(null)
+  const [composing,setComposing]=useState(false)
+  const [identitiesOpen,setIdentitiesOpen]=useState(false)
+  const [selectedId,setSelectedId]=useState<string|null>(null)
+  const selected=state.messages.find(message=>message.id===selectedId)
   const [now,setNow] = useState(Date.now())
   const [readIds,setReadIds] = useState<Set<string>>(new Set())
   const operation=useRef(false)
@@ -44,7 +48,7 @@ export function MessagesPanel({canSend,inbox}:{canSend:boolean;inbox?:MessageInb
     if(!canSend)return
     const controller=new AbortController()
     fetch(apiPath("/api/delegation"),{cache:"no-store",signal:controller.signal})
-      .then(async response=>{const data=await response.json();if(!response.ok)throw new Error(data.error);setUsers(data.users)})
+      .then(async response=>{const data=await response.json();if(!response.ok)throw new Error(data.error);setUsers(data.users.filter((user:{role:string;accessStatus:string})=>(user.role==="employee"||user.role==="user")&&user.accessStatus==="active"))})
       .catch(error=>{if(!controller.signal.aborted)setError(error.message)})
     return ()=>controller.abort()
   },[canSend])
@@ -82,7 +86,7 @@ export function MessagesPanel({canSend,inbox}:{canSend:boolean;inbox?:MessageInb
     operation.current=true;setBusy(true);setError(null)
     try{
       const encrypted=await encryption.encrypt(body,recipient||null,[state.email,...(recipient?[recipient]:users.map(user=>user.email))])
-      if(await mutate("POST",{recipient:recipient||null,encrypted}))setBody("")
+      if(await mutate("POST",{recipient:recipient||null,encrypted})){setBody("");setComposing(false)}
     }catch(error){setError(error instanceof Error?error.message:"Unable to encrypt message.")}
     finally{operation.current=false;setBusy(false)}
   }
@@ -107,34 +111,38 @@ export function MessagesPanel({canSend,inbox}:{canSend:boolean;inbox?:MessageInb
         {!encryption.own&&<><label className="text-sm">Confirm recovery passphrase<input type="password" autoComplete="off" minLength={16} required value={confirmation} onChange={event=>setConfirmation(event.target.value)} className="mt-1 block w-full rounded-md border p-2"/></label><p className="text-xs text-muted-foreground">Use at least 16 characters. Keep this separate from your Microsoft password. Losing it means losing access to encrypted messages.</p></>}
         <Button type="submit" className="w-fit" disabled={encryption.busy}>{encryption.busy?"Unlocking...":encryption.own?"Unlock messages":"Set up encryption"}</Button>
       </form>}
-      {encryption.own&&<details className="mt-2 text-xs"><summary className="cursor-pointer font-medium">Encryption identities</summary><p className="my-2 text-muted-foreground">Compare fingerprints with participants using another trusted channel.</p>{encryption.keys.map(key=><p key={key.email} className="mb-2 break-all"><span className="font-medium">{key.email}</span><br/>{key.fingerprint}</p>)}</details>}
+      {encryption.own&&<Button variant="ghost" size="sm" className="mt-2" onClick={()=>setIdentitiesOpen(true)}><LockKeyhole className="size-3"/>Encryption identities</Button>}
     </div>
-    {canSend&&<details className="border-y border-border py-3"><summary className="cursor-pointer text-sm font-medium">New message</summary><div className="grid gap-3 pt-3">
+    {canSend&&<Button variant="outline" size="sm" onClick={()=>setComposing(true)}><Pencil className="size-3"/>New message</Button>}
+    {composing&&<WindowSurface title="New message" onBack={()=>setComposing(false)} disabled={busy}><section className="flex min-h-0 w-full max-w-4xl flex-col bg-white"><h2 className="border-b p-4 font-semibold">New message</h2><div className="grid min-h-0 flex-1 content-start gap-3 overflow-auto p-4">
       <label className="text-sm">Recipient<select value={recipient} disabled={busy} onChange={event=>setRecipient(event.target.value)} className="mt-1 block w-full rounded-md border border-border bg-background p-2"><option value="">All employees</option>{users.map(user=><option key={user.email} value={user.email}>{user.email}</option>)}</select></label>
       <label className="text-sm">Message<textarea value={body} disabled={busy} maxLength={4000} onChange={event=>setBody(event.target.value)} className="mt-1 min-h-28 w-full rounded-md border border-border bg-background p-2"/></label>
       <Button className="w-fit" disabled={busy||!body.trim()||!encryption.unlocked} onClick={send}><Send className="size-4"/>{busy?"Sending...":"Send message"}</Button>
-    </div></details>}
+      {error&&<p role="alert" className="text-sm text-destructive">{error}</p>}
+    </div></section></WindowSurface>}
+    {identitiesOpen&&<WindowSurface title="Encryption identities" onBack={()=>setIdentitiesOpen(false)}><section className="w-full overflow-auto bg-white p-4"><h2 className="font-semibold">Encryption identities</h2><p className="my-3 text-sm text-muted-foreground">Compare fingerprints with participants using another trusted channel.</p><table className="w-full text-left text-sm"><thead><tr className="border-b"><th className="p-2">Actor</th><th className="p-2">Fingerprint</th></tr></thead><tbody>{encryption.keys.map(key=><tr key={key.email} className="border-b"><td className="p-2">{key.email}</td><td className="break-all p-2 font-mono text-xs">{key.fingerprint}</td></tr>)}</tbody></table></section></WindowSurface>}
     {state.loading&&<p role="status" className="text-sm text-muted-foreground">Loading messages...</p>}
     {!state.loading&&!state.messages.length&&<p className="text-sm text-muted-foreground">No messages yet.</p>}
     <div className="max-h-[60dvh] overflow-auto overscroll-contain">{state.messages.map(message=>{
       const own=message.sender_email.toLowerCase()===state.email
       const text=message.encrypted_payload?encryption.plaintext[message.id]??"Encrypted message · unlock to read":message.body
       const editable=(canSend||state.admin)&&(!message.encrypted_payload||!!encryption.plaintext[message.id])&&canEditMessage(message,state.email,state.admin,now)
-      return <details key={message.id} className="border-b border-border py-3" onToggle={event=>{if(event.currentTarget.open)void read(message)}}>
-        <summary className="cursor-pointer break-words text-sm"><span className="font-medium">{message.sender_email} → {message.recipient_email ?? "All employees"}</span><time className="ml-2 text-xs text-muted-foreground">{new Date(message.created_at).toLocaleString()}</time>
+      return <article key={message.id} className="border-b border-border py-3">
+        <button type="button" className="block w-full cursor-pointer break-words text-left text-sm" onClick={()=>{setSelectedId(message.id);void read(message)}}><span className="font-medium">{message.sender_email} → {message.recipient_email ?? "All employees"}</span><time className="ml-2 text-xs text-muted-foreground">{new Date(message.created_at).toLocaleString()}</time>
           {!own&&!message.read_at&&!readIds.has(message.id)&&!message.deleted_at&&<span className="ml-2 inline-block size-2 rounded-full bg-primary" aria-label="Unread message"/>}
           <span className="mt-1 block truncate text-muted-foreground">{message.deleted_at?"Message deleted":text.slice(0,120)}</span>
           {!message.deleted_at&&<span className="text-xs text-muted-foreground">{message.encrypted_payload?"End-to-end encrypted · ":"Legacy plaintext message · "}</span>}
           {message.edited_at&&!message.deleted_at&&<span className="text-xs text-muted-foreground">Edited{message.encrypted_payload?.author!==message.sender_email&&message.encrypted_payload?.author?` by ${message.encrypted_payload.author}`:""} · </span>}
           {own&&!message.deleted_at&&<span className="inline-flex items-center gap-1 text-xs text-muted-foreground">{message.read_at||message.read_count ? <CheckCheck className="size-3 text-primary"/> : message.delivered_at||message.delivered_count ? <CheckCheck className="size-3"/> : <Check className="size-3"/>}{message.recipient_email ? message.read_at?"Read":message.delivered_at?"Delivered":"Sent" : `Sent · Delivered to ${message.delivered_count??0} · Read by ${message.read_count??0}`}</span>}
-        </summary>
-        <p className="mt-2 whitespace-pre-wrap break-words text-sm">{message.deleted_at?"Message deleted":text}</p>
-        {!message.deleted_at&&<div className="mt-2 flex flex-wrap gap-2">
+        </button>
+        {selected?.id===message.id&&<WindowSurface title="Message detail" onBack={()=>setSelectedId(null)}><section className="flex min-h-0 w-full max-w-4xl flex-col bg-white"><header className="border-b p-4"><h2 className="font-semibold">Message detail</h2><p className="text-sm text-muted-foreground">{message.sender_email} → {message.recipient_email??"All employees"}</p></header><div className="min-h-0 flex-1 overflow-auto p-4"><p className="whitespace-pre-wrap break-words text-sm">{message.deleted_at?"Message deleted":text}</p>
+        {!message.deleted_at&&<div className="mt-4 flex flex-wrap gap-2">
           {editable&&<Button variant="outline" size="sm" onClick={()=>{setEditing(message);setDraft(text)}}><Pencil className="size-3"/>Edit message</Button>}
           {(state.admin||(own&&canSend))&&<Button variant="outline" size="sm" onClick={()=>setDeleting(message)}><Trash2 className="size-3"/>Delete message</Button>}
           {own&&!state.admin&&!editable&&<p className="text-xs text-muted-foreground">Editing closed after {MESSAGE_EDIT_MINUTES} minutes.</p>}
         </div>}
-      </details>
+        </div></section></WindowSurface>}
+      </article>
     })}</div>
     {editing&&<WindowSurface title="Edit message" onBack={()=>setEditing(null)} disabled={busy}><section className="flex min-h-0 w-full max-w-3xl flex-col bg-white">
       <h2 className="border-b p-4 font-semibold">Edit message</h2><div className="min-h-0 flex-1 overflow-auto p-4"><label className="text-sm">Message<textarea className="mt-2 min-h-40 w-full rounded-md border p-3" value={draft} maxLength={4000} disabled={busy} onChange={event=>setDraft(event.target.value)}/></label>{error&&<p role="alert" className="text-sm text-destructive">{error}</p>}</div>
