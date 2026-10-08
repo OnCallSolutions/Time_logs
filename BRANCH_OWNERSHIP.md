@@ -8,13 +8,13 @@
 
 - `audit_logging_security`: employee administration, audit capture, white admin activity views, and event details. IP addresses appear only in selected event details.
 - `security`: builds on the admin branch; advisory AI assessments and future server-side cybersecurity controls. Assessments never automatically grant, revoke, or block access.
-- `Per_user_entries`: employee time-entry ownership and business workflows.
+- `Per_user_entries` was retired after its commits were preserved in the three role branches. New feature work belongs in `employee`, `manager`, or `admin`.
 - `ui_widescreen_layout`: shared appearance and responsive layout.
 - `testing_framework`: external testing tools and automation.
 - `main`: reviewed releases.
 - `Development`: integrated UI, employee workflows, administration, security monitoring, and testing tools.
 
-Keep feature-specific work on its owning branch, then integrate it into `Development`. Synchronize active feature branches with `Development` when they need shared changes. The remote rebrand branch is excluded so the application remains at `/timelog`.
+The supporting audit, security, UI, and testing branches are retained history; use the three role branches for new feature changes, then integrate into `Development`. Synchronize active feature branches with `Development` when they need shared changes. The remote rebrand branch is excluded so the application remains at `/timelog`.
 
 # Storage and Configuration
 
