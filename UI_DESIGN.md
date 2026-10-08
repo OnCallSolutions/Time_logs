@@ -10,6 +10,8 @@ The parent organization's visual reference is [devoncall.net](https://www.devonc
 - Keep success, warning, error, and chart colors distinct from brand colors.
 - Prefer shared CSS tokens and Button variants over hard-coded accent classes.
 - White technology-management dialogs use `tech-surface` to stay readable in dark system themes. Authentication uses `auth-surface` for the same reason.
+- The root document explicitly uses the light brand theme, regardless of operating-system preference. All pages share a subtle neutral grid and orange top rule; forms and popovers remain solid white.
+- Admin overview, workflow counts, directory totals, recent audit activity, message composition, and read-only employee rights are expandable. Messages show compact previews; expanding reveals the full body. Editing rights still requires explicit Edit and Save.
 
 ## Working Layouts
 

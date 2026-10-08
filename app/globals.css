@@ -56,12 +56,12 @@
 
 :root {
   color-scheme: light;
-  --background: oklch(0.985 0.002 250);
+  --background: #fafafa;
   --foreground: #050720;
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.21 0.02 260);
+  --card-foreground: #050720;
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.21 0.02 260);
+  --popover-foreground: #050720;
   --primary: #c2410c;
   --primary-foreground: oklch(0.99 0 0);
   --secondary: oklch(0.96 0.006 250);
@@ -168,6 +168,20 @@
   }
   body {
     @apply bg-background text-foreground;
+    background-image: linear-gradient(#e4e6eb33 1px, transparent 1px), linear-gradient(90deg, #e4e6eb33 1px, transparent 1px);
+    background-size: 40px 40px;
+    border-top: 3px solid #f97316;
+    overflow-wrap: anywhere;
+  }
+  summary {
+    border-radius: 4px;
+  }
+  summary:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 4px;
+  }
+  details[open] > summary {
+    color: var(--primary);
   }
   input[type='checkbox'], input[type='radio'] {
     accent-color: var(--primary);
@@ -176,6 +190,15 @@
 
 /* Keeps the provider form readable in either system theme, matching DevOnCall. */
 .auth-surface, .tech-surface {
+  --background: #fafafa;
+  --card: #ffffff;
+  --card-foreground: #050720;
+  --popover: #ffffff;
+  --popover-foreground: #050720;
+  --secondary: #f3f4f6;
+  --secondary-foreground: #050720;
+  --muted: #f3f4f6;
+  --input: #e4e6eb;
   --foreground: #050720;
   --muted-foreground: #525866;
   --border: #e4e6eb;
@@ -192,7 +215,6 @@
   background-color: #fafafa;
   background-image: linear-gradient(#e4e6eb55 1px, transparent 1px), linear-gradient(90deg, #e4e6eb55 1px, transparent 1px);
   background-size: 40px 40px;
-  border-top: 3px solid #f97316;
 }
 
 @media (prefers-color-scheme: dark) {
