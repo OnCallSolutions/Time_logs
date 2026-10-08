@@ -181,7 +181,7 @@ export function ManagerReport({ entries }: { entries: TimeEntry[] }) {
   return (
     <div className="flex flex-col gap-4">
       {/* Filters */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card p-4 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-y border-border bg-card p-4">
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2">
             <label htmlFor="f-contractor" className="text-xs text-muted-foreground">
@@ -279,7 +279,7 @@ export function ManagerReport({ entries }: { entries: TimeEntry[] }) {
       </div>
 
       {/* Per-contractor summary */}
-      <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
+      <div className="border-y border-border bg-card p-4">
         <h3 className="mb-3 text-sm font-semibold">Hours by contractor</h3>
         <ul className="flex flex-col gap-3">
           {byContractor.map((c) => (
@@ -306,7 +306,7 @@ export function ManagerReport({ entries }: { entries: TimeEntry[] }) {
       </div>
 
       {/* Detail table */}
-      <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+      <div className="overflow-hidden border-y border-border bg-card">
         <div className="border-b border-border px-4 py-3">
           <h3 className="text-sm font-semibold">Detailed entries</h3>
           <p className="text-xs text-muted-foreground">

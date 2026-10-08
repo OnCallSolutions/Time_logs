@@ -6,9 +6,8 @@
  * The form submits directly to the server action so sign-out works without adding
  * client-side auth logic to pages that only need a simple control.
  */
-import { LogOut } from "lucide-react"
 import { signOutAction } from "@/app/actions"
-import { Button } from "@/components/ui/button"
+import { AuthSubmitButton } from "@/components/auth-submit-button"
 
 /**
  * Renders the server-backed sign-out control.
@@ -20,11 +19,8 @@ import { Button } from "@/components/ui/button"
  */
 export function SignOutButton() {
   return (
-    <form action={signOutAction}>
-      <Button type="submit" variant="outline" size="sm">
-        <LogOut className="size-3.5" aria-hidden="true" />
-        Sign out
-      </Button>
+    <form action={signOutAction} className="shrink-0">
+      <AuthSubmitButton mode="signout" />
     </form>
   )
 }

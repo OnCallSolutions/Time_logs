@@ -74,7 +74,7 @@ export function NoteInput({
   }
 
   return (
-    <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
+    <section className="border-y border-border bg-card px-1 py-5 sm:px-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <span className="flex size-7 items-center justify-center rounded-md bg-accent text-accent-foreground">

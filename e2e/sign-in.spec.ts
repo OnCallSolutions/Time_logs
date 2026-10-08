@@ -13,7 +13,7 @@ test("shows the Microsoft sign-in entry point", async ({ page }) => {
   await page.goto(targetUrl)
 
   await expect(
-    page.getByRole("heading", { name: /sign in to manage contractor hours/i }),
+    page.getByRole("heading", { name: /sign in to devoncall/i }),
   ).toBeVisible()
   await expect(
     page.getByRole("button", { name: /sign in with microsoft/i }),

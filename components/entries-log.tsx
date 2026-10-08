@@ -142,7 +142,7 @@ export function EntriesLog({
   const total = visibleEntries.reduce((sum, e) => sum + (Number(e.hours) || 0), 0)
 
   return (
-    <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+    <div className="overflow-hidden border-y border-border bg-card">
       {review && <EntryReviewDialog entry={review.entry} decision={review.decision} onCancel={() => setReview(null)} onConfirm={note => {
         onStatusChange(review.entry.id, review.decision, note || undefined)
         setReview(null)

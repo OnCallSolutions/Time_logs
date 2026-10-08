@@ -36,7 +36,7 @@ export function SecurityRiskWindow({ onClose }: { onClose: () => void }) {
     return () => controller.abort()
   }, [])
   return <div ref={dialogRef} tabIndex={-1} className="fixed inset-0 z-[60] bg-black/50 p-4" role="dialog" aria-modal="true" aria-label="Security risks">
-    <section className="mx-auto max-h-[90svh] max-w-5xl overflow-auto rounded-lg bg-white p-6 text-black">
+    <section className="tech-surface mx-auto max-h-[90svh] max-w-5xl overflow-auto rounded-lg bg-white p-6 text-black">
       <div className="flex items-center justify-between"><h2 className="text-lg font-semibold">Security risks</h2>
         <button autoFocus onClick={onClose} title="Close security risks" aria-label="Close security risks"><X /></button></div>
       {loading && <p role="status">Loading reports...</p>}
@@ -48,7 +48,7 @@ export function SecurityRiskWindow({ onClose }: { onClose: () => void }) {
         <p className="text-sm">Completed: {report.completed_at ? new Date(report.completed_at).toLocaleString() : "Pending"}</p>
         {report.status === "failed" && <p className="text-red-700">Monitoring failed. Review service configuration.</p>}
         <p>{report.assessment?.summary}</p>
-        {report.assessment?.findings.map((finding,index) => <div key={index} className="mt-3 border-l-2 border-blue-600 pl-3">
+        {report.assessment?.findings.map((finding,index) => <div key={index} className="mt-3 border-l-2 border-primary pl-3">
           <p>{finding.explanation}</p><p>{finding.recommendation}</p><p className="break-all text-xs">Evidence: {finding.eventIds.join(", ")}</p>
         </div>)}
       </article>)}

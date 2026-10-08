@@ -9,6 +9,7 @@
  * the permissions enforced by the API routes.
  */
 import { useEffect, useState } from "react"
+import { Brand } from "@/components/brand"
 import { EmployeeWorkspace } from "@/components/employee-workspace"
 import { EmployeeRightsPanel, MessagesPanel } from "@/components/collaboration-panel"
 import { notifyPermissionsChanged } from "@/lib/permission-events"
@@ -428,15 +429,10 @@ export function TimesheetApp({
   ]
 
   return (
-    <main className="mx-auto flex min-h-svh w-full max-w-[1600px] flex-col gap-6 px-4 py-8 md:px-8 md:py-12">
-      <header className="flex flex-col gap-1">
+    <main className="mx-auto flex min-h-svh w-full max-w-[1600px] flex-col gap-5 px-4 py-5 md:px-8 md:py-7">
+      <header className="flex flex-col gap-3 border-b border-border pb-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="flex items-center gap-2 text-primary">
-            <Clock3 className="size-5" aria-hidden="true" />
-            <span className="text-xs font-semibold uppercase tracking-widest">
-              Timesheet
-            </span>
-          </div>
+          <Brand />
           <div className="flex min-w-0 items-center justify-end gap-3">
             <AccountProfile
               email={userEmail}
@@ -446,14 +442,9 @@ export function TimesheetApp({
             <SignOutButton />
           </div>
         </div>
-        <h1 className="text-2xl font-semibold tracking-tight text-balance md:text-3xl">
-          Contractor hours, from messy notes to a manager report
+        <h1 className="text-2xl font-semibold text-balance">
+          {role === "admin" ? "Technology management" : role === "manager" ? "Team workspace" : "My timesheet"}
         </h1>
-        <p className="max-w-2xl text-sm text-muted-foreground text-pretty">
-          Paste time-worked notes in any format. AI extracts structured entries you
-          can review and edit, then rolls them into a clean report of hours per
-          contractor.
-        </p>
       </header>
 
       <RoleOverview role={role} />
@@ -468,7 +459,10 @@ export function TimesheetApp({
         role={role}
       />
 
-      {permissions.create_entries && <NoteInput onParsed={addParsed} />}
+      {permissions.create_entries && <details open={role === "employee" || role === "user"} className="border-y border-border bg-card">
+        <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-primary focus-visible:outline-2 focus-visible:outline-primary">Log time notes</summary>
+        <NoteInput onParsed={addParsed} />
+      </details>}
       {(role === "employee" || role === "user") && <EmployeeWorkspace entries={entries} selected={personalStatus} onSelect={setPersonalStatus} />}
       {!accessDenied && (canReviewEntries || permissions.ai_review || canViewTeamReports) && <ManagerWorkspace canReview={canReviewEntries} canReports={canViewTeamReports} canAI={permissions.ai_review} pending={pendingEntries.length} entries={pendingEntries} onApprovals={() => setView("approvals")} onReports={() => setView("report")} onRecommendation={(entry,decision,reason) => setSuggestedReview({entry,decision,reason})} />}
       {suggestedReview && <EntryReviewDialog entry={suggestedReview.entry} decision={suggestedReview.decision} initialNote={suggestedReview.reason} onCancel={() => setSuggestedReview(null)} onConfirm={note => {
@@ -491,16 +485,16 @@ export function TimesheetApp({
       )}
 
       {/* View switch */}
-      <div aria-label="Workspace views" className="sticky top-0 z-10 grid grid-cols-2 gap-1 rounded-lg border border-border bg-card p-1 shadow-sm sm:flex sm:items-center">
+      <div aria-label="Workspace views" className="sticky top-0 z-10 grid grid-cols-2 gap-1 border-y border-border bg-card p-1 sm:flex sm:flex-wrap sm:items-center">
         {tabs.map(({ key, label, icon: Icon }) => (
           <button
             key={key}
             type="button"
             onClick={() => setView(key)}
             aria-pressed={view === key}
-            className={`flex min-w-0 flex-1 items-center justify-center gap-2 rounded-md px-2 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+            className={`flex min-h-11 min-w-0 flex-1 items-center justify-center gap-2 rounded-md px-2 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
               view === key
-                ? "bg-primary text-primary-foreground"
+                ? "bg-accent text-primary ring-1 ring-primary/20"
                 : "text-muted-foreground hover:bg-muted hover:text-foreground"
             }`}
           >
@@ -510,7 +504,7 @@ export function TimesheetApp({
               <span
                 className={`ml-1 rounded-full px-1.5 text-xs tabular-nums ${
                   view === key
-                    ? "bg-primary-foreground/20"
+                    ? "bg-primary/10"
                     : "bg-muted-foreground/15"
                 }`}
               >
@@ -521,7 +515,7 @@ export function TimesheetApp({
               <span
                 className={`ml-1 rounded-full px-1.5 text-xs tabular-nums ${
                   view === key
-                    ? "bg-primary-foreground/20"
+                    ? "bg-primary/10"
                     : "bg-muted-foreground/15"
                 }`}
               >
@@ -597,7 +591,7 @@ export function TimesheetApp({
       <footer className="mt-auto pt-4 text-center text-xs text-muted-foreground">
         {entries.length} entries ·{" "}
         {totalHours.toLocaleString(undefined, { maximumFractionDigits: 2 })}h logged
-        this session · {approvedEntries.length} approved · data is saved to Neon
+        total · {approvedEntries.length} approved
       </footer>
     </main>
   )
@@ -635,7 +629,7 @@ function RoleOverview({ role }: { role: UserRole }) {
   }[role]
 
   return (
-    <section className="rounded-lg border border-border bg-card px-4 py-3 shadow-sm">
+    <section className="border-l-2 border-primary bg-card px-4 py-2">
       <p className="text-sm font-medium">{content.title}</p>
       <p className="mt-1 text-xs text-muted-foreground">{content.body}</p>
     </section>
@@ -686,7 +680,7 @@ function WorkflowOverview({
       {items.map(({ label, value, icon: Icon }) => (
         <div
           key={label}
-          className="rounded-lg border border-border bg-card px-3 py-3 shadow-sm"
+          className="border-b border-border bg-card px-3 py-3"
         >
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Icon className="size-3.5" aria-hidden="true" />
@@ -979,11 +973,11 @@ function AdminPanel({ role }: { role: UserRole }) {
   const activityEvents = allActivityEvents.length > 0 ? allActivityEvents : auditEvents
 
   return (
-    <div className="flex flex-col gap-4 rounded-xl bg-white p-3 text-slate-950 shadow-sm">
-      <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+    <div className="tech-surface flex flex-col gap-4 bg-white text-slate-950">
+      <section className="overflow-hidden border-y border-slate-200 bg-white">
         <div className="border-b border-slate-200 bg-white px-4 py-3">
         <div className="flex items-center gap-2">
-          <ShieldCheck className="size-4 text-blue-700" aria-hidden="true" />
+          <ShieldCheck className="size-4 text-primary" aria-hidden="true" />
           <h2 className="text-sm font-semibold">Admin user directory</h2>
         </div>
         <p className="mt-1 text-xs text-slate-600">
@@ -1008,7 +1002,7 @@ function AdminPanel({ role }: { role: UserRole }) {
           </div>
           <Button
             type="button"
-            className="w-fit bg-blue-700 text-white hover:bg-blue-800"
+            className="w-fit bg-primary text-white hover:bg-primary/90"
             onClick={openAddUserEditor}
           >
             <UserPlus className="size-4" aria-hidden="true" />
@@ -1120,12 +1114,12 @@ function AdminPanel({ role }: { role: UserRole }) {
       )}
       </section>
 
-      <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      <section className="overflow-hidden border-y border-slate-200 bg-white">
         <div className="border-b border-slate-200 bg-white px-4 py-3">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <div className="flex items-center gap-2">
-                <ShieldCheck className="size-4 text-blue-700" aria-hidden="true" />
+                <ShieldCheck className="size-4 text-primary" aria-hidden="true" />
                 <h2 className="text-sm font-semibold">Security audit log</h2>
               </div>
               <p className="mt-1 text-xs text-slate-600">
@@ -1271,12 +1265,12 @@ function AdminUserAccessEditor({
         aria-label={title}
         aria-modal="true"
         role="dialog"
-        className="flex max-h-[calc(100dvh-1.5rem)] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-slate-200 bg-white text-slate-950 shadow-2xl sm:max-h-[calc(100dvh-3rem)]"
+        className="tech-surface flex max-h-[calc(100dvh-1.5rem)] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-slate-200 bg-white text-slate-950 shadow-2xl sm:max-h-[calc(100dvh-3rem)]"
       >
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 bg-white px-4 py-3">
           <div>
             <div className="flex items-center gap-2">
-              <Users className="size-4 text-blue-700" aria-hidden="true" />
+              <Users className="size-4 text-primary" aria-hidden="true" />
               <h2 className="text-base font-semibold">{title}</h2>
             </div>
             <p className="mt-1 text-xs text-slate-600">
@@ -1309,7 +1303,7 @@ function AdminUserAccessEditor({
               }
               placeholder="employee@company.com"
               disabled={editor.mode === "edit" || saving}
-              className="mt-1 h-9 w-full rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-950 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-100 disabled:text-slate-500"
+              className="mt-1 h-9 w-full rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-950 outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:bg-slate-100 disabled:text-slate-500"
             />
           </label>
 
@@ -1324,7 +1318,7 @@ function AdminUserAccessEditor({
                   disabled={saving}
                   className={`rounded-md border px-3 py-2 text-sm font-medium capitalize transition ${
                     editor.role === roleOption
-                      ? "border-blue-700 bg-blue-700 text-white"
+                      ? "border-primary bg-primary text-white"
                       : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
                   }`}
                 >
@@ -1372,7 +1366,7 @@ function AdminUserAccessEditor({
               placeholder="Optional reason for this role or permission change"
               maxLength={500}
               disabled={saving}
-              className="mt-1 min-h-24 w-full resize-y rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-100 disabled:text-slate-500"
+              className="mt-1 min-h-24 w-full resize-y rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:bg-slate-100 disabled:text-slate-500"
             />
           </label>
 
@@ -1403,7 +1397,7 @@ function AdminUserAccessEditor({
           </Button>
           <Button
             type="button"
-            className="bg-blue-700 text-white hover:bg-blue-800"
+            className="bg-primary text-white hover:bg-primary/90"
             onClick={onSave}
             disabled={saving || !editor.email.trim()}
           >
@@ -1451,11 +1445,11 @@ function AdminActivityWindow({
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/60 p-3 sm:p-6">
-      <section ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="All app activity" className={`mx-auto flex h-[calc(100dvh-1.5rem)] min-h-0 max-h-[calc(100dvh-1.5rem)] max-w-full flex-col overflow-hidden rounded-lg border border-slate-200 bg-white text-slate-950 shadow-2xl sm:h-[80dvh] sm:min-h-80 sm:min-w-[min(640px,calc(100vw-3rem))] sm:max-h-[calc(100dvh-3rem)] ${expanded ? "w-full sm:!h-[calc(100dvh-3rem)]" : "w-full sm:w-[90%] sm:max-w-7xl sm:resize"}`}>
+      <section ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="All app activity" className={`tech-surface mx-auto flex h-[calc(100dvh-1.5rem)] min-h-0 max-h-[calc(100dvh-1.5rem)] max-w-full flex-col overflow-hidden rounded-lg border border-slate-200 bg-white text-slate-950 shadow-2xl sm:h-[80dvh] sm:min-h-80 sm:min-w-[min(640px,calc(100vw-3rem))] sm:max-h-[calc(100dvh-3rem)] ${expanded ? "w-full sm:!h-[calc(100dvh-3rem)]" : "w-full sm:w-[90%] sm:max-w-7xl sm:resize"}`}>
         <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 bg-white px-4 py-3">
           <div>
             <div className="flex items-center gap-2">
-              <Activity className="size-4 text-blue-700" aria-hidden="true" />
+              <Activity className="size-4 text-primary" aria-hidden="true" />
               <h2 className="text-base font-semibold">All app activity</h2>
               <Button variant="outline" onClick={() => setShowSecurity(true)}>Security risks</Button>
               <Button variant="outline" size="icon-sm" title={expanded ? "Restore window" : "Expand window"} aria-label={expanded ? "Restore window" : "Expand window"} onClick={() => setExpanded(!expanded)}>
@@ -1516,8 +1510,8 @@ function AdminActivityWindow({
                 {events.map((event) => (
                   <tr
                     key={event.id}
-                    className={`cursor-pointer border-b border-slate-200 align-top outline-none last:border-0 hover:bg-blue-50 focus:bg-blue-50 ${
-                      selectedEvent?.id === event.id ? "bg-blue-50" : ""
+                    className={`cursor-pointer border-b border-slate-200 align-top outline-none last:border-0 hover:bg-accent focus:bg-accent ${
+                      selectedEvent?.id === event.id ? "bg-accent" : ""
                     }`}
                     tabIndex={0}
                     onClick={() => setSelectedEvent(event)}
