@@ -61,7 +61,7 @@ type DirectoryUser = {
 }
 
 const accessUpdateSchema = z.object({
-  permissions: z.record(z.enum(Object.keys(permissionLabels) as [keyof typeof permissionLabels, ...(keyof typeof permissionLabels)[]]), z.boolean()).optional(),
+  permissions: z.partialRecord(z.enum(Object.keys(permissionLabels) as [keyof typeof permissionLabels, ...(keyof typeof permissionLabels)[]]), z.boolean()).optional(),
   email: z.string().trim().email(),
   role: z.enum(["admin", "manager", "employee", "user"]),
   accessStatus: z.enum(["active", "denied", "blocked"]).default("active"),
@@ -291,10 +291,16 @@ async function saveManagedAccess(req: Request) {
 
     return Response.json({ user })
   } catch (err) {
+    if (err instanceof z.ZodError) {
+      return Response.json(
+        { error: "Invalid access settings. Use valid roles, permission names, and boolean permission values." },
+        { status: 400 },
+      )
+    }
     console.error("[users] access save failed")
     return Response.json(
       { error: "Failed to save user access." },
-      { status: 400 },
+      { status: 500 },
     )
   }
 }
