@@ -447,10 +447,15 @@ export function TimesheetApp({
         </h1>
       </header>
 
-      <RoleOverview role={role} />
+      <details open={role !== "admin"} className="border-b border-border pb-2">
+        <summary className="cursor-pointer text-sm font-medium">Workspace overview</summary>
+        <RoleOverview role={role} />
+      </details>
       {canViewAdmin && <AdminWorkspace onDirectory={() => setView("admin")} onSecurity={() => setTechnologyReports(true)} />}
       {canViewAdmin && technologyReports && <SecurityRiskWindow onClose={() => setTechnologyReports(false)} />}
 
+      <details open={role !== "admin"} className="border-b border-border pb-2">
+      <summary className="cursor-pointer text-sm font-medium">Workflow totals</summary>
       <WorkflowOverview
         approvedCount={approvedEntries.length}
         draftCount={draftEntries.length}
@@ -459,6 +464,7 @@ export function TimesheetApp({
         role={role}
       />
 
+      </details>
       {permissions.create_entries && <details open={role === "employee" || role === "user"} className="border-y border-border bg-card">
         <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-primary focus-visible:outline-2 focus-visible:outline-primary">Log time notes</summary>
         <NoteInput onParsed={addParsed} />
@@ -986,19 +992,17 @@ function AdminPanel({ role }: { role: UserRole }) {
         </p>
       </div>
 
-        <div className="grid grid-cols-1 gap-3 border-b border-slate-200 bg-white p-4 sm:grid-cols-3">
+        <details className="border-b border-slate-200 px-4 py-2"><summary className="cursor-pointer text-xs font-medium">Directory totals ({users.length} users)</summary>
+        <div className="grid grid-cols-1 gap-3 bg-white py-2 sm:grid-cols-3">
         <AdminStat icon={Users} label="Directory users" value={users.length} />
         <AdminStat icon={ShieldCheck} label="Configured access" value={configuredCount} />
         <AdminStat icon={CheckCircle2} label="Awaiting review" value={submittedCount} />
         </div>
+        </details>
 
         <div className="flex flex-col gap-3 border-b border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h3 className="text-sm font-semibold">Managed role and permission changes</h3>
-            <p className="mt-1 text-xs text-slate-600">
-              Use Add employee or Edit to open the access window. Role and
-              permission changes are saved only after the Save button is clicked.
-            </p>
+            <h3 className="text-sm font-semibold">Employee access</h3>
           </div>
           <Button
             type="button"
@@ -1159,7 +1163,8 @@ function AdminPanel({ role }: { role: UserRole }) {
           </p>
         </div>
       ) : (
-        <div className="overflow-x-auto">
+        <details className="px-4 py-2"><summary className="cursor-pointer text-sm font-medium">Recent activity ({auditEvents.length})</summary>
+        <div className="max-h-[40dvh] overflow-auto overscroll-contain">
           <table className="w-full border-collapse text-left text-sm">
             <thead>
               <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
@@ -1194,7 +1199,7 @@ function AdminPanel({ role }: { role: UserRole }) {
               ))}
             </tbody>
           </table>
-        </div>
+        </div></details>
       )}
       </section>
 
