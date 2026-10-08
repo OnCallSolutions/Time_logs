@@ -71,15 +71,15 @@ export function MessagesPanel({canSend}:{canSend:boolean}) {
   return <section aria-label="Messages" className="space-y-4">
     <div className="flex items-center justify-between"><h2 className="text-base font-semibold">Messages</h2><Button size="icon-sm" variant="outline" title="Refresh inbox" aria-label="Refresh inbox" onClick={()=>setRefresh(value=>value+1)}><RefreshCw className="size-4"/></Button></div>
     {(error||rosterError)&&<p role="alert" className="text-sm text-destructive">{error||rosterError}</p>}
-    {canSend&&<div className="grid gap-3 border-y border-border py-4">
+    {canSend&&<details className="border-y border-border py-3"><summary className="cursor-pointer text-sm font-medium">New message</summary><div className="grid gap-3 pt-3">
       <label className="text-sm">Recipient<select value={recipient} disabled={sending} onChange={event=>setRecipient(event.target.value)} className="mt-1 block w-full rounded-md border border-border bg-background p-2"><option value="">All employees</option>{users.map(user=><option key={user.email} value={user.email}>{user.email}</option>)}</select></label>
       <label className="text-sm">Message<textarea value={body} disabled={sending} maxLength={4000} onChange={event=>setBody(event.target.value)} className="mt-1 min-h-28 w-full rounded-md border border-border bg-background p-2"/></label>
       <Button className="w-fit" disabled={sending||!body.trim()} onClick={send}><Send className="size-4"/>{sending?"Sending...":"Send message"}</Button>
-    </div>}
+    </div></details>}
     {!messages.length&&<p className="text-sm text-muted-foreground">No messages yet.</p>}
-    <div className="max-h-[60dvh] overflow-auto overscroll-contain">{messages.map(message=><article key={message.id} className="border-b border-border py-4">
-      <p className="break-words text-sm font-medium">{message.sender_email} → {message.recipient_email ?? "All employees"}</p><time className="text-xs text-muted-foreground">{new Date(message.created_at).toLocaleString()}</time><p className="mt-2 whitespace-pre-wrap break-words text-sm">{message.body}</p>
-    </article>)}</div>
+    <div className="max-h-[60dvh] overflow-auto overscroll-contain">{messages.map(message=><details key={message.id} className="border-b border-border py-3">
+      <summary className="cursor-pointer break-words text-sm"><span className="font-medium">{message.sender_email} → {message.recipient_email ?? "All employees"}</span><time className="ml-2 text-xs text-muted-foreground">{new Date(message.created_at).toLocaleString()}</time><span className="mt-1 block truncate text-muted-foreground">{message.body.slice(0,120)}</span></summary><p className="mt-2 whitespace-pre-wrap break-words text-sm">{message.body}</p>
+    </details>)}</div>
   </section>
 }
 
@@ -113,7 +113,8 @@ export function EmployeeRightsPanel({permissions}:{permissions:Permissions}) {
     {(error||rosterError)&&<p role="alert" className="text-sm text-destructive">{error||rosterError}</p>}
     <label className="block text-sm">Employee<select value={email} disabled={editing} onChange={event=>setEmail(event.target.value)} className="mt-1 block w-full rounded-md border border-border bg-background p-2"><option value="">Select employee</option>{users.map(user=><option key={user.email} value={user.email}>{user.email}</option>)}</select></label>
     <Button variant="outline" disabled={!selected||editing} onClick={()=>{setDraft({...selected!.permissions});setEditing(true)}}><Pencil className="size-4"/>Edit rights</Button>
-    {selected&&<fieldset className="grid gap-3">{(Object.entries(permissionLabels) as [Permission,string][]).filter(([key])=>key!=="delegate_permissions"&&key!=="send_messages").map(([key,label])=><label key={key} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={editing?!!draft[key]:selected.permissions[key]} disabled={!editing||saving||(!permissions[key]&&!draft[key])} onChange={event=>setDraft({...draft,[key]:event.target.checked})}/>{label}</label>)}</fieldset>}
+    {selected&&!editing&&<details className="border-y border-border py-2"><summary className="cursor-pointer text-sm font-medium">Current rights</summary><ul className="grid gap-1 pt-2 text-sm">{(Object.entries(permissionLabels) as [Permission,string][]).filter(([key])=>selected.permissions[key]).map(([key,label])=><li key={key}>{label}</li>)}</ul></details>}
+    {selected&&editing&&<fieldset className="grid gap-3 sm:grid-cols-2">{(Object.entries(permissionLabels) as [Permission,string][]).filter(([key])=>key!=="delegate_permissions"&&key!=="send_messages").map(([key,label])=><label key={key} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!draft[key]} disabled={saving||(!permissions[key]&&!draft[key])} onChange={event=>setDraft({...draft,[key]:event.target.checked})}/>{label}</label>)}</fieldset>}
     {editing&&<div className="flex gap-2"><Button variant="outline" disabled={saving} onClick={()=>setEditing(false)}>Cancel</Button><Button disabled={saving} onClick={save}><Save className="size-4"/>{saving?"Saving...":"Save rights"}</Button></div>}
   </section>
 }
