@@ -24,3 +24,10 @@ it("does not approve selected records until the confirmation command",async()=>{
   await user.click(screen.getByRole("button",{name:"Confirm 1 approvals"}))
   await waitFor(()=>expect(updated).toHaveBeenCalledWith(expect.objectContaining({status:"approved"})))
 })
+it("selects only visible eligible rows after searching",async()=>{
+  render(<ApprovalSelection entries={[entry,{...entry,id:"other",contractor:"Other supplier"}]} email="manager@example.com" canReview canAI onUpdated={()=>{}}/>);const user=userEvent.setup()
+  await user.type(screen.getByRole("textbox",{name:"Search review queue"}),"Other")
+  expect(screen.queryByRole("checkbox",{name:"Select Supplier 2026-10-09"})).not.toBeInTheDocument()
+  await user.click(screen.getByRole("button",{name:"Select all eligible (up to 50)"}))
+  expect(screen.getByRole("button",{name:"Review selected (1)"})).toBeEnabled()
+})

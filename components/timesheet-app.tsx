@@ -276,12 +276,12 @@ export function TimesheetApp({
   useEffect(() => {
     if (!permissionsLoaded) return
     if (view === "report" && !canViewTeamReports) setView("log")
-    if (view === "approvals" && !canReviewEntries) setView("log")
+    if (view === "approvals" && !canReviewEntries && !permissions.ai_review) setView("log")
     if (view === "admin" && !canViewAdmin) setView("log")
     if (view === "permissions" && (!permissions.delegate_permissions || (role !== "admin" && role !== "manager"))) setView("log")
     if (accessDenied && view === "messages") setView("log")
     if(view==="accounts"&&(accessDenied||!((permissions.send_to_accounts&&(role==="admin"||role==="manager"))||(permissions.view_accounts&&(role==="admin"||role==="account_manager")))))setView("log")
-  }, [canReviewEntries, canViewAdmin, canViewTeamReports, view,permissionsLoaded,permissions.delegate_permissions,permissions.send_to_accounts,permissions.view_accounts,role,accessDenied])
+  }, [canReviewEntries, canViewAdmin, canViewTeamReports, view,permissionsLoaded,permissions.ai_review,permissions.delegate_permissions,permissions.send_to_accounts,permissions.view_accounts,role,accessDenied])
 
   /**
    * Persists newly parsed entries and prepends them to the local view.
@@ -408,6 +408,10 @@ export function TimesheetApp({
       .then(async (res) => {
         const data = await res.json()
         if (!res.ok) throw new Error(data.error ?? "Failed to clear entries.")
+        const refresh = await fetch(apiPath("/api/entries"), { cache: "no-store" })
+        const current = await refresh.json()
+        if (!refresh.ok) throw new Error(current.error ?? "Unable to refresh entries after clearing.")
+        setEntries(current.entries ?? [])
         setSyncError(null)
       })
       .catch((err) => {
@@ -432,8 +436,8 @@ export function TimesheetApp({
       label: permissions.view_team ? "Team entries" : "My entries",
       icon: ListChecks,
     },
-    ...(canReviewEntries
-      ? [{ key: "approvals" as const, label: "Approvals", icon: CheckCircle2 }]
+    ...(canReviewEntries || ((role==="manager"||role==="admin")&&permissions.ai_review)
+      ? [{ key: "approvals" as const, label: canReviewEntries?"Approvals":"AI review", icon: CheckCircle2 }]
       : []),
     ...(canViewTeamReports
       ? [{ key: "report" as const, label: "Reports", icon: BarChart3 }]
@@ -491,7 +495,7 @@ export function TimesheetApp({
         setSuggestedReview(null)
       }} />}
       {accessDenied && <p role="alert">Access is unavailable. Contact your administrator.</p>}
-      {!accessDenied&&(role==="manager"||role==="admin")&&(canReviewEntries||permissions.ai_review)&&<ApprovalSelection entries={pendingEntries} email={userEmail??""} canReview={canReviewEntries} canAI={permissions.ai_review} onUpdated={entry=>setEntries(previous=>previous.map(current=>current.id===entry.id?entry:current))}/>}
+      {!accessDenied&&view==="approvals"&&(role==="manager"||role==="admin")&&(canReviewEntries||permissions.ai_review)&&<ApprovalSelection entries={pendingEntries} email={userEmail??""} canReview={canReviewEntries} canAI={permissions.ai_review} onUpdated={entry=>setEntries(previous=>previous.map(current=>current.id===entry.id?entry:current))}/>}
 
       {(loadingEntries || syncError) && (
         <div

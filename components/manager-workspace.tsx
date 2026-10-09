@@ -46,6 +46,7 @@ export function ManagerWorkspace({ pending, entries, canReview = true, canReport
     finally { setLoading(false) }
   }
   return <section aria-label="Manager workflow" className="space-y-3">
+    <dl className="flex flex-wrap gap-5 border-b border-orange-200 pb-3 text-sm"><div><dt className="text-muted-foreground">Awaiting review</dt><dd className="font-semibold text-orange-800">{pending}</dd></div><div><dt className="text-muted-foreground">Submitted hours</dt><dd className="font-semibold text-blue-800">{entries.reduce((total,entry)=>total+entry.hours,0)}</dd></div><div><dt className="text-muted-foreground">Projects in queue</dt><dd className="font-semibold text-teal-800">{new Set(entries.map(entry=>entry.project)).size}</dd></div></dl>
     <div className="flex flex-wrap gap-2">
     {canAI && <Button className="feature-control" data-feature="ai" variant="outline" disabled={loading || !pending} onClick={prepareReview}><Sparkles className="size-4" />{loading ? "Preparing review..." : "Prepare AI review"}</Button>}
     {canReview && <Button className="feature-control" data-feature="approved" variant="outline" onClick={onApprovals}><CheckCircle2 className="size-4" />Review queue <span>{pending}</span></Button>}
