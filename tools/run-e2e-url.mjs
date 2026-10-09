@@ -68,7 +68,7 @@ const url = normalizeUrl(suppliedUrl)
 
 if (!url) {
   console.error(
-    "Provide a deployed app URL, for example: pnpm test:e2e:url https://example.vercel.app/tanovotime",
+    "Provide a deployed app URL, for example: pnpm test:e2e:url https://example.vercel.app/tanovo-time",
   )
   process.exit(1)
 }

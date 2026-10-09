@@ -21,7 +21,7 @@ export function AuthScreen({action,email}:{action?:()=>Promise<void>;email?:stri
     </header>
     <div className="mx-auto flex w-full max-w-lg flex-1 flex-col justify-center px-5 py-12 sm:px-8">
       <div className="mb-6 flex items-center gap-2 text-xs font-medium uppercase text-primary"><span className="h-px w-8 bg-primary"/>{denied?"Account access":"Your workspace"}</div>
-      <h1 className="text-3xl font-semibold leading-tight text-foreground">{denied?"Access not approved":"Sign in to TanovoTime"}</h1>
+      <h1 className="text-3xl font-semibold leading-tight text-foreground">{denied?"Access not approved":"Sign in to Tanovo Time"}</h1>
       <p className="mt-3 text-sm leading-6 text-muted-foreground">{denied?"Your Microsoft account is signed in, but access to this workspace has not been approved.":"Continue to your timesheet with your approved Microsoft account."}</p>
       <section className="mt-8 rounded-lg border border-border bg-white p-5 shadow-sm sm:p-6" aria-label="Account sign-in">
         <div className="mb-5 flex items-center gap-2 text-sm font-medium"><LockKeyhole className="size-4 text-primary" aria-hidden="true"/>{denied?"Signed-in account":"Microsoft account"}</div>
@@ -33,6 +33,6 @@ export function AuthScreen({action,email}:{action?:()=>Promise<void>;email?:stri
         <p className="mt-2 text-xs leading-6">Use the account approved by your technology manager. If Microsoft rejects the account, check its organization access with your manager.</p>
       </details>
     </div>
-    <footer className="border-t border-border bg-white px-5 py-4 text-center text-xs text-muted-foreground">DevOnCall / TanovoTime</footer>
+    <footer className="border-t border-border bg-white px-5 py-4 text-center text-xs text-muted-foreground">DevOnCall / Tanovo Time</footer>
   </main>
 }

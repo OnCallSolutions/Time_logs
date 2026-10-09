@@ -121,18 +121,18 @@ function mockTimesheetFetch() {
     const url = String(input)
     const method = init?.method ?? "GET"
     const body = init?.body ? JSON.parse(String(init.body)) : null
-    if (url === "/tanovotime/api/permissions") return jsonResponse({role:"admin",permissions:resolvePermissions("admin")})
+    if (url === "/tanovo-time/api/permissions") return jsonResponse({role:"admin",permissions:resolvePermissions("admin")})
     fetchCalls.push({ url, method, body })
 
-    if (url === "/tanovotime/api/entries") {
+    if (url === "/tanovo-time/api/entries") {
       return jsonResponse({ entries: [] })
     }
 
-    if (url === "/tanovotime/api/users" && method === "GET") {
+    if (url === "/tanovo-time/api/users" && method === "GET") {
       return jsonResponse({ users: adminUsers })
     }
 
-    if (url === "/tanovotime/api/users" && method === "PATCH") {
+    if (url === "/tanovo-time/api/users" && method === "PATCH") {
       return jsonResponse({
         user: {
           email: body.email.toLowerCase(),
@@ -145,7 +145,7 @@ function mockTimesheetFetch() {
       })
     }
 
-    if (url === "/tanovotime/api/audit?limit=25") {
+    if (url === "/tanovo-time/api/audit?limit=25") {
       return jsonResponse({ events: [] })
     }
 
@@ -244,7 +244,7 @@ describe("TimesheetApp admin directory", () => {
     })
 
     const patchCall = fetchCalls.find(
-      (call) => call.url === "/tanovotime/api/users" && call.method === "PATCH",
+      (call) => call.url === "/tanovo-time/api/users" && call.method === "PATCH",
     )
 
     expect(patchCall?.body).toEqual({

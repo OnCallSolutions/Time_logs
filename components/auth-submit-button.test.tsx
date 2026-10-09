@@ -11,7 +11,7 @@ beforeEach(()=>{state.pending=false})
 it("shows the Microsoft submit control and self-hosted official symbol",()=>{
   render(<AuthSubmitButton mode="signin"/>)
   expect(screen.getByRole("button",{name:"Sign in with Microsoft"})).toHaveAttribute("type","submit")
-  expect(document.querySelector("img")).toHaveAttribute("src","/tanovotime/microsoft-symbol.png")
+  expect(document.querySelector("img")).toHaveAttribute("src","/tanovo-time/microsoft-symbol.png")
 })
 it("prevents duplicate sign-in while the form is pending",()=>{
   state.pending=true;render(<AuthSubmitButton mode="signin"/>)

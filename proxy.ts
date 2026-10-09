@@ -1,5 +1,5 @@
 /**
- * Redirects bare-root requests into the /tanovotime application base path.
+ * Redirects bare-root requests into the /tanovo-time application base path.
  *
  * The Next.js basePath handles normal app routing, while this proxy provides a
  * lightweight server-side guard for direct root visits in environments where the
@@ -10,7 +10,7 @@ import type { NextRequest } from "next/server"
 import { basePath } from "@/lib/paths"
 
 /**
- * Allows /tanovotime requests and redirects every matched root request to /tanovotime.
+ * Allows /tanovo-time requests and redirects every matched root request to /tanovo-time.
  *
  * @param request - Incoming request inspected before route rendering.
  * @returns Next response that continues or redirects to the app base path.

@@ -31,7 +31,7 @@ beforeEach(()=>{
   vi.mocked(publicMessageKeys).mockResolvedValue([]);vi.mocked(ownMessageKey).mockResolvedValue(null)
 })
 /** @param input - Public identity and encrypted recovery fields. @returns Registration request with JSON body. */
-function request(input:object):Request{return new Request("http://localhost/tanovotime/api/messages/keys",{method:"POST",body:JSON.stringify(input)})}
+function request(input:object):Request{return new Request("http://localhost/tanovo-time/api/messages/keys",{method:"POST",body:JSON.stringify(input)})}
 it("looks up a recovery backup only for the authenticated account",async()=>{
   expect((await GET()).status).toBe(200)
   expect(ownMessageKey).toHaveBeenCalledWith("employee@example.com")

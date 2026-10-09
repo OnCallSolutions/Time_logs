@@ -1,7 +1,7 @@
 /**
  * Configures NextAuth with Microsoft Entra ID and exports auth helpers.
  *
- * The configuration pins the app's auth routes under /tanovotime/api/auth so they
+ * The configuration pins the app's auth routes under /tanovo-time/api/auth so they
  * match the public Next.js base path and Azure redirect URI. The route handler
  * wrapper re-adds that public base path before requests reach Auth.js locally.
  */

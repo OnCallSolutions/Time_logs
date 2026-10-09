@@ -1,18 +1,20 @@
 /**
- * Guards the TanovoTime public route prefix across configuration and clients.
+ * Guards the Tanovo Time public route prefix across configuration and clients.
  * The scheduled monitor and auth URLs must share the same base path.
  * These checks catch partial rebrands before deployment and Microsoft sign-in.
  */
 import { expect, it } from "vitest"
 import nextConfig from "../next.config.mjs"
 import vercelConfig from "../vercel.json"
+import packageInfo from "../package.json"
 import { apiPath, basePath } from "./paths"
 
 it("keeps Next.js, API, authentication, and scheduled security paths aligned", () => {
-  expect(basePath).toBe("/tanovotime")
+  expect(packageInfo.name).toBe("tanovo-time")
+  expect(basePath).toBe("/tanovo-time")
   expect(nextConfig.basePath).toBe(basePath)
-  expect(apiPath("/api/auth")).toBe("/tanovotime/api/auth")
-  expect(apiPath("/api/entries")).toBe("/tanovotime/api/entries")
+  expect(apiPath("/api/auth")).toBe("/tanovo-time/api/auth")
+  expect(apiPath("/api/entries")).toBe("/tanovo-time/api/entries")
   expect(vercelConfig.crons[0].path).toBe(apiPath("/api/security") + "?scheduled=1")
 })
 

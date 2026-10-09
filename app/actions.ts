@@ -80,7 +80,7 @@ function expireCookie(name: string, path: string) {
 }
 
 /**
- * Expires Auth.js and NextAuth cookies on both root and /tanovotime paths.
+ * Expires Auth.js and NextAuth cookies on both root and /tanovo-time paths.
  *
  * This is intentionally more aggressive than a default sign-out because preview
  * and local testing can leave cookies on different paths after base-path changes.

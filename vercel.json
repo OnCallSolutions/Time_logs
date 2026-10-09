@@ -1,3 +1,3 @@
 {
-  "crons": [{ "path": "/tanovotime/api/security?scheduled=1", "schedule": "0 6 * * *" }]
+  "crons": [{ "path": "/tanovo-time/api/security?scheduled=1", "schedule": "0 6 * * *" }]
 }

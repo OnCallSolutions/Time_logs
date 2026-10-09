@@ -1,7 +1,20 @@
-# TanovoTime Deployment Migration
+# Tanovo Time Deployment Migration
 
-TanovoTime is the product name; DevOnCall remains the parent organization. The
-application path is `/tanovotime`, including API endpoints, images, authentication,
+## Rebrand Source
+
+The authoritative branding settings come from [PR #5](https://github.com/OnCallSolutions/Time_logs/pull/5),
+branch `feature/tanovo-time-rebrand`, commit `0bbad4f1845a21ac973a2a06b53832a0c2e9db95`.
+Its display name is `Tanovo Time`, package name is `tanovo-time`, metadata title
+is `Tanovo Time | Contractor Hours & Manager Reports`, and description is
+`Tanovo Time turns contractor time notes into clear reports of hours worked for managers.`
+The user approved correcting the PR's misspelled route to `/tanovo-time`.
+
+Only rebrand settings are integrated, not the older application implementation
+from the PR. Development's current roles, rights, security controls, encrypted
+messages, profiles, Microsoft provider, and sign-out behavior are preserved.
+
+Tanovo Time is the product name; DevOnCall remains the parent organization. The
+application path is `/tanovo-time`, including API endpoints, images, authentication,
 and scheduled security monitoring. Microsoft Entra ID remains required.
 
 The source changes apply to `Development` only. Remote service renames, remote
@@ -11,24 +24,28 @@ project names are shared remote settings, while application paths depend on each
 branch's code. Keep the existing routes and callback URIs for branches that have
 not been migrated.
 
-Use `/tanovotime` only on deployments built from this rebranded `Development`
+Use `/tanovo-time` only on deployments built from this rebranded `Development`
 code. Production remains on its released branch's existing path until a separate,
 approved release. Renaming a shared remote project does not update branch code.
 
 ## 1. Rename the GitHub Repository
 
-Your current repository is `maurice-devnet/ONCALL_SOLUTIONS`. On GitHub, open its
-Settings, change Repository name to `tanovotime`, and select Rename. Rename the
+The verified rebrand PR is in `OnCallSolutions/Time_logs`. On GitHub, open the
+repository you deploy, then Settings, change Repository name to `tanovo-time`, and select Rename. Rename the
 existing repository instead of creating an empty replacement; history stays in
 the same repository. Then run these commands from the current local checkout:
 
 ```powershell
-git remote set-url origin https://github.com/maurice-devnet/tanovotime.git
+git remote set-url origin https://github.com/OnCallSolutions/tanovo-time.git
 git remote -v
 git fetch origin
 ```
 
-Do not run the set-url command until the GitHub rename is complete. The local
+Do not run the set-url command until the GitHub rename is complete; replace the
+owner if your deployed repository is under a different account. The currently
+configured `maurice-devnet/tanovotime` origin was inaccessible during this work;
+the rebrand was fetched from the PR repository without changing remote settings.
+The local
 folder can remain `ONCALL_SOLUTIONS`; renaming that folder is optional and does
 not change the Git remote. If renamed, stop local servers, close the workspace,
 rename it in File Explorer, and reopen/update the saved project in your editor.
@@ -39,7 +56,7 @@ Afterward, update the README clone example to the new repository URL and folder.
 ## 2. Rename the Existing Vercel Project
 
 Open the existing project, then Settings > General. Change its Project Name to
-`tanovotime` and save. Keep the existing project so its environment configuration
+`tanovo-time` and save. Keep the existing project so its environment configuration
 and linked database remain available. Do not delete and recreate it.
 
 In Settings > Git, verify the connected repository after the GitHub rename. Keep
@@ -49,13 +66,13 @@ the Production Branch unchanged unless deliberately changing your release policy
 In Settings > Domains, confirm/add the new production domain and the stable
 branch aliases you will actually use. A project rename is not proof that a
 particular hostname is available or assigned. Copy the domains Vercel shows; do
-not assume `tanovotime.vercel.app` is yours. Use a stable branch alias or a custom
+not assume `tanovo-time.vercel.app` is yours. Use a stable branch alias or a custom
 domain assigned to the branch, not a deployment-specific hash URL.
 
 Example only, if Vercel assigns it:
 
 ```text
-https://tanovotime.vercel.app/tanovotime
+https://tanovo-time.vercel.app/tanovo-time
 ```
 
 [Vercel project rename instructions](https://vercel.com/kb/guide/how-do-i-change-the-name-of-my-vercel-project).
@@ -64,16 +81,16 @@ https://tanovotime.vercel.app/tanovotime
 ## 3. Update the Existing Azure / Entra App
 
 Use the existing Entra app registration. In App registrations > your application
-> Branding & properties, change the display name to `TanovoTime` and save. Update
+> Branding & properties, change the display name to `Tanovo Time` and save. Update
 the corresponding Enterprise application > Properties name if it still shows
 the previous product name. This does not require renaming the DevOnCall tenant.
 
 In Authentication, add these exact redirect URIs under the **Web** platform:
 
 ```text
-http://localhost:3000/tanovotime/api/auth/callback/microsoft-entra-id
-https://<ACTUAL-PRODUCTION-HOST>/tanovotime/api/auth/callback/microsoft-entra-id
-https://<ACTUAL-STABLE-PREVIEW-HOST>/tanovotime/api/auth/callback/microsoft-entra-id
+http://localhost:3000/tanovo-time/api/auth/callback/microsoft-entra-id
+https://<ACTUAL-PRODUCTION-HOST>/tanovo-time/api/auth/callback/microsoft-entra-id
+https://<ACTUAL-STABLE-PREVIEW-HOST>/tanovo-time/api/auth/callback/microsoft-entra-id
 ```
 
 Replace the placeholders with confirmed Vercel/custom hostnames. Add a separate
@@ -85,7 +102,7 @@ Keep the client ID, tenant issuer, permissions, account types, assignments, and
 current valid secret unchanged. Do not create a new client secret merely to
 rename the app. Do not change the Application ID URI under Expose an API as part
 of this URL migration. If a homepage URL is configured, update it to the actual
-production origin plus `/tanovotime`. Do not add a front-channel logout URL unless
+production origin plus `/tanovo-time`. Do not add a front-channel logout URL unless
 you have an endpoint that implements that protocol.
 
 [Microsoft redirect URI procedure](https://learn.microsoft.com/en-us/entra/identity-platform/how-to-add-redirect-uri).
@@ -95,7 +112,7 @@ you have an endpoint that implements that protocol.
 ## 4. Set Canonical Origins and Redeploy
 
 This app configures Auth.js's path in code. Set `AUTH_URL` to the origin only,
-without `/tanovotime`, `/api/auth`, query parameters, or a trailing path:
+without `/tanovo-time`, `/api/auth`, query parameters, or a trailing path:
 
 ```dotenv
 # Local .env.local
@@ -140,7 +157,7 @@ Stop the old local server and rebuild the current checkout:
 ```powershell
 pnpm verify
 pnpm start
-# Then open http://localhost:3000/tanovotime
+# Then open http://localhost:3000/tanovo-time
 ```
 
 If port 3000 is occupied, use `pnpm start --port 3002`. For authentication on that
@@ -149,7 +166,7 @@ callback in Entra. Restore those settings when returning to port 3000.
 
 Verify root navigation, Microsoft sign-in, sign-out, each role's navigation,
 messages, profile assets, and scheduled security monitoring. The cron path in
-`vercel.json` is now `/tanovotime/api/security?scheduled=1`. Database tables and
+`vercel.json` is now `/tanovo-time/api/security?scheduled=1`. Database tables and
 employee permissions do not need renaming; do not reset the database.
 
 A changed hostname is a new browser origin. Cookies and local encrypted-message

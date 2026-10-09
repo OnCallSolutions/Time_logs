@@ -410,11 +410,11 @@ function renderDashboard() {
 
       <section>
         <h2>Branch Preview URL</h2>
-        <p>Paste a Vercel preview or production page URL, including <strong>/tanovotime</strong>.</p>
+        <p>Paste a Vercel preview or production page URL, including <strong>/tanovo-time</strong>.</p>
         <div class="inline">
           <label>
             Main page URL
-            <input id="targetUrl" placeholder="https://your-branch.vercel.app/tanovotime" />
+            <input id="targetUrl" placeholder="https://your-branch.vercel.app/tanovo-time" />
           </label>
           <label>
             Branch label

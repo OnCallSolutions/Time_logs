@@ -25,7 +25,7 @@ it("does not save edits until Save is clicked",async()=>{
   await user.click(screen.getByRole("button",{name:"Save message"}))
   await waitFor(()=>expect(screen.queryByRole("dialog",{name:"Edit message"})).not.toBeInTheDocument())
   expect(screen.getByRole("dialog",{name:"Message detail"})).toBeVisible()
-  expect(fetchMock).toHaveBeenCalledWith("/tanovotime/api/messages",expect.objectContaining({method:"PATCH",body:expect.stringContaining("Updated message")}))
+  expect(fetchMock).toHaveBeenCalledWith("/tanovo-time/api/messages",expect.objectContaining({method:"PATCH",body:expect.stringContaining("Updated message")}))
 })
 it("hides expired sender edits but retains an admin exemption",async()=>{
   requests();const state=inbox(false,true);const {rerender}=render(<MessagesPanel canSend inbox={state}/>)
@@ -39,12 +39,12 @@ it("requires confirmation before deleting for everyone",async()=>{
   await user.click(screen.getByText("manager@example.com → employee@example.com"));await user.click(screen.getByRole("button",{name:"Delete message"}))
   expect(fetchMock.mock.calls.filter(call=>call[0].endsWith("/api/messages"))).toHaveLength(0)
   await user.click(screen.getByRole("button",{name:"Delete for everyone"}))
-  await waitFor(()=>expect(fetchMock).toHaveBeenCalledWith("/tanovotime/api/messages",expect.objectContaining({method:"DELETE"})))
+  await waitFor(()=>expect(fetchMock).toHaveBeenCalledWith("/tanovo-time/api/messages",expect.objectContaining({method:"DELETE"})))
 })
 it("marks incoming messages read only after they are opened",async()=>{
   vi.spyOn(document,"visibilityState","get").mockReturnValue("visible")
   const fetchMock=requests();render(<MessagesPanel canSend={false} inbox={inbox(true)}/>)
   expect(fetchMock).not.toHaveBeenCalled()
   await userEvent.click(screen.getByText("employee@example.com → manager@example.com"))
-  await waitFor(()=>expect(fetchMock).toHaveBeenCalledWith("/tanovotime/api/messages",expect.objectContaining({method:"PATCH",body:expect.stringContaining('"action":"read"')})))
+  await waitFor(()=>expect(fetchMock).toHaveBeenCalledWith("/tanovo-time/api/messages",expect.objectContaining({method:"PATCH",body:expect.stringContaining('"action":"read"')})))
 })

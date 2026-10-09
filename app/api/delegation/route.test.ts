@@ -32,7 +32,7 @@ it("lists every actor without permitting manager edits to higher roles",async()=
  * @returns Request containing the validated target identity and changes.
  */
 function request(permissions:Record<string,boolean>):Request {
-  return new Request("http://localhost/tanovotime/api/delegation",{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({email:"employee@example.com",permissions})})
+  return new Request("http://localhost/tanovo-time/api/delegation",{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({email:"employee@example.com",permissions})})
 }
 it("delegates approval while preserving the employee role",async()=>{
   expect((await PATCH(request({review_entries:true}))).status).toBe(200)
