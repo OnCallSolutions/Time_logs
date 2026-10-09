@@ -28,12 +28,23 @@ export type Permissions = Record<Permission, boolean>
  */
 export function resolvePermissions(role: UserRole | null, overrides: PermissionOverrides = {}): Permissions {
   const elevated = role === "admin" || role === "manager"
-  const personal = role === "employee" || role === "user"
+  const personal = role === "employee" || role === "contractor"
   const defaults: Permissions = {create_entries:!!role,edit_entries:!!role,delete_entries:!!role,
     submit_entries:personal,review_entries:elevated,view_team:elevated,view_reports:elevated,ai_review:elevated,
     delegate_permissions:elevated,send_messages:elevated}
   for (const key of Object.keys(permissionLabels) as Permission[]) {
     if (role && typeof overrides[key] === "boolean") defaults[key] = overrides[key]!
+  }
+  // Business-account actors cannot mutate timesheets or approve the operational review stage.
+  // Financial authorization will use separate, server-enforced permissions when implemented.
+  if (role === "account_manager") {
+    defaults.create_entries = false
+    defaults.edit_entries = false
+    defaults.delete_entries = false
+    defaults.submit_entries = false
+    defaults.review_entries = false
+    defaults.ai_review = false
+    defaults.delegate_permissions = false
   }
   return defaults
 }

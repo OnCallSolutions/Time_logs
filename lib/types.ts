@@ -50,7 +50,7 @@ export type ParsedEntry = Omit<
  * Admins and managers can view team-wide data, while employees and users are
  * scoped to entries owned by their signed-in email.
  */
-export type UserRole = "admin" | "manager" | "employee" | "user"
+export type UserRole = "admin" | "manager" | "account_manager" | "employee" | "contractor"
 
 /**
  * Access states administrators can apply to managed app users.

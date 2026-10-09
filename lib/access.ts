@@ -30,14 +30,17 @@ function parseEmailList(value?: string) {
 /**
  * Returns the general allowlist emails configured for the app.
  *
- * The general allowlist grants baseline "user" access without assigning manager
+ * The general allowlist grants baseline "contractor" access without assigning manager
  * or admin capabilities. Role-specific lists are handled separately so elevated
  * privileges remain explicit.
  *
  * @returns Email addresses listed in ALLOWED_EMAILS.
  */
 export function getAllowedEmails() {
-  return parseEmailList(process.env.ALLOWED_EMAILS)
+  return [...new Set([
+    ...parseEmailList(process.env.ALLOWED_EMAILS),
+    ...parseEmailList(process.env.CONTRACTOR_EMAILS),
+  ])]
 }
 
 /**
@@ -85,7 +88,7 @@ export function getConfiguredAccessUsers() {
 
   for (const email of getAllowedEmails()) {
     if (!users.has(email)) {
-      users.set(email, "user")
+      users.set(email, "contractor")
     }
   }
 
@@ -128,7 +131,7 @@ export function getUserRole(email?: string | null): UserRole | null {
   if (getRoleEmails("admin").includes(normalizedEmail)) return "admin"
   if (getRoleEmails("manager").includes(normalizedEmail)) return "manager"
   if (getRoleEmails("employee").includes(normalizedEmail)) return "employee"
-  if (getAllowedEmails().includes(normalizedEmail)) return "user"
+  if (getAllowedEmails().includes(normalizedEmail)) return "contractor"
 
   return null
 }
@@ -137,7 +140,7 @@ export function getUserRole(email?: string | null): UserRole | null {
  * Resolves a user's role, falling back to the base user role when allowed.
  *
  * This is the safest helper for UI and API code because it converts approved but
- * non-elevated users into the base "user" role. A null return means the caller
+ * non-elevated users into the base "contractor" role. A null return means the caller
  * should treat the request as unauthorized.
  *
  * @param email - Signed-in user's email address.
@@ -167,7 +170,7 @@ export async function getEffectiveUserRole(
     return environmentRole
   }
 
-  return hasEnvironmentAccessPolicy() ? null : "user"
+  return hasEnvironmentAccessPolicy() ? null : "contractor"
 }
 
 /**

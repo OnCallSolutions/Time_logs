@@ -23,6 +23,7 @@ const accessEnvKeys = [
   "EMPLOYEE_EMAILS",
   "WORKER_EMAILS",
   "ALLOWED_EMAILS",
+  "CONTRACTOR_EMAILS",
 ]
 
 /**
@@ -41,6 +42,14 @@ describe("access resolution", () => {
     clearAccessEnv()
     managedAccessMock.mockReset()
     managedAccessMock.mockResolvedValue(null)
+  })
+
+  it("distinguishes outsourced contractors from internal employees",async()=>{
+    process.env.CONTRACTOR_EMAILS="supplier@example.com"
+    process.env.EMPLOYEE_EMAILS="staff@example.com"
+    await expect(getEffectiveUserRole("supplier@example.com")).resolves.toBe("contractor")
+    await expect(getEffectiveUserRole("staff@example.com")).resolves.toBe("employee")
+    await expect(getEffectiveUserRole("unknown@example.com")).resolves.toBeNull()
   })
 
   it("keeps environment administrators as the highest recovery role", async () => {
@@ -102,12 +111,12 @@ describe("access resolution", () => {
 
     expect(getConfiguredAccessUsers()).toEqual([
       { email: "lead@example.com", role: "manager" },
-      { email: "viewer@example.com", role: "user" },
+      { email: "viewer@example.com", role: "contractor" },
     ])
   })
 
   it("defaults to base user access only when no access policy exists", async () => {
-    await expect(getEffectiveUserRole("anyone@example.com")).resolves.toBe("user")
+    await expect(getEffectiveUserRole("anyone@example.com")).resolves.toBe("contractor")
 
     process.env.ALLOWED_EMAILS = "approved@example.com"
 

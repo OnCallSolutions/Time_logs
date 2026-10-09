@@ -5,7 +5,7 @@
  */
 "use client"
 import { useEffect, useRef, useState } from "react"
-import { Check, CheckCheck, LockKeyhole, Pencil, RefreshCw, Save, Send, Trash2, X } from "lucide-react"
+import { Check, CheckCheck, LockKeyhole, Pencil, RefreshCw, Save, Send, Trash2, X, Settings, Search } from "lucide-react"
 import { useMessageEncryption } from "@/components/use-message-encryption"
 import { Button } from "@/components/ui/button"
 import { WindowSurface } from "@/components/window-surface"
@@ -35,6 +35,15 @@ export function MessagesPanel({canSend,inbox}:{canSend:boolean;inbox?:MessageInb
   const [deleting,setDeleting] = useState<AppMessage|null>(null)
   const [composing,setComposing]=useState(false)
   const [identitiesOpen,setIdentitiesOpen]=useState(false)
+  const [securityOpen,setSecurityOpen]=useState(false)
+  const [query,setQuery]=useState("")
+  const [conversation,setConversation]=useState("*")
+  const contacts=[...new Set(state.messages.flatMap(message=>message.recipient_email?[message.sender_email.toLowerCase()===state.email?message.recipient_email:message.sender_email]:[]))]
+  const visibleMessages=state.messages.filter(message=>{
+    const matchesConversation=conversation==="*"||(conversation==="broadcast"?!message.recipient_email:!!message.recipient_email&&(message.sender_email===conversation||message.recipient_email===conversation))
+    const text=message.encrypted_payload?encryption.plaintext[message.id]??"":message.body
+    return matchesConversation&&`${message.sender_email} ${message.recipient_email??"All employees"} ${message.deleted_at?"":text}`.toLowerCase().includes(query.toLowerCase())
+  })
   const [selectedId,setSelectedId]=useState<string|null>(null)
   const selected=state.messages.find(message=>message.id===selectedId)
   const [now,setNow] = useState(Date.now())
@@ -48,7 +57,7 @@ export function MessagesPanel({canSend,inbox}:{canSend:boolean;inbox?:MessageInb
     if(!canSend)return
     const controller=new AbortController()
     fetch(apiPath("/api/delegation"),{cache:"no-store",signal:controller.signal})
-      .then(async response=>{const data=await response.json();if(!response.ok)throw new Error(data.error);setUsers(data.users.filter((user:{role:string;accessStatus:string})=>(user.role==="employee"||user.role==="user")&&user.accessStatus==="active"))})
+      .then(async response=>{const data=await response.json();if(!response.ok)throw new Error(data.error);setUsers(data.users.filter((user:{role:string;accessStatus:string})=>(user.role==="employee"||user.role==="contractor")&&user.accessStatus==="active"))})
       .catch(error=>{if(!controller.signal.aborted)setError(error.message)})
     return ()=>controller.abort()
   },[canSend])
@@ -101,18 +110,22 @@ export function MessagesPanel({canSend,inbox}:{canSend:boolean;inbox?:MessageInb
     finally{operation.current=false;setBusy(false)}
   }
   return <section aria-label="Messages" className="space-y-3">
-    <div className="flex items-center justify-between"><h2 className="text-base font-semibold">Messages <span className="text-xs text-muted-foreground">{state.unread ? `${state.unread} unread` : ""}</span></h2><Button size="icon-sm" variant="outline" title="Refresh inbox" aria-label="Refresh inbox" onClick={state.refresh}><RefreshCw className="size-4"/></Button></div>
+    <div className="flex items-center justify-between gap-2 border-b pb-3"><h2 className="text-base font-semibold">Messages <span className="text-xs text-muted-foreground">{state.unread ? `${state.unread} unread` : ""}</span></h2><div className="flex gap-2"><Button size="icon-sm" variant="ghost" title="Message settings" aria-label="Message settings" onClick={()=>setSecurityOpen(true)}><Settings className="size-4"/></Button><Button size="icon-sm" variant="ghost" title="Refresh inbox" aria-label="Refresh inbox" onClick={state.refresh}><RefreshCw className="size-4"/></Button></div></div>
     {(error||state.error)&&<p role="alert" className="text-sm text-destructive">{error||state.error}</p>}
-    <div className="border-y border-border py-3">
+    {!encryption.unlocked&&<Button size="sm" variant="outline" onClick={()=>setSecurityOpen(true)}><LockKeyhole className="size-4"/>Unlock messages</Button>}
+    {encryption.error&&<p role="alert" className="text-sm text-destructive">{encryption.error}</p>}
+    {securityOpen&&<WindowSurface title="Message settings" onBack={()=>setSecurityOpen(false)} disabled={encryption.busy}><div className="w-full max-w-xl overflow-auto p-4">
       <div className="flex flex-wrap items-center justify-between gap-2"><p className="flex items-center gap-2 text-sm font-medium"><LockKeyhole className="size-4 text-primary"/>{encryption.unlocked?"Messaging encryption unlocked":"Messaging encryption locked"}</p>{encryption.unlocked&&<Button size="sm" variant="outline" onClick={encryption.lock}>Lock messages</Button>}</div>
       {encryption.error&&<p role="alert" className="mt-2 text-sm text-destructive">{encryption.error}</p>}
-      {!encryption.unlocked&&encryption.loaded&&<form className="mt-3 grid max-w-lg gap-2" onSubmit={async event=>{event.preventDefault();if(!encryption.own&&passphrase!==confirmation){setError("Recovery passphrases must match.");return}if(await encryption.unlock(passphrase)){setPassphrase("");setConfirmation("")}}}>
+      {!encryption.unlocked&&encryption.loaded&&<form className="mt-3 grid max-w-lg gap-2" onSubmit={async event=>{event.preventDefault();if(!encryption.own&&passphrase!==confirmation){setError("Recovery passphrases must match.");return}if(await encryption.unlock(passphrase)){setPassphrase("");setConfirmation("");setSecurityOpen(false)}}}>
         <label className="text-sm">Recovery passphrase<input type="password" autoComplete="off" minLength={encryption.own?1:16} required value={passphrase} onChange={event=>setPassphrase(event.target.value)} className="mt-1 block w-full rounded-md border p-2"/></label>
         {!encryption.own&&<><label className="text-sm">Confirm recovery passphrase<input type="password" autoComplete="off" minLength={16} required value={confirmation} onChange={event=>setConfirmation(event.target.value)} className="mt-1 block w-full rounded-md border p-2"/></label><p className="text-xs text-muted-foreground">Use at least 16 characters. Keep this separate from your Microsoft password. Losing it means losing access to encrypted messages.</p></>}
         <Button type="submit" className="w-fit" disabled={encryption.busy}>{encryption.busy?"Unlocking...":encryption.own?"Unlock messages":"Set up encryption"}</Button>
       </form>}
       {encryption.own&&<Button variant="ghost" size="sm" className="mt-2" onClick={()=>setIdentitiesOpen(true)}><LockKeyhole className="size-3"/>Encryption identities</Button>}
-    </div>
+      {error&&<p role="alert" className="mt-2 text-sm text-destructive">{error}</p>}
+    </div></WindowSurface>}
+    <div className="flex flex-wrap items-center gap-2"><label className="relative min-w-0 flex-1"><Search aria-hidden="true" className="absolute left-3 top-3 size-4 text-muted-foreground"/><input aria-label="Search messages" value={query} onChange={event=>setQuery(event.target.value)} placeholder="Search messages" className="w-full rounded-md border bg-background py-2 pl-9 pr-3 text-sm"/></label><select aria-label="Conversation" value={conversation} onChange={event=>setConversation(event.target.value)} className="max-w-full rounded-md border bg-background p-2 text-sm"><option value="*">All conversations</option><option value="broadcast">Announcements</option>{contacts.map(email=><option key={email} value={email}>{email}</option>)}</select></div>
     {canSend&&<Button variant="outline" size="sm" onClick={()=>setComposing(true)}><Pencil className="size-3"/>New message</Button>}
     {composing&&<WindowSurface title="New message" onBack={()=>setComposing(false)} disabled={busy}><section className="flex min-h-0 w-full max-w-4xl flex-col bg-white"><h2 className="border-b p-4 font-semibold">New message</h2><div className="grid min-h-0 flex-1 content-start gap-3 overflow-auto p-4">
       <label className="text-sm">Recipient<select value={recipient} disabled={busy} onChange={event=>setRecipient(event.target.value)} className="mt-1 block w-full rounded-md border border-border bg-background p-2"><option value="">All employees</option>{users.map(user=><option key={user.email} value={user.email}>{user.email}</option>)}</select></label>
@@ -123,15 +136,14 @@ export function MessagesPanel({canSend,inbox}:{canSend:boolean;inbox?:MessageInb
     {identitiesOpen&&<WindowSurface title="Encryption identities" onBack={()=>setIdentitiesOpen(false)}><section className="w-full overflow-auto bg-white p-4"><h2 className="font-semibold">Encryption identities</h2><p className="my-3 text-sm text-muted-foreground">Compare fingerprints with participants using another trusted channel.</p><table className="w-full text-left text-sm"><thead><tr className="border-b"><th className="p-2">Actor</th><th className="p-2">Fingerprint</th></tr></thead><tbody>{encryption.keys.map(key=><tr key={key.email} className="border-b"><td className="p-2">{key.email}</td><td className="break-all p-2 font-mono text-xs">{key.fingerprint}</td></tr>)}</tbody></table></section></WindowSurface>}
     {state.loading&&<p role="status" className="text-sm text-muted-foreground">Loading messages...</p>}
     {!state.loading&&!state.messages.length&&<p className="text-sm text-muted-foreground">No messages yet.</p>}
-    <div className="max-h-[60dvh] overflow-auto overscroll-contain">{state.messages.map(message=>{
+    <div className="max-h-[60dvh] min-h-48 space-y-3 overflow-auto overscroll-contain bg-neutral-50 p-3 sm:p-4">{!state.loading&&state.messages.length>0&&!visibleMessages.length&&<p className="text-sm text-muted-foreground">No matching messages.</p>}{visibleMessages.map(message=>{
       const own=message.sender_email.toLowerCase()===state.email
       const text=message.encrypted_payload?encryption.plaintext[message.id]??"Encrypted message · unlock to read":message.body
       const editable=(canSend||state.admin)&&(!message.encrypted_payload||!!encryption.plaintext[message.id])&&canEditMessage(message,state.email,state.admin,now)
-      return <article key={message.id} className="border-b border-border py-3">
+      return <article key={message.id} className={`w-fit max-w-[92%] rounded-md border p-3 shadow-sm sm:max-w-[75%] ${own?"ml-auto border-emerald-200 bg-emerald-50":"mr-auto border-border bg-white"}`}>
         <button type="button" className="block w-full cursor-pointer break-words text-left text-sm" onClick={()=>{setSelectedId(message.id);void read(message)}}><span className="font-medium">{message.sender_email} → {message.recipient_email ?? "All employees"}</span><time className="ml-2 text-xs text-muted-foreground">{new Date(message.created_at).toLocaleString()}</time>
           {!own&&!message.read_at&&!readIds.has(message.id)&&!message.deleted_at&&<span className="ml-2 inline-block size-2 rounded-full bg-primary" aria-label="Unread message"/>}
-          <span className="mt-1 block truncate text-muted-foreground">{message.deleted_at?"Message deleted":text.slice(0,120)}</span>
-          {!message.deleted_at&&<span className="text-xs text-muted-foreground">{message.encrypted_payload?"End-to-end encrypted · ":"Legacy plaintext message · "}</span>}
+          <span className="my-2 block whitespace-pre-wrap break-words">{message.deleted_at?"Message deleted":text}</span>
           {message.edited_at&&!message.deleted_at&&<span className="text-xs text-muted-foreground">Edited{message.encrypted_payload?.author!==message.sender_email&&message.encrypted_payload?.author?` by ${message.encrypted_payload.author}`:""} · </span>}
           {own&&!message.deleted_at&&<span className="inline-flex items-center gap-1 text-xs text-muted-foreground">{message.read_at||message.read_count ? <CheckCheck className="size-3 text-primary"/> : message.delivered_at||message.delivered_count ? <CheckCheck className="size-3"/> : <Check className="size-3"/>}{message.recipient_email ? message.read_at?"Read":message.delivered_at?"Delivered":"Sent" : `Sent · Delivered to ${message.delivered_count??0} · Read by ${message.read_count??0}`}</span>}
         </button>

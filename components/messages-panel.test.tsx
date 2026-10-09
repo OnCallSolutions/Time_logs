@@ -10,6 +10,22 @@ import { MessagesPanel } from "./messages-panel"
 import type { MessageInbox } from "./use-message-inbox"
 vi.mock("./use-message-encryption",()=>({useMessageEncryption:()=>({own:null,keys:[],plaintext:{},error:null,busy:false,loaded:false,unlocked:true,unlock:vi.fn(),encrypt:vi.fn(),lock:vi.fn()})}))
 afterEach(()=>{vi.unstubAllGlobals();vi.restoreAllMocks()})
+it("keeps encryption controls out of the everyday inbox",async()=>{
+  requests();render(<MessagesPanel canSend inbox={inbox()}/>)
+  expect(screen.queryByText("Messaging encryption unlocked")).not.toBeInTheDocument()
+  await userEvent.click(screen.getByRole("button",{name:"Message settings"}))
+  expect(screen.getByRole("dialog",{name:"Message settings"})).toBeVisible()
+  expect(screen.getByText("Messaging encryption unlocked")).toBeVisible()
+})
+it("filters message text and announcements without exposing mismatched conversations",async()=>{
+  requests();render(<MessagesPanel canSend inbox={inbox()}/>);const user=userEvent.setup()
+  await user.type(screen.getByRole("textbox",{name:"Search messages"}),"not present")
+  expect(screen.getByText("No matching messages.")).toBeVisible()
+  await user.clear(screen.getByRole("textbox",{name:"Search messages"}))
+  expect(screen.getByText("Original message")).toBeVisible()
+  await user.selectOptions(screen.getByRole("combobox",{name:"Conversation"}),"broadcast")
+  expect(screen.queryByText("Original message")).not.toBeInTheDocument()
+})
 /** @param incoming - Whether the fixture is a received message. @param expired - Whether its deadline elapsed. @returns Controlled inbox and refresh spy. */
 function inbox(incoming=false,expired=false):MessageInbox{
   return {messages:[{id:"123e4567-e89b-42d3-a456-426614174000",sender_email:incoming?"employee@example.com":"manager@example.com",recipient_email:incoming?"manager@example.com":"employee@example.com",body:"Original message",created_at:new Date(Date.now()-(expired?61:1)*60000).toISOString()}],email:"manager@example.com",admin:false,error:null,loading:false,unread:incoming?1:0,notification:null,dismissNotification:vi.fn(),refresh:vi.fn()}

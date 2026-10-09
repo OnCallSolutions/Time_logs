@@ -43,7 +43,7 @@ export default async function Page() {
 
   return (
     <TimesheetApp
-      role={role ?? "user"}
+      role={role ?? "contractor"}
       userName={session.user.name}
       userEmail={session.user.email}
     />

@@ -230,7 +230,7 @@ function toManagedAccessUser(row: ManagedAccessUserRow): ManagedAccessUser {
   return {
     permissions: row.permissions ?? {},
     email: row.email,
-    role: row.role,
+    role: (row.role as string) === "user" ? "contractor" : row.role,
     accessStatus: row.access_status,
     note: row.note ?? "",
     updatedBy: row.updated_by,
@@ -403,7 +403,7 @@ export function ensureManagedAccessTable() {
     await sql`
       CREATE TABLE IF NOT EXISTS managed_user_access (
         email text PRIMARY KEY,
-        role text NOT NULL CHECK (role IN ('admin', 'manager', 'employee', 'user')),
+        role text NOT NULL CHECK (role IN ('admin', 'manager', 'account_manager', 'employee', 'contractor', 'user')),
         access_status text NOT NULL DEFAULT 'active'
           CHECK (access_status IN ('active', 'denied', 'blocked')),
         note text NOT NULL DEFAULT '',
@@ -417,6 +417,11 @@ export function ensureManagedAccessTable() {
       ON managed_user_access (access_status, role)
     `
     await sql`ALTER TABLE managed_user_access ADD COLUMN IF NOT EXISTS permissions jsonb NOT NULL DEFAULT '{}'::jsonb`
+    // Keep legacy rows readable while older deployments still use the shared database.
+    await sql.transaction([
+      sql`ALTER TABLE managed_user_access DROP CONSTRAINT IF EXISTS managed_user_access_role_check`,
+      sql`ALTER TABLE managed_user_access ADD CONSTRAINT managed_user_access_role_check CHECK (role IN ('admin', 'manager', 'account_manager', 'employee', 'contractor', 'user'))`,
+    ])
   })()
 
   return accessSchemaReady
@@ -706,13 +711,13 @@ export async function upsertManagedAccessUser(assignment: {
  * @param updatedBy - Authenticated delegator identity for audit attribution.
  * @returns Promise<ManagedAccessUser> containing the saved assignment.
  */
-export async function delegateEmployeePermissions(email:string,role:"employee"|"user",permissions:PermissionOverrides,updatedBy:string):Promise<ManagedAccessUser> {
+export async function delegateEmployeePermissions(email:string,role:"employee"|"contractor",permissions:PermissionOverrides,updatedBy:string):Promise<ManagedAccessUser> {
   await ensureManagedAccessTable()
   const rows = await sql`INSERT INTO managed_user_access (email,role,access_status,permissions,updated_by)
     VALUES (${email.toLowerCase()},${role},'active',${JSON.stringify(permissions)}::jsonb,${updatedBy})
     ON CONFLICT (email) DO UPDATE SET permissions = managed_user_access.permissions || EXCLUDED.permissions,
       updated_by = EXCLUDED.updated_by, updated_at = NOW()
-    WHERE managed_user_access.access_status = 'active' AND managed_user_access.role IN ('employee','user')
+    WHERE managed_user_access.access_status = 'active' AND managed_user_access.role IN ('employee','contractor','user')
     RETURNING email,role,access_status,note,permissions,updated_by,created_at,updated_at`
   if (!rows.length) throw new Error("Employee access changed before delegation")
   return toManagedAccessUser((rows as ManagedAccessUserRow[])[0])

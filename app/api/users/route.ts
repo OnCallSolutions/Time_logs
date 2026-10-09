@@ -65,7 +65,7 @@ type DirectoryUser = {
 const accessUpdateSchema = z.object({
   permissions: z.partialRecord(z.enum(Object.keys(permissionLabels) as [keyof typeof permissionLabels, ...(keyof typeof permissionLabels)[]]), z.boolean()).optional(),
   email: z.string().trim().email(),
-  role: z.enum(["admin", "manager", "employee", "user"]),
+  role: z.enum(["admin", "manager", "account_manager", "employee", "contractor"]),
   accessStatus: z.enum(["active", "denied", "blocked"]).default("active"),
   note: z.string().trim().max(500).default(""),
 })
@@ -98,8 +98,9 @@ async function getAdminEmail() {
 function roleSeniority(role: DirectoryUser["role"]) {
   if (role === "admin") return 4
   if (role === "manager") return 3
+  if (role === "account_manager") return 3
   if (role === "employee") return 2
-  if (role === "user") return 1
+  if (role === "contractor") return 1
   return 0
 }
 

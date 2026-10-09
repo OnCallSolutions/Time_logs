@@ -4,7 +4,16 @@ AI-assisted time logging, review, and employee administration built with Next.js
 
 **AI prepares the work; people review and confirm decisions.** The application is served at `/tanovo-time`.
 
+Contractors are outsourced workers who log their own time and submit it for review.
+Employees are internal company staff. Managers review work and delegate permitted
+controls; administrators manage technology and access. The former baseline `user`
+role is now `contractor`; generic account identifiers and audit target names remain
+unchanged. Existing stored `user` assignments are read as contractors without
+rewriting their permissions or deleting historical records.
+
 For GitHub, Vercel, and Microsoft Entra name/URL migration, see [REBRANDING.md](REBRANDING.md). This rebrand applies to `Development` only; other branches retain their existing names and routes.
+
+For the exact Development URL, Azure callbacks, local ports, and branch-specific rules, see [URL_CONFIGURATION.md](URL_CONFIGURATION.md).
 
 ## Contents
 

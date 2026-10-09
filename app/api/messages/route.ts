@@ -20,7 +20,7 @@ export async function GET(): Promise<Response> {
   const access = await getEffectivePermissions(email)
   if (!email || !access.role) return Response.json({error:"Forbidden."},{status:403})
   try {
-    return Response.json({messages:await listMessages(email,access.role === "employee" || access.role === "user"),email:email.toLowerCase(),role:access.role,editMinutes:MESSAGE_EDIT_MINUTES},{headers:{"Cache-Control":"no-store"}})
+    return Response.json({messages:await listMessages(email,access.role === "employee" || access.role === "contractor"),email:email.toLowerCase(),role:access.role,editMinutes:MESSAGE_EDIT_MINUTES},{headers:{"Cache-Control":"no-store"}})
   } catch { return Response.json({error:"Inbox unavailable."},{status:500}) }
 }
 
@@ -39,7 +39,7 @@ export async function PATCH(req: Request): Promise<Response> {
       z.object({action:z.literal("edit"),id:z.string().uuid(),body:z.string().trim().min(1).max(4000).optional(),encrypted:encryptedMessageSchema.optional()}),
     ]).parse(await req.json())
     if (input.action === "read") {
-      await readMessages(email,access.role === "employee" || access.role === "user",input.ids)
+      await readMessages(email,access.role === "employee" || access.role === "contractor",input.ids)
       return Response.json({ok:true})
     }
     if (access.role !== "admin" && (!(access.role === "manager") || !access.permissions.send_messages)) return Response.json({error:"Forbidden."},{status:403})
