@@ -181,10 +181,52 @@ function detail(row) {
       .join("\n\n") || "No failure details.";
 }
 /** @param {string} id - Stable case ID. @returns {void} Opens its full diagnostics window. */
-function openCase(id) {
+async function openCase(id) {
   selectedCase = id;
   detail(rows.get(id));
   windowView("test", "Test details");
+  const container = $("testExplanation");
+  container.replaceChildren(element("p", "Loading test explanation..."));
+  try {
+    const response = await fetch(
+      "/api/test-details?id=" +
+        encodeURIComponent(id) +
+        (currentRun ? "&runId=" + encodeURIComponent(currentRun) : ""),
+    );
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error);
+    if (selectedCase !== id) return;
+    container.replaceChildren(element("p", data.source, "explanation-source"));
+    for (const [key, title] of Object.entries({
+      purpose: "What it tests",
+      necessity: "Why it matters",
+      targets: "Target functions",
+      cases: "Test cases",
+      setup: "How it is set up",
+    })) {
+      const section = element("section");
+      section.append(element("h3", title), element("p", data[key]));
+      container.append(section);
+    }
+    for (const block of data.code) {
+      const section = element("section"),
+        pre = element("pre"),
+        code = element("code", block.code);
+      code.className = "language-" + block.language;
+      pre.append(code);
+      section.append(
+        element("h3", block.title),
+        element("p", block.file, "explanation-source"),
+        pre,
+      );
+      container.append(section);
+    }
+  } catch (error) {
+    if (selectedCase === id)
+      container.replaceChildren(
+        element("p", "Explanation unavailable: " + error.message, "failed"),
+      );
+  }
 }
 
 /** @param {boolean} value - Whether a command is active. @returns {void} Prevents concurrent UI launches. */

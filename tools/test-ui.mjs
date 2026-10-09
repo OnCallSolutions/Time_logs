@@ -24,6 +24,7 @@ import {
   Eye,
 } from "lucide-react";
 import { caseRow, eventParser } from "./test-events.mjs";
+import { explainTest } from "./test-explanations.mjs";
 const root = fileURLToPath(new URL("../", import.meta.url)),
   require = createRequire(import.meta.url);
 const local = (file) => fileURLToPath(new URL(file, import.meta.url));
@@ -348,6 +349,30 @@ export function createTestConsole({
           response,
           await catalog(url.searchParams.get("refresh") === "1"),
         );
+      if (url.pathname === "/api/test-details" && request.method === "GET") {
+        const runId = url.searchParams.get("runId");
+        const run = runId ? runs.get(runId) : null;
+        if (runId && !run)
+          return json(response, { error: "Run not found" }, 404);
+        if (run && run.branch !== branchState().currentBranch)
+          return json(
+            response,
+            {
+              error:
+                "Source branch changed; return to current inventory for setup details",
+            },
+            409,
+          );
+        const inventory = run ? [...run.rows.values()] : (await catalog()).rows;
+        const row = inventory.find(
+          (item) => item.id === url.searchParams.get("id"),
+        );
+        if (!row) return json(response, { error: "Test not found" }, 404);
+        return json(response, {
+          ...explainTest(row),
+          source: "Current checkout: " + branchState().currentBranch,
+        });
+      }
       if (url.pathname === "/api/run" && request.method === "POST") {
         if (
           starting ||

@@ -28,8 +28,10 @@ afterEach(async () => {
  * @param {Function} executor - Command substitute reporting safe fixture outcomes.
  * @returns {Promise<string>} Ephemeral local URL.
  */
-async function fixture(executor) {
-  const row = caseRow({ file: "lib/sample.test.ts", name: "sample case" });
+async function fixture(
+  executor,
+  row = caseRow({ file: "lib/sample.test.ts", name: "sample case" }),
+) {
   server = createTestConsole({
     watchFiles: false,
     discoverTests: async () => ({ rows: [row], errors: [] }),
@@ -203,4 +205,26 @@ it("blocks DNS-rebinding hostnames and unknown actions", async () => {
       })
     ).status,
   ).toBe(400);
+});
+
+it("serves explanations only for discovered IDs, not arbitrary source paths", async () => {
+  const row = caseRow({
+    file: "lib/permissions.test.ts",
+    name: "does not grant rights to denied accounts",
+  });
+  const base = await fixture(undefined, row);
+  const response = await fetch(base + "/api/test-details?id=" + row.id);
+  const details = await response.json();
+  expect(response.status).toBe(200);
+  expect(details.targets).toContain("resolvePermissions");
+  expect(details.code.some((block) => block.file === "tests/setup.ts")).toBe(
+    true,
+  );
+  expect(
+    (await fetch(base + "/api/test-details?id=../../.env.local")).status,
+  ).toBe(404);
+  expect(
+    (await fetch(base + "/api/test-details?id=" + row.id + "&runId=unknown"))
+      .status,
+  ).toBe(404);
 });

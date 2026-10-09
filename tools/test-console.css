@@ -3,6 +3,24 @@
  * The table scrolls internally and full-screen dialogs hide the previous view.
  * Responsive columns preserve readable test names and visible detail buttons.
  */
+#testExplanation {
+  max-width: 1100px;
+}
+#testExplanation p {
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+#testExplanation section {
+  margin: 20px 0;
+}
+.explanation-source {
+  color: #59616e;
+  font-size: 12px;
+}
+#testExplanation pre {
+  min-height: 0;
+}
 :root {
   font-family: Arial, Helvetica, sans-serif;
   color: #050720;

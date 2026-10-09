@@ -41,6 +41,13 @@ diagnostics window; Back returns to the table. Logs, recent in-memory run histor
 and JSON export are available. Refresh tests recollects the inventory; file
 watchers invalidate it when test sources change.
 
+Details now include concise purpose, rationale, referenced target functions,
+test cases, and setup explanations, followed by exact file fixtures, selected
+case code, and shared runner setup. These are parsed from the current checkout
+without executing test source. History results are not immutable source snapshots;
+switching branches blocks explanations for runs from another branch. Dynamically
+generated titles that cannot be matched are explicitly marked, not guessed.
+
 Only one command runs at a time. The server binds to loopback and rejects
 cross-origin commands and non-loopback Host headers. It never checks out, merges,
 or pushes branches. Local commands test the current checkout. Browser targets
