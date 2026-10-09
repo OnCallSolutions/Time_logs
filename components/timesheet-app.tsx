@@ -11,6 +11,7 @@
 import { useEffect, useState } from "react"
 import { Brand } from "@/components/brand"
 import { EmployeeWorkspace } from "@/components/employee-workspace"
+import { ApprovalSelection } from "@/components/approval-selection"
 import { EmployeeRightsPanel, MessagesPanel } from "@/components/collaboration-panel"
 import { useMessageInbox } from "@/components/use-message-inbox"
 import { MessageNotifications } from "@/components/message-notifications"
@@ -472,13 +473,15 @@ export function TimesheetApp({
         role={role}
       />}
       </div></section></WindowSurface>}
-      {(role === "employee" || role === "contractor") && <EmployeeWorkspace entries={entries} selected={personalStatus} onSelect={setPersonalStatus} />}
+      {(role === "employee" || role === "contractor") && <EmployeeWorkspace contractor={role==="contractor"} entries={entries} selected={personalStatus} onSelect={setPersonalStatus} />}
+      {role==="manager"&&<EmployeeWorkspace entries={entries.filter(entry=>entry.ownerEmail?.toLowerCase()===userEmail?.toLowerCase())} selected={personalStatus} onSelect={setPersonalStatus}/>}
       {!accessDenied && (canReviewEntries || permissions.ai_review || canViewTeamReports) && <ManagerWorkspace canReview={canReviewEntries} canReports={canViewTeamReports} canAI={permissions.ai_review} pending={pendingEntries.length} entries={pendingEntries} onApprovals={() => setView("approvals")} onReports={() => setView("report")} onRecommendation={(entry,decision,reason) => setSuggestedReview({entry,decision,reason})} />}
       {suggestedReview && <EntryReviewDialog entry={suggestedReview.entry} decision={suggestedReview.decision} initialNote={suggestedReview.reason} onCancel={() => setSuggestedReview(null)} onConfirm={note => {
         changeEntryStatus(suggestedReview.entry.id,suggestedReview.decision,note || undefined)
         setSuggestedReview(null)
       }} />}
       {accessDenied && <p role="alert">Access is unavailable. Contact your administrator.</p>}
+      {!accessDenied&&(role==="manager"||role==="admin")&&(canReviewEntries||permissions.ai_review)&&<ApprovalSelection entries={pendingEntries} email={userEmail??""} canReview={canReviewEntries} canAI={permissions.ai_review} onUpdated={entry=>setEntries(previous=>previous.map(current=>current.id===entry.id?entry:current))}/>}
 
       {(loadingEntries || syncError) && (
         <div
