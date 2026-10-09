@@ -116,6 +116,10 @@ type ManagedAccessUserRow = {
 }
 
 export type AuditAction =
+  | "account_lifecycle_updated"
+  | "temporary_assignment_created"
+  | "temporary_assignment_revoked"
+  | "temporary_assignment_extended"
   | "account_handoff_created"
   | "message_sent"
   | "message_edited"

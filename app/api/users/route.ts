@@ -208,6 +208,9 @@ export async function GET() {
       })
     }
 
+    for(const user of directory.values()){
+      if(user.accessStatus==="active"&&!await getEffectiveUserRole(user.email))user.accessStatus="denied"
+    }
     return Response.json({
       users: sortDirectoryUsers(Array.from(directory.values())),
     })
