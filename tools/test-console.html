@@ -1,0 +1,142 @@
+<!doctype html>
+<!--
+  Defines the standalone test-console table and native full-screen detail window.
+  All source, names, errors, and statuses are inserted with DOM text APIs.
+  This console runs on loopback and is deliberately separate from the app.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DevOnCall Test Console</title>
+    <link rel="stylesheet" href="/test-console.css" />
+    <script src="/test-console.js" defer></script>
+  </head>
+  <body>
+    <header class="brand">
+      <strong>DevOnCall<span>.</span></strong
+      ><span>Test console</span
+      ><span class="source">Source: <b id="currentBranch">Loading...</b></span>
+    </header>
+    <main>
+      <div class="toolbar" aria-label="Test commands">
+        <button class="primary" data-action="unit">{{play}} Run tests</button>
+        <button data-action="verify">{{verify}} Full verification</button>
+        <button data-action="coverage">{{coverage}} Coverage</button>
+        <button id="refreshCatalog" title="Refresh discovered tests">
+          {{refresh}} Refresh tests
+        </button>
+        <button id="openLogs">{{logs}} Logs</button>
+        <button id="exportResults" disabled>{{download}} Export results</button>
+        <button id="openTargets">{{browser}} Browser targets</button>
+      </div>
+      <div class="runline">
+        <span id="runStatus" role="status">Discovering tests...</span
+        ><span id="currentStage"></span
+        ><label
+          >Run
+          <select id="history">
+            <option value="">Current inventory</option>
+          </select></label
+        >
+      </div>
+      <div class="counts" aria-label="Test totals">
+        <span><b id="totalCount">0</b> tests</span
+        ><span class="passed"><b id="passedCount">0</b> passed</span
+        ><span class="failed"><b id="failedCount">0</b> failed</span
+        ><span class="running"><b id="runningCount">0</b> running</span
+        ><span><b id="skippedCount">0</b> skipped</span
+        ><span><b id="checksCount">0</b> checks</span>
+      </div>
+      <div class="filters">
+        <label class="search"
+          >Search<input
+            id="search"
+            type="search"
+            placeholder="Test name or file"
+        /></label>
+        <label
+          >Category<select id="category">
+            <option value="">All categories</option>
+          </select></label
+        >
+        <label
+          >Area<select id="area">
+            <option value="">All areas</option>
+          </select></label
+        >
+        <label
+          >Status<select id="status">
+            <option value="">All statuses</option>
+            <option value="not_run">Not run</option>
+            <option value="queued">Queued</option>
+            <option value="running">Running</option>
+            <option value="passed">Passed</option>
+            <option value="failed">Failed</option>
+            <option value="skipped">Skipped</option>
+            <option value="flaky">Flaky</option>
+          </select></label
+        >
+        <span id="visibleCount"></span>
+      </div>
+      <p id="catalogErrors" class="failed" role="alert" hidden></p>
+      <div class="table-scroll">
+        <table aria-label="All tests">
+          <thead>
+            <tr>
+              <th>Category</th>
+              <th>Area</th>
+              <th>Test</th>
+              <th class="file-column">File</th>
+              <th>Status</th>
+              <th class="numeric">Duration</th>
+              <th class="action-column">Details</th>
+            </tr>
+          </thead>
+          <tbody id="testRows">
+            <tr>
+              <td colspan="7">Discovering test cases...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </main>
+    <dialog id="detailWindow" aria-labelledby="detailTitle">
+      <div class="window-toolbar">
+        <button id="closeWindow">{{back}} Back</button>
+        <h2 id="detailTitle">Test details</h2>
+      </div>
+      <div class="window-body">
+        <section id="testDetail">
+          <dl id="detailFields"></dl>
+          <h3>Failure details</h3>
+          <pre id="detailErrors"></pre>
+        </section>
+        <section id="logDetail" hidden><pre id="output">Ready.</pre></section>
+        <section id="targetDetail" hidden>
+          <div class="target-row">
+            <label
+              >Local page URL<input
+                id="localUrl"
+                value="http://127.0.0.1:3000/timelog" /></label
+            ><button data-action="e2e-local">
+              {{play}} Run local browser tests
+            </button>
+          </div>
+          <div class="target-row">
+            <label
+              >Deployed page URL<input
+                id="targetUrl"
+                placeholder="https://your-preview.vercel.app/timelog" /></label
+            ><label>Deployment branch<select id="branchList"></select></label
+            ><button data-action="e2e-url">
+              {{play}} Run deployed browser tests
+            </button>
+          </div>
+          <button data-action="install">{{browser}} Install Chromium</button>
+        </section>
+      </div>
+    </dialog>
+    <template id="detailIcon">{{view}}</template>
+  </body>
+</html>

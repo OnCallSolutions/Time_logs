@@ -1,616 +1,488 @@
 /**
- * Serves the standalone ONCALL testing dashboard.
- *
- * This Node server is intentionally outside the Next.js application. It exposes a
- * small local web UI with buttons and event listeners for running the shared test
- * framework against the current checkout, local app, or any deployed branch URL.
+ * Serves a loopback-only console independent of the Next.js application.
+ * Discovers actual cases and streams structured outcomes into a compact table.
+ * Fixed commands run on the current checkout without changing Git branches.
  */
-import { spawn, spawnSync } from "node:child_process"
-import { createServer } from "node:http"
-import { randomUUID } from "node:crypto"
-import { URL } from "node:url"
+import { spawn, spawnSync } from "node:child_process";
+import { createServer } from "node:http";
+import { randomUUID } from "node:crypto";
+import { readFileSync, watch } from "node:fs";
+import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
+import { dirname, join, resolve } from "node:path";
+import React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import {
+  Play,
+  ShieldCheck,
+  ChartNoAxesCombined,
+  RefreshCw,
+  Logs,
+  Download,
+  Globe,
+  ArrowLeft,
+  Eye,
+} from "lucide-react";
+import { caseRow, eventParser } from "./test-events.mjs";
+const root = fileURLToPath(new URL("../", import.meta.url)),
+  require = createRequire(import.meta.url);
+const local = (file) => fileURLToPath(new URL(file, import.meta.url));
+const vitest = join(
+  dirname(require.resolve("vitest/package.json")),
+  "vitest.mjs",
+);
+const playwright = require.resolve("@playwright/test/cli"),
+  tsc = require.resolve("typescript/bin/tsc"),
+  next = require.resolve("next/dist/bin/next");
+const icons = {
+  play: Play,
+  verify: ShieldCheck,
+  coverage: ChartNoAxesCombined,
+  refresh: RefreshCw,
+  logs: Logs,
+  download: Download,
+  browser: Globe,
+  back: ArrowLeft,
+  view: Eye,
+};
 
-const port = Number(process.env.TEST_UI_PORT ?? 4317)
-const host = process.env.TEST_UI_HOST ?? "127.0.0.1"
-const runs = new Map()
-
-/**
- * Reads a JSON request body.
- *
- * @param {import("node:http").IncomingMessage} request - Incoming HTTP request.
- * @returns {Promise<Record<string, unknown>>} Parsed JSON body, or an empty object.
- */
-function readJsonBody(request) {
-  return new Promise((resolve, reject) => {
-    let body = ""
-    request.on("data", (chunk) => {
-      body += chunk
-    })
-    request.on("end", () => {
-      if (!body.trim()) {
-        resolve({})
-        return
-      }
-
-      try {
-        resolve(JSON.parse(body))
-      } catch (error) {
-        reject(error)
-      }
-    })
-    request.on("error", reject)
-  })
-}
-
-/**
- * Sends a JSON response.
- *
- * @param {import("node:http").ServerResponse} response - HTTP response object.
- * @param {unknown} payload - JSON payload to send.
- * @param {number} status - HTTP status code.
- * @returns {void}
- */
-function sendJson(response, payload, status = 200) {
-  response.writeHead(status, {
-    "Content-Type": "application/json; charset=utf-8",
-  })
-  response.end(JSON.stringify(payload))
-}
-
-/**
- * Runs a shell command and stores streamed output for dashboard clients.
- *
- * @param {string} label - Human-readable run label.
- * @param {string} executable - Command executable.
- * @param {string[]} args - Command arguments.
- * @param {NodeJS.ProcessEnv} env - Environment variables for the child process.
- * @returns {string} Created run id.
- */
-function startRun(label, executable, args, env = process.env) {
-  const id = randomUUID()
-  const run = {
-    id,
-    label,
-    command: [executable, ...args].join(" "),
-    status: "running",
-    exitCode: null,
-    logs: [],
-    clients: new Set(),
-    startedAt: new Date().toISOString(),
-    finishedAt: null,
-  }
-  runs.set(id, run)
-
-  pushLog(run, "system", `> ${run.command}\n`)
-
-  const command = resolveCommand(executable, args)
-  const child = spawn(command.executable, command.args, {
-    env,
-    stdio: ["ignore", "pipe", "pipe"],
-  })
-
-  child.stdout.on("data", (chunk) => pushLog(run, "stdout", chunk.toString()))
-  child.stderr.on("data", (chunk) => pushLog(run, "stderr", chunk.toString()))
-  child.on("exit", (code) => {
-    run.status = code === 0 ? "passed" : "failed"
-    run.exitCode = code ?? 1
-    run.finishedAt = new Date().toISOString()
-    pushLog(run, "system", `\n${run.status.toUpperCase()} (${run.exitCode})\n`)
-    broadcast(run, "done", {
-      status: run.status,
-      exitCode: run.exitCode,
-      finishedAt: run.finishedAt,
-    })
-    for (const client of run.clients) {
-      client.end()
-    }
-    run.clients.clear()
-  })
-
-  return id
-}
-
-/**
- * Adds one output chunk to a run and broadcasts it.
- *
- * @param {Record<string, unknown>} run - Stored run state.
- * @param {string} stream - Output stream name.
- * @param {string} text - Output text.
- * @returns {void}
- */
-function pushLog(run, stream, text) {
-  const entry = { stream, text, at: new Date().toISOString() }
-  run.logs.push(entry)
-  broadcast(run, "log", entry)
-}
-
-/**
- * Broadcasts a server-sent event to every connected client for a run.
- *
- * @param {Record<string, unknown>} run - Stored run state.
- * @param {string} event - Event name.
- * @param {unknown} payload - Event payload.
- * @returns {void}
- */
-function broadcast(run, event, payload) {
-  const frame = `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`
-  for (const client of run.clients) {
-    client.write(frame)
-  }
-}
-
-/**
- * Returns current Git branch and local branch names.
- *
- * @returns {{ currentBranch: string, branches: string[] }} Branch metadata.
- */
-function getBranchState() {
-  const current = spawnSync("git", ["branch", "--show-current"], {
-    encoding: "utf8",
-  })
-  const branches = spawnSync("git", ["branch", "--format=%(refname:short)"], {
-    encoding: "utf8",
-  })
-
+/** @returns {object} Current source branch and local branches, without modifying Git. */
+export function branchState() {
+  const git = (args) =>
+    spawnSync("git", args, {
+      cwd: root,
+      encoding: "utf8",
+      windowsHide: true,
+    }).stdout?.trim() ?? "";
   return {
-    currentBranch: current.stdout.trim() || "unknown",
-    branches: branches.stdout
+    currentBranch: git(["branch", "--show-current"]) || "detached",
+    branches: git(["branch", "--format=%(refname:short)"])
       .split(/\r?\n/)
-      .map((branch) => branch.trim())
       .filter(Boolean),
-  }
+  };
 }
-
-/**
- * Resolves command shims across Windows and Unix-like terminals.
- *
- * @param {string} executable - Portable command name.
- * @returns {string} Platform-specific executable name.
- */
-function resolveCommand(executable, args) {
-  if (process.platform === "win32" && executable === "pnpm") {
-    return {
-      executable: "cmd.exe",
-      args: ["/d", "/s", "/c", "pnpm", ...args],
-    }
-  }
-
-  return { executable, args }
-}
-
-/**
- * Validates an absolute HTTP(S) URL for deployed branch testing.
- *
- * @param {unknown} value - Candidate URL from the dashboard.
- * @returns {string | null} Normalized URL, or null when invalid.
- */
-function normalizeHttpUrl(value) {
-  if (typeof value !== "string") return null
-
+/** @param {string} value - Target page. @returns {string|null} Credential-free HTTP URL. */
+export function normalizeTarget(value) {
   try {
-    const url = new URL(value.trim())
-    if (url.protocol !== "http:" && url.protocol !== "https:") return null
-    return url.toString()
+    const url = new URL(value);
+    return ["http:", "https:"].includes(url.protocol) &&
+      !url.username &&
+      !url.password
+      ? url.href
+      : null;
   } catch {
-    return null
+    return null;
   }
 }
-
 /**
- * Maps a dashboard action to a command.
- *
- * @param {Record<string, unknown>} body - Request body from the dashboard.
- * @returns {{ label: string, executable: string, args: string[], env?: NodeJS.ProcessEnv } | null} Command spec.
+ * Resolves allowlisted actions into direct Node arguments, never shell strings.
+ * @param {object} input - Action and browser target.
+ * @returns {object[]|null} Ordered stages or invalid-action sentinel.
  */
-function commandForAction(body) {
-  if (body.action === "verify") {
-    return { label: "Full local verification", executable: "pnpm", args: ["verify"] }
-  }
-  if (body.action === "unit") {
-    return { label: "Unit and component tests", executable: "pnpm", args: ["test"] }
-  }
-  if (body.action === "coverage") {
-    return {
-      label: "Coverage report",
-      executable: "pnpm",
-      args: ["test:coverage"],
-    }
-  }
-  if (body.action === "e2e-local") {
-    return {
-      label: "Local browser smoke test",
-      executable: "pnpm",
-      args: ["test:e2e"],
-    }
-  }
-  if (body.action === "install") {
-    return {
-      label: "Install Playwright Chromium",
-      executable: "pnpm",
-      args: ["test:install"],
-    }
-  }
-  if (body.action === "e2e-url") {
-    const targetUrl = normalizeHttpUrl(body.targetUrl)
-    if (!targetUrl) return null
-    return {
-      label: `Deployed browser smoke test: ${targetUrl}`,
-      executable: "pnpm",
-      args: ["test:e2e:url"],
-      env: {
-        ...process.env,
-        TEST_TARGET_URL: targetUrl,
+export function actionSteps(input) {
+  const unit = {
+    label: "Unit, API, and UI tests",
+    kind: "unit",
+    args: [vitest, "run", "--reporter=" + local("vitest-console-reporter.mjs")],
+  };
+  if (input.action === "unit") return [unit];
+  if (input.action === "coverage")
+    return [{ ...unit, args: [...unit.args, "--coverage"] }];
+  if (input.action === "verify")
+    return [
+      { label: "TypeScript", kind: "check", args: [tsc, "--noEmit"] },
+      unit,
+      { label: "Production build", kind: "check", args: [next, "build"] },
+    ];
+  if (input.action === "install")
+    return [
+      {
+        label: "Install Chromium",
+        kind: "check",
+        args: [playwright, "install", "chromium"],
       },
-    }
+    ];
+  if (["e2e-local", "e2e-url"].includes(input.action)) {
+    const target = normalizeTarget(
+      input.action === "e2e-local" ? input.localUrl : input.targetUrl,
+    );
+    if (!target) return null;
+    if (
+      input.action === "e2e-local" &&
+      !["localhost", "127.0.0.1", "[::1]"].includes(new URL(target).hostname)
+    )
+      return null;
+    return [
+      {
+        label: "Browser tests",
+        kind: "browser",
+        args: [
+          playwright,
+          "test",
+          "--reporter=" + local("playwright-console-reporter.mjs"),
+        ],
+        env: { TEST_TARGET_URL: target },
+      },
+    ];
   }
-
-  return null
+  return null;
+}
+/**
+ * Runs a direct Node child, separating reporter events from terminal output.
+ * @param {string[]} args - CLI arguments. @param {object} env - Scoped environment additions.
+ * @param {Function} onEvent - Event consumer. @param {Function} onLog - Output consumer.
+ * @returns {Promise<number>} Actual process exit status.
+ */
+export function execute(args, env = {}, onEvent = () => {}, onLog = () => {}) {
+  return new Promise((done) => {
+    const parser = eventParser(onEvent, onLog),
+      child = spawn(process.execPath, args, {
+        cwd: root,
+        env: { ...process.env, ...env },
+        windowsHide: true,
+      });
+    child.stdout.on("data", (chunk) => parser.write(chunk.toString()));
+    child.stderr.on("data", (chunk) => onLog(chunk.toString()));
+    child.on("error", (error) => onLog(error.message + "\n"));
+    child.on("close", (code) => {
+      parser.flush();
+      done(code ?? 1);
+    });
+  });
+}
+/** @returns {Promise<object>} Collects runnable cases without executing test callbacks. */
+export async function discover() {
+  const rows = new Map(),
+    errors = [];
+  const event = (value) => {
+    if (value.type === "case")
+      rows.set(value.row.id, { ...value.row, state: "not_run" });
+    if (value.type === "error") errors.push(JSON.stringify(value));
+  };
+  for (const args of [
+    [local("collect-console-tests.mjs")],
+    [
+      playwright,
+      "test",
+      "--list",
+      "--reporter=" + local("playwright-console-reporter.mjs"),
+    ],
+  ]) {
+    let output = "";
+    const code = await execute(args, {}, event, (text) => {
+      output += text;
+    });
+    if (code) errors.push(output || "Runner discovery failed");
+  }
+  for (const name of ["TypeScript", "Production build"]) {
+    const row = caseRow({ file: "", name, kind: "check" });
+    rows.set(row.id, row);
+  }
+  return { rows: [...rows.values()], errors };
+}
+/** @param {object} response - HTTP response. @param {unknown} data - Payload. @param {number} code - Status. @returns {void} Sends JSON. */
+function json(response, data, code = 200) {
+  response.writeHead(code, {
+    "Content-Type": "application/json",
+    "Cache-Control": "no-store",
+  });
+  response.end(JSON.stringify(data));
+}
+/** @param {object} request - Incoming request. @returns {Promise<object>} Bounded parsed JSON. */
+async function body(request) {
+  let text = "";
+  for await (const chunk of request) {
+    text += chunk;
+    if (text.length > 131072) throw new Error("Request too large");
+  }
+  return JSON.parse(text || "{}");
 }
 
 /**
- * Serves the dashboard HTML.
- *
- * @returns {string} HTML document with dynamic event-listener UI.
+ * Creates an injectable local server with no import-time listener.
+ * @param {object} options - Discovery, executor, and watch overrides for tests.
+ * @returns {import('node:http').Server} Unbound HTTP server.
  */
-function renderDashboard() {
-  return `<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>ONCALL Test Console</title>
-    <style>
-      :root {
-        color-scheme: light;
-        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        background: #f8fafc;
-        color: #0f172a;
-      }
-      body {
-        margin: 0;
-      }
-      main {
-        margin: 0 auto;
-        max-width: 1180px;
-        padding: 28px;
-      }
-      header,
-      section {
-        border: 1px solid #dbe3ef;
-        border-radius: 12px;
-        background: #ffffff;
-        box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
-      }
-      header {
-        padding: 24px;
-      }
-      h1,
-      h2 {
-        margin: 0;
-      }
-      p {
-        color: #475569;
-      }
-      .grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-        gap: 12px;
-        margin-top: 18px;
-      }
-      button {
-        min-height: 44px;
-        cursor: pointer;
-        border: 1px solid #cbd5e1;
-        border-radius: 10px;
-        background: #f8fafc;
-        color: #0f172a;
-        font-weight: 650;
-      }
-      button:hover {
-        background: #eef4ff;
-        border-color: #93c5fd;
-      }
-      button.primary {
-        background: #1d4ed8;
-        border-color: #1d4ed8;
-        color: #ffffff;
-      }
-      button:disabled {
-        cursor: not-allowed;
-        opacity: 0.55;
-      }
-      section {
-        margin-top: 16px;
-        padding: 18px;
-      }
-      label {
-        display: block;
-        font-size: 0.84rem;
-        font-weight: 700;
-        color: #334155;
-      }
-      input,
-      select {
-        box-sizing: border-box;
-        width: 100%;
-        height: 42px;
-        margin-top: 6px;
-        border: 1px solid #cbd5e1;
-        border-radius: 10px;
-        padding: 0 12px;
-        color: #0f172a;
-      }
-      .inline {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) 180px;
-        gap: 12px;
-      }
-      pre {
-        min-height: 360px;
-        max-height: 58vh;
-        overflow: auto;
-        border-radius: 10px;
-        background: #020617;
-        color: #d1fae5;
-        padding: 16px;
-        white-space: pre-wrap;
-      }
-      .status {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 10px;
-        align-items: center;
-        margin-top: 14px;
-      }
-      .pill {
-        border: 1px solid #cbd5e1;
-        border-radius: 999px;
-        padding: 5px 10px;
-        background: #f8fafc;
-        font-size: 0.82rem;
-        font-weight: 700;
-      }
-      .ok {
-        color: #047857;
-      }
-      .bad {
-        color: #b91c1c;
-      }
-      @media (max-width: 720px) {
-        main {
-          padding: 14px;
+export function createTestConsole({
+  discoverTests = discover,
+  executeStep = execute,
+  watchFiles = true,
+} = {}) {
+  const runs = new Map(),
+    watchers = [];
+  let cached = null,
+    cacheBranch = "",
+    dirty = true,
+    starting = false;
+  if (watchFiles)
+    for (const directory of [
+      "app",
+      "components",
+      "lib",
+      "tests",
+      "e2e",
+      "tools",
+    ]) {
+      try {
+        watchers.push(
+          watch(join(root, directory), { recursive: true }, () => {
+            dirty = true;
+          }),
+        );
+      } catch {}
+    }
+  /** @param {boolean} refresh - Force collection. @returns {Promise<object>} Branch-scoped inventory. */
+  async function catalog(refresh = false) {
+    const branch = branchState().currentBranch;
+    if (refresh || dirty || !cached || cacheBranch !== branch) {
+      cached = await discoverTests();
+      cacheBranch = branch;
+      dirty = false;
+    }
+    return cached;
+  }
+  /** @param {object} run - Run record. @returns {object} Snapshot without process environment or clients. */
+  function snapshot(run) {
+    return { ...run, rows: [...run.rows.values()], clients: undefined };
+  }
+  /** @param {object} run - Run. @param {string} type - Event. @param {unknown} value - Payload. @returns {void} Broadcasts an event. */
+  function publish(run, type, value) {
+    for (const client of run.clients)
+      client.write(
+        "event: " + type + "\ndata: " + JSON.stringify(value) + "\n\n",
+      );
+  }
+  /** @param {object} run - Run. @param {string} text - Output. @returns {void} Stores bounded logs. */
+  function log(run, text) {
+    run.logs = (run.logs + text).slice(-1000000);
+    publish(run, "log", { text });
+  }
+  /** @param {object} run - Run. @param {object} row - Case. @returns {void} Updates one table row. */
+  function update(run, row) {
+    run.rows.set(row.id, { ...run.rows.get(row.id), ...row });
+    publish(run, "case", run.rows.get(row.id));
+  }
+  /** @param {object} run - Run. @param {object[]} steps - Stages. @returns {Promise<void>} Completes stages and result streams. */
+  async function perform(run, steps) {
+    let code = 0;
+    try {
+      for (const step of steps) {
+        publish(run, "stage", { label: step.label });
+        const start = Date.now(),
+          check = caseRow({ file: "", name: step.label, kind: "check" });
+        if (step.kind === "check")
+          update(run, {
+            ...check,
+            state: "running",
+            startedAt: new Date().toISOString(),
+          });
+        code = await executeStep(
+          step.args,
+          step.env ?? {},
+          (event) => {
+            if (event.type === "case") update(run, event.row);
+            else if (event.type === "error")
+              log(run, JSON.stringify(event) + "\n");
+          },
+          (text) => log(run, text),
+        );
+        if (
+          step.kind !== "check" &&
+          code === 0 &&
+          [...run.rows.values()].some(
+            (row) =>
+              row.kind === step.kind &&
+              ["queued", "running"].includes(row.state),
+          )
+        ) {
+          code = 1;
+          log(run, "Runner did not report every discovered outcome.\n");
         }
-        .inline {
-          grid-template-columns: 1fr;
-        }
+        if (step.kind === "check" || code)
+          update(run, {
+            ...check,
+            state: code ? "failed" : "passed",
+            duration: Date.now() - start,
+            finishedAt: new Date().toISOString(),
+          });
+        if (code) break;
       }
-    </style>
-  </head>
-  <body>
-    <main>
-      <header>
-        <h1>ONCALL Test Console</h1>
-        <p>Run the shared testing framework from VS Code or your terminal. The local buttons test the current checkout; the deployed URL button can test any previous, current, or future branch preview URL.</p>
-        <div class="status">
-          <span class="pill">Current branch: <span id="currentBranch">loading</span></span>
-          <span class="pill">Run status: <span id="runStatus">idle</span></span>
-        </div>
-      </header>
-
-      <section>
-        <h2>Local Checkout</h2>
-        <div class="grid">
-          <button class="primary" data-action="verify">Full verification</button>
-          <button data-action="unit">Unit/component tests</button>
-          <button data-action="coverage">Coverage report</button>
-          <button data-action="e2e-local">Local browser smoke</button>
-          <button data-action="install">Install Playwright Chromium</button>
-        </div>
-      </section>
-
-      <section>
-        <h2>Branch Preview URL</h2>
-        <p>Paste a Vercel preview or production page URL, including <strong>/timelog</strong>.</p>
-        <div class="inline">
-          <label>
-            Main page URL
-            <input id="targetUrl" placeholder="https://your-branch.vercel.app/timelog" />
-          </label>
-          <label>
-            Branch label
-            <select id="branchList"></select>
-          </label>
-        </div>
-        <div class="grid">
-          <button class="primary" data-action="e2e-url">Test deployed URL</button>
-        </div>
-      </section>
-
-      <section>
-        <h2>Output</h2>
-        <pre id="output">Ready.</pre>
-      </section>
-    </main>
-
-    <script>
-      const output = document.querySelector("#output");
-      const statusEl = document.querySelector("#runStatus");
-      const currentBranchEl = document.querySelector("#currentBranch");
-      const branchList = document.querySelector("#branchList");
-      const targetUrl = document.querySelector("#targetUrl");
-      const buttons = Array.from(document.querySelectorAll("button[data-action]"));
-
-      function append(text) {
-        output.textContent += text;
-        output.scrollTop = output.scrollHeight;
-      }
-
-      function setButtons(disabled) {
-        for (const button of buttons) button.disabled = disabled;
-      }
-
-      async function loadState() {
-        const response = await fetch("/api/state");
-        const state = await response.json();
-        currentBranchEl.textContent = state.currentBranch;
-        targetUrl.value = state.defaultTargetUrl || "";
-        branchList.innerHTML = "";
-        for (const branch of state.branches) {
-          const option = document.createElement("option");
-          option.value = branch;
-          option.textContent = branch;
-          option.selected = branch === state.currentBranch;
-          branchList.append(option);
-        }
-      }
-
-      async function run(action) {
-        output.textContent = "";
-        statusEl.textContent = "starting";
-        statusEl.className = "";
-        setButtons(true);
-
-        const response = await fetch("/api/run", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action, targetUrl: targetUrl.value, branch: branchList.value }),
+    } catch (error) {
+      code = 1;
+      log(run, error.stack || error.message);
+    }
+    for (const row of run.rows.values())
+      if (["queued", "running"].includes(row.state))
+        update(run, { ...row, state: "not_run" });
+    run.exitCode = code;
+    run.status = code ? "failed" : "passed";
+    run.finishedAt = new Date().toISOString();
+    publish(run, "done", snapshot(run));
+    for (const client of run.clients) client.end();
+    run.clients.clear();
+  }
+  const server = createServer(async (request, response) => {
+    try {
+      const url = new URL(request.url, "http://" + request.headers.host);
+      if (!["localhost", "127.0.0.1", "[::1]"].includes(url.hostname))
+        return json(response, { error: "Loopback host required" }, 403);
+      if (
+        request.method === "POST" &&
+        request.headers.origin &&
+        request.headers.origin !== url.origin
+      )
+        return json(response, { error: "Cross-origin commands blocked" }, 403);
+      if (url.pathname === "/api/state")
+        return json(response, {
+          ...branchState(),
+          runs: [...runs.values()].map(({ id, label, status, startedAt }) => ({
+            id,
+            label,
+            status,
+            startedAt,
+          })),
+          defaultTargetUrl: "",
         });
-        const data = await response.json();
-
-        if (!response.ok) {
-          append(data.error || "Unable to start run.");
-          statusEl.textContent = "failed";
-          statusEl.className = "bad";
-          setButtons(false);
+      if (url.pathname === "/api/tests")
+        return json(
+          response,
+          await catalog(url.searchParams.get("refresh") === "1"),
+        );
+      if (url.pathname === "/api/run" && request.method === "POST") {
+        if (
+          starting ||
+          [...runs.values()].some((run) => run.status === "running")
+        )
+          return json(response, { error: "A run is already active" }, 409);
+        const input = await body(request),
+          steps = actionSteps(input);
+        if (!steps)
+          return json(
+            response,
+            { error: "Invalid command or target URL" },
+            400,
+          );
+        if (
+          starting ||
+          [...runs.values()].some((run) => run.status === "running")
+        )
+          return json(
+            response,
+            { error: "A run is already starting or active" },
+            409,
+          );
+        starting = true;
+        try {
+          const branch = branchState().currentBranch,
+            inventory = await catalog();
+          if (branchState().currentBranch !== branch)
+            return json(
+              response,
+              { error: "Source branch changed; refresh and retry" },
+              409,
+            );
+          if (inventory.errors.length)
+            return json(response, { error: inventory.errors.join("\n") }, 400);
+          const kinds = new Set(steps.map((step) => step.kind)),
+            id = randomUUID();
+          const run = {
+            id,
+            label: input.action,
+            branch,
+            targetUrl: steps[0].env?.TEST_TARGET_URL,
+            startedAt: new Date().toISOString(),
+            status: "running",
+            rows: new Map(
+              inventory.rows.map((row) => [
+                row.id,
+                { ...row, state: kinds.has(row.kind) ? "queued" : "not_run" },
+              ]),
+            ),
+            logs: "",
+            clients: new Set(),
+          };
+          runs.set(id, run);
+          while (runs.size > 10) runs.delete(runs.keys().next().value);
+          json(response, { runId: id });
+          void perform(run, steps);
+        } finally {
+          starting = false;
+        }
+        return;
+      }
+      if (["/api/events", "/api/results"].includes(url.pathname)) {
+        const run = runs.get(url.searchParams.get("runId"));
+        if (!run) return json(response, { error: "Run not found" }, 404);
+        if (url.pathname === "/api/results")
+          return json(response, snapshot(run));
+        response.writeHead(200, {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          Connection: "keep-alive",
+        });
+        response.write(
+          "event: snapshot\ndata: " + JSON.stringify(snapshot(run)) + "\n\n",
+        );
+        if (run.status !== "running") {
+          response.end(
+            "event: done\ndata: " + JSON.stringify(snapshot(run)) + "\n\n",
+          );
           return;
         }
-
-        statusEl.textContent = "running";
-        const events = new EventSource("/api/events?runId=" + encodeURIComponent(data.runId));
-        events.addEventListener("log", (event) => {
-          const entry = JSON.parse(event.data);
-          append(entry.text);
+        run.clients.add(response);
+        const heartbeat = setInterval(
+          () => response.write(": heartbeat\n\n"),
+          15000,
+        );
+        response.on("close", () => {
+          clearInterval(heartbeat);
+          run.clients.delete(response);
         });
-        events.addEventListener("done", (event) => {
-          const result = JSON.parse(event.data);
-          statusEl.textContent = result.status;
-          statusEl.className = result.status === "passed" ? "ok" : "bad";
-          setButtons(false);
-          events.close();
-        });
-        events.onerror = () => {
-          append("\\nConnection to test run closed.\\n");
-          setButtons(false);
-          events.close();
-        };
+        return;
       }
-
-      for (const button of buttons) {
-        button.addEventListener("click", () => run(button.dataset.action));
-      }
-
-      loadState().catch((error) => {
-        currentBranchEl.textContent = "unknown";
-        append("\\nFailed to load test console state: " + error.message + "\\n");
+      if (request.method !== "GET")
+        return json(response, { error: "Not found" }, 404);
+      const file = {
+        "/": "test-console.html",
+        "/test-console.css": "test-console.css",
+        "/test-console.js": "test-console.js",
+      }[url.pathname];
+      if (!file) return json(response, { error: "Not found" }, 404);
+      let content = readFileSync(local(file), "utf8");
+      if (file.endsWith("html"))
+        content = content.replace(/\{\{(\w+)\}\}/g, (_, name) =>
+          icons[name]
+            ? renderToStaticMarkup(
+                React.createElement(icons[name], {
+                  size: 16,
+                  "aria-hidden": true,
+                }),
+              )
+            : "",
+        );
+      response.writeHead(200, {
+        "Content-Type": file.endsWith("html")
+          ? "text/html"
+          : file.endsWith("css")
+            ? "text/css"
+            : "text/javascript",
       });
-    </script>
-  </body>
-</html>`
-}
-
-/**
- * Handles incoming dashboard and API requests.
- *
- * @param {import("node:http").IncomingMessage} request - HTTP request.
- * @param {import("node:http").ServerResponse} response - HTTP response.
- * @returns {Promise<void>}
- */
-async function handleRequest(request, response) {
-  const url = new URL(request.url ?? "/", `http://${host}:${port}`)
-
-  if (request.method === "GET" && url.pathname === "/") {
-    response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" })
-    response.end(renderDashboard())
-    return
-  }
-
-  if (request.method === "GET" && url.pathname === "/api/state") {
-    sendJson(response, {
-      ...getBranchState(),
-      defaultTargetUrl: process.env.MAIN_PAGE_URL ?? process.env.TEST_TARGET_URL ?? "",
-    })
-    return
-  }
-
-  if (request.method === "POST" && url.pathname === "/api/run") {
-    try {
-      const body = await readJsonBody(request)
-      const command = commandForAction(body)
-      if (!command) {
-        sendJson(response, { error: "Unknown action or invalid deployed URL." }, 400)
-        return
-      }
-
-      const runId = startRun(
-        command.label,
-        command.executable,
-        command.args,
-        command.env,
-      )
-      sendJson(response, { runId })
+      response.end(content);
     } catch (error) {
-      sendJson(response, { error: error instanceof Error ? error.message : "Bad request." }, 400)
+      json(response, { error: error.message }, 400);
     }
-    return
-  }
-
-  if (request.method === "GET" && url.pathname === "/api/events") {
-    const runId = url.searchParams.get("runId")
-    const run = runId ? runs.get(runId) : null
-    if (!run) {
-      response.writeHead(404)
-      response.end("Unknown run.")
-      return
-    }
-
-    response.writeHead(200, {
-      "Cache-Control": "no-cache",
-      "Connection": "keep-alive",
-      "Content-Type": "text/event-stream",
-    })
-
-    run.clients.add(response)
-    for (const entry of run.logs) {
-      response.write(`event: log\ndata: ${JSON.stringify(entry)}\n\n`)
-    }
-    if (run.status !== "running") {
-      response.write(
-        `event: done\ndata: ${JSON.stringify({
-          status: run.status,
-          exitCode: run.exitCode,
-          finishedAt: run.finishedAt,
-        })}\n\n`,
-      )
-      response.end()
-      return
-    }
-
-    request.on("close", () => {
-      run.clients.delete(response)
-    })
-    return
-  }
-
-  response.writeHead(404)
-  response.end("Not found.")
+  });
+  server.on("close", () => {
+    for (const watcher of watchers) watcher.close();
+  });
+  return server;
 }
-
-const server = createServer((request, response) => {
-  handleRequest(request, response).catch((error) => {
-    sendJson(response, { error: error instanceof Error ? error.message : "Server error." }, 500)
-  })
-})
-
-server.listen(port, host, () => {
-  console.log(`ONCALL Test Console: http://${host}:${port}`)
-})
+if (
+  process.argv[1] &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+) {
+  const port = Number(process.env.TEST_UI_PORT ?? 4317);
+  createTestConsole().listen(port, "127.0.0.1", () =>
+    console.log("Test console: http://127.0.0.1:" + port),
+  );
+}
