@@ -21,6 +21,8 @@ export type EntryStatus = "draft" | "submitted" | "approved" | "rejected"
  */
 export type TimeEntry = {
   id: string
+  /** Server-assigned record owner; never inferred from the display contractor name. */
+  ownerEmail?: string
   contractor: string
   /** ISO date string: YYYY-MM-DD */
   date: string
@@ -41,7 +43,7 @@ export type TimeEntry = {
  */
 export type ParsedEntry = Omit<
   TimeEntry,
-  "id" | "status" | "reviewedBy" | "reviewedAt" | "reviewNote"
+  "id" | "ownerEmail" | "status" | "reviewedBy" | "reviewedAt" | "reviewNote"
 >
 
 /**

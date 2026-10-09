@@ -15,8 +15,8 @@ import { Button } from "@/components/ui/button"
  * @param props.onSelect - Callback that selects a status without changing records.
  * @returns JSX.Element with employee workflow controls.
  */
-export function EmployeeWorkspace({ entries, selected, onSelect }: {
-  entries: TimeEntry[]; selected: EntryStatus | "all"; onSelect: (status: EntryStatus | "all") => void
+export function EmployeeWorkspace({ entries, selected, onSelect, contractor=false }: {
+  entries: TimeEntry[]; selected: EntryStatus | "all"; onSelect: (status: EntryStatus | "all") => void; contractor?:boolean
 }) {
   const options = [
     { status: "all", label: "All my entries", icon: ListChecks },
@@ -25,7 +25,9 @@ export function EmployeeWorkspace({ entries, selected, onSelect }: {
     { status: "rejected", label: "Needs correction", icon: XCircle },
     { status: "approved", label: "Approved", icon: CheckCircle2 },
   ] as const
-  return <section aria-label="Personal workflow" className="flex flex-wrap gap-2">
+  return <section aria-label={contractor?"Contractor workflow":"Personal workflow"} className="flex flex-wrap items-center gap-2">
+    <h2 className="mr-2 text-sm font-semibold">{contractor?"Contractor submissions":"Internal staff time"}</h2>
+    {contractor&&<dl className="flex w-full flex-wrap gap-5 border-b pb-3 text-sm"><div><dt className="text-muted-foreground">Submitted hours</dt><dd className="font-semibold">{entries.filter(entry=>entry.status==="submitted").reduce((total,entry)=>total+entry.hours,0)}</dd></div><div><dt className="text-muted-foreground">Approved hours</dt><dd className="font-semibold text-green-700">{entries.filter(entry=>entry.status==="approved").reduce((total,entry)=>total+entry.hours,0)}</dd></div><div><dt className="text-muted-foreground">Contract projects</dt><dd className="font-semibold">{new Set(entries.map(entry=>entry.project)).size}</dd></div></dl>}
     {options.map(({status,label,icon:Icon}) => <Button key={status} className="feature-control" data-feature={status} variant="outline" aria-pressed={selected === status} onClick={() => onSelect(status)}>
       <Icon className="size-4" aria-hidden="true" />{label}
       <span className="tabular-nums">{status === "all" ? entries.length : entries.filter(entry => entry.status === status).length}</span>

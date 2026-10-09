@@ -29,6 +29,7 @@ const sql = neon(databaseUrl)
 
 type TimeEntryRow = {
   id: string
+  owner_email?: string
   contractor: string
   work_date: string | Date
   hours: string | number
@@ -115,6 +116,7 @@ type ManagedAccessUserRow = {
 }
 
 export type AuditAction =
+  | "account_handoff_created"
   | "message_sent"
   | "message_edited"
   | "message_deleted"
@@ -173,6 +175,7 @@ const accessSchemaReady = createDatabaseInitializer()
 function toTimeEntry(row: TimeEntryRow): TimeEntry {
   return {
     id: row.id,
+    ownerEmail: row.owner_email,
     contractor: row.contractor,
     date:
       row.work_date instanceof Date
@@ -808,6 +811,7 @@ export async function listTimeEntries(ownerEmail: string, includeAll = false) {
   const rows = await sql`
     SELECT
       id,
+      owner_email,
       contractor,
       work_date,
       hours,
@@ -868,6 +872,7 @@ export async function createTimeEntries(
       )
       RETURNING
         id,
+        owner_email,
         contractor,
         work_date,
         hours,
@@ -906,6 +911,7 @@ export async function getTimeEntry(
   const rows = await sql`
     SELECT
       id,
+      owner_email,
       contractor,
       work_date,
       hours,
@@ -982,8 +988,11 @@ export async function updateTimeEntry(
       updated_at = now()
     WHERE id = ${id}
       AND (${includeAll} OR owner_email = ${ownerEmail})
+      AND (${patch.status ?? null} NOT IN ('approved', 'rejected') OR ${patch.status ?? null} IS NULL
+        OR (status = 'submitted' AND lower(owner_email) <> lower(${ownerEmail}) AND ${reviewerEmail ?? null} IS NOT NULL))
     RETURNING
       id,
+      owner_email,
       contractor,
       work_date,
       hours,

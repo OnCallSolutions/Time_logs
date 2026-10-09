@@ -188,6 +188,11 @@ export async function PATCH(
       return Response.json({ error: "Entry not found." }, { status: 404 })
     }
 
+    if (patch.status === "approved" || patch.status === "rejected") {
+      if(current.ownerEmail?.toLowerCase()===access.email.toLowerCase())return Response.json({error:"Your own entries require another authorized reviewer."},{status:403})
+      if(hasEntryFieldPatch(patch))return Response.json({error:"Review decisions cannot change submitted evidence."},{status:400})
+    }
+
     if (
       !access.canReview &&
       hasEntryFieldPatch(patch) &&
