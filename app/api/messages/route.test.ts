@@ -5,14 +5,15 @@
 import {beforeEach,expect,it,vi} from "vitest"
 vi.mock("@/auth",()=>({auth:vi.fn()}))
 vi.mock("@/lib/effective-permissions",()=>({getEffectivePermissions:vi.fn()}))
-vi.mock("@/lib/collaboration",()=>({employeeRoster:vi.fn(),listMessages:vi.fn(),sendMessage:vi.fn(),readMessages:vi.fn(),changeMessage:vi.fn(),editableMessage:vi.fn()}))
+vi.mock("@/lib/collaboration",()=>({actorRoster:vi.fn(),listMessages:vi.fn(),sendMessage:vi.fn(),readMessages:vi.fn(),changeMessage:vi.fn(),editableMessage:vi.fn()}))
 vi.mock("@/lib/message-keys",()=>({publicMessageKeys:vi.fn()}))
 vi.mock("@/lib/db",()=>({recordAuditEvent:vi.fn()}))
 import {auth} from "@/auth"
 import {getEffectivePermissions} from "@/lib/effective-permissions"
-import {listMessages,sendMessage,employeeRoster,readMessages,changeMessage,editableMessage} from "@/lib/collaboration"
+import {listMessages,sendMessage,actorRoster,readMessages,changeMessage,editableMessage} from "@/lib/collaboration"
 import {resolvePermissions} from "@/lib/permissions"
 import {GET,POST,PATCH,DELETE} from "./route"
+import * as envelopes from "@/lib/message-envelope"
 beforeEach(()=>{vi.resetAllMocks();vi.mocked(auth).mockResolvedValue({user:{email:"employee@example.com"}} as never);vi.mocked(getEffectivePermissions).mockResolvedValue({role:"employee",permissions:resolvePermissions("employee")});vi.mocked(listMessages).mockResolvedValue([])})
 it("loads only the authenticated employee inbox and eligible broadcasts",async()=>{
   expect((await GET()).status).toBe(200)
@@ -24,7 +25,7 @@ it("denies employee broadcast sending",async()=>{
 })
 it("rejects a private message to an ineligible recipient",async()=>{
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"manager",permissions:resolvePermissions("manager")})
-  vi.mocked(employeeRoster).mockResolvedValue([])
+  vi.mocked(actorRoster).mockResolvedValue([])
   expect((await POST(new Request("http://localhost/tanovo-time/api/messages",{method:"POST",body:JSON.stringify({recipient:"admin@example.com",body:"Hello"})}))).status).toBe(400)
   expect(sendMessage).not.toHaveBeenCalled()
 })
@@ -67,4 +68,20 @@ it("refuses downgrading encrypted messages to plaintext",async()=>{
 it("rejects invalid IDs without querying storage",async()=>{
   expect((await PATCH(request("PATCH",{action:"read",ids:["invalid"]}))).status).toBe(400)
   expect(readMessages).not.toHaveBeenCalled()
+})
+it("validates a manager-only broadcast against exactly the selected active roles",async()=>{
+  vi.mocked(getEffectivePermissions).mockResolvedValue({role:"manager",permissions:resolvePermissions("manager")})
+  vi.mocked(actorRoster).mockResolvedValue([
+    {email:"lead@example.com",role:"manager",accessStatus:"active",displayName:""},
+    {email:"staff@example.com",role:"employee",accessStatus:"active",displayName:""},
+    {email:"blocked@example.com",role:"manager",accessStatus:"blocked",displayName:""},
+  ])
+  const validate=vi.spyOn(envelopes,"validateEnvelope").mockResolvedValue(true)
+  vi.mocked(sendMessage).mockResolvedValue(messageId)
+  const encrypted={version:1,nonce:"AAAAAAAAAAAAAAAA",ciphertext:"A".repeat(24),sender:"employee@example.com",author:"employee@example.com",recipient:null,token:messageId,signature:"AAAA",keys:{}}
+  try {
+    const response=await POST(request("POST",{recipient:null,audience:"manager",encrypted}))
+    expect(response.status).toBe(201)
+    expect(validate).toHaveBeenCalledWith(encrypted,"employee@example.com","employee@example.com",null,["employee@example.com","lead@example.com"])
+  } finally {validate.mockRestore()}
 })

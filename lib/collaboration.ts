@@ -72,7 +72,7 @@ export async function listMessages(email:string,receivesBroadcast:boolean) {
   const identity = email.toLowerCase()
   await sql`INSERT INTO app_message_receipts (message_id,recipient_email)
     SELECT id,${identity} FROM app_messages WHERE sender_email <> ${identity} AND deleted_at IS NULL
-      AND (recipient_email = ${identity} OR (recipient_email IS NULL AND ${receivesBroadcast} AND (encrypted_payload IS NULL OR encrypted_payload->'keys' ? ${identity})))
+      AND (recipient_email = ${identity} OR (recipient_email IS NULL AND (encrypted_payload->'keys' ? ${identity} OR (${receivesBroadcast} AND encrypted_payload IS NULL))))
     ORDER BY created_at DESC LIMIT 100 ON CONFLICT DO NOTHING`
   return sql`SELECT m.id,m.sender_email,m.recipient_email,m.body,m.created_at,m.edited_at,m.deleted_at,m.encrypted_payload,
     r.delivered_at,r.read_at,
@@ -81,7 +81,7 @@ export async function listMessages(email:string,receivesBroadcast:boolean) {
     FROM app_messages m LEFT JOIN app_message_receipts r ON r.message_id=m.id
       AND r.recipient_email=CASE WHEN m.sender_email=${identity} AND m.recipient_email IS NOT NULL THEN m.recipient_email ELSE ${identity} END
     WHERE m.recipient_email = ${identity} OR m.sender_email = ${identity}
-      OR (m.recipient_email IS NULL AND ${receivesBroadcast} AND (m.encrypted_payload IS NULL OR m.encrypted_payload->'keys' ? ${identity})) ORDER BY m.created_at DESC LIMIT 100`
+      OR (m.recipient_email IS NULL AND (m.encrypted_payload->'keys' ? ${identity} OR (${receivesBroadcast} AND m.encrypted_payload IS NULL))) ORDER BY m.created_at DESC LIMIT 100`
 }
 
 /**
@@ -96,7 +96,7 @@ export async function readMessages(email: string, receivesBroadcast: boolean, id
   await sql`INSERT INTO app_message_receipts (message_id,recipient_email,read_at)
     SELECT id,${email.toLowerCase()},NOW() FROM app_messages WHERE id=ANY(${ids}::uuid[])
       AND sender_email<>${email.toLowerCase()} AND deleted_at IS NULL
-      AND (recipient_email=${email.toLowerCase()} OR (recipient_email IS NULL AND ${receivesBroadcast} AND (encrypted_payload IS NULL OR encrypted_payload->'keys' ? ${email.toLowerCase()})))
+      AND (recipient_email=${email.toLowerCase()} OR (recipient_email IS NULL AND (encrypted_payload->'keys' ? ${email.toLowerCase()} OR (${receivesBroadcast} AND encrypted_payload IS NULL))))
     ON CONFLICT (message_id,recipient_email) DO UPDATE SET read_at=COALESCE(app_message_receipts.read_at,EXCLUDED.read_at)`
 }
 

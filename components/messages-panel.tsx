@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button"
 import { WindowSurface } from "@/components/window-surface"
 import { useMessageInbox, type MessageInbox } from "@/components/use-message-inbox"
 import { apiPath } from "@/lib/paths"
+import { audienceEmails,type MessageAudience } from "@/lib/message-audience"
 import { canEditMessage, MESSAGE_EDIT_MINUTES, type AppMessage } from "@/lib/message-policy"
 
 /**
@@ -25,7 +26,8 @@ export function MessagesPanel({canSend,inbox}:{canSend:boolean;inbox?:MessageInb
   const encryption=useMessageEncryption(state.email,state.messages)
   const [passphrase,setPassphrase]=useState("")
   const [confirmation,setConfirmation]=useState("")
-  const [users,setUsers] = useState<{email:string}[]>([])
+  const [users,setUsers] = useState<{email:string;role:string;accessStatus:string}[]>([])
+  const [audience,setAudience]=useState<MessageAudience>("workforce")
   const [rosterLoading,setRosterLoading]=useState(canSend)
   const [recipient,setRecipient] = useState("")
   const [body,setBody] = useState("")
@@ -51,7 +53,7 @@ export function MessagesPanel({canSend,inbox}:{canSend:boolean;inbox?:MessageInb
   const [readIds,setReadIds] = useState<Set<string>>(new Set())
   const operation=useRef(false)
   const missingRecipients=encryption.loaded&&encryption.unlocked
-    ? (recipient?[recipient]:users.map(user=>user.email)).filter(email=>!encryption.keys.some(key=>key.email.toLowerCase()===email.toLowerCase()))
+    ? audienceEmails(users,audience,recipient||null).filter(email=>!encryption.keys.some(key=>key.email.toLowerCase()===email.toLowerCase()))
     : []
   useEffect(() => {
     const timer = window.setInterval(()=>setNow(Date.now()),1000)
@@ -62,7 +64,7 @@ export function MessagesPanel({canSend,inbox}:{canSend:boolean;inbox?:MessageInb
     setRosterLoading(true)
     const controller=new AbortController()
     fetch(apiPath("/api/delegation"),{cache:"no-store",signal:controller.signal})
-      .then(async response=>{const data=await response.json();if(!response.ok)throw new Error(data.error);setUsers(data.users.filter((user:{role:string;accessStatus:string})=>(user.role==="employee"||user.role==="contractor")&&user.accessStatus==="active"))})
+      .then(async response=>{const data=await response.json();if(!response.ok)throw new Error(data.error);setUsers(data.users.filter((user:{accessStatus:string})=>user.accessStatus==="active"))})
       .catch(error=>{if(!controller.signal.aborted)setError(error.message)})
       .finally(()=>{if(!controller.signal.aborted)setRosterLoading(false)})
     return ()=>controller.abort()
@@ -101,8 +103,11 @@ export function MessagesPanel({canSend,inbox}:{canSend:boolean;inbox?:MessageInb
     if(!canSend||rosterLoading||!encryption.unlocked||missingRecipients.length||!body.trim())return
     operation.current=true;setBusy(true);setError(null)
     try{
-      const encrypted=await encryption.encrypt(body,recipient||null,[state.email,...(recipient?[recipient]:users.map(user=>user.email))])
-      if(await mutate("POST",{recipient:recipient||null,encrypted})){setBody("");setComposing(false)}
+      const target=audience==="individual"?recipient:null
+      const recipients=audienceEmails(users,audience,target)
+      if(!recipients.length)throw new Error("Select an audience with active recipients.")
+      const encrypted=await encryption.encrypt(body,target,[state.email,...recipients])
+      if(await mutate("POST",{recipient:target,audience,encrypted})){setBody("");setComposing(false)}
     }catch(error){setError(error instanceof Error?error.message:"Unable to encrypt message.")}
     finally{operation.current=false;setBusy(false)}
   }
@@ -139,7 +144,8 @@ export function MessagesPanel({canSend,inbox}:{canSend:boolean;inbox?:MessageInb
       {encryption.error&&<p role="alert" className="text-sm text-destructive">{encryption.error}</p>}
       {rosterLoading&&<p role="status" className="text-sm text-muted-foreground">Loading recipients...</p>}
       {missingRecipients.length>0&&<p role="status" className="text-sm text-muted-foreground">Messaging setup required for: {missingRecipients.join(", ")}. Choose a recipient who has completed setup, or ask these recipients to open Message settings.</p>}
-      <label className="text-sm">Recipient<select value={recipient} disabled={busy} onChange={event=>setRecipient(event.target.value)} className="mt-1 block w-full rounded-md border border-border bg-background p-2"><option value="">All employees</option>{users.map(user=><option key={user.email} value={user.email}>{user.email}</option>)}</select></label>
+      <label className="text-sm">Audience<select value={audience} disabled={busy} onChange={event=>{setAudience(event.target.value as MessageAudience);setRecipient("")}} className="mt-1 block w-full rounded-md border border-border bg-background p-2"><option value="workforce">Employees and contractors</option><option value="everyone">Everyone</option><option value="contractor">All contractors</option><option value="employee">All employees</option><option value="manager">All managers</option><option value="admin">All admins</option><option value="individual">Individual</option></select></label>
+      {audience==="individual"&&<label className="text-sm">Recipient<select value={recipient} disabled={busy} onChange={event=>setRecipient(event.target.value)} className="mt-1 block w-full rounded-md border border-border bg-background p-2"><option value="">Choose a person</option>{users.map(user=><option key={user.email} value={user.email}>{user.email}</option>)}</select></label>}
       <label className="text-sm">Message<textarea value={body} disabled={busy} maxLength={4000} onChange={event=>setBody(event.target.value)} className="mt-1 min-h-28 w-full rounded-md border border-border bg-background p-2"/></label>
       <Button className="w-fit" disabled={busy||rosterLoading||!body.trim()||!encryption.unlocked||missingRecipients.length>0} onClick={send}><Send className="size-4"/>{busy?"Sending...":"Send message"}</Button>
       {error&&<p role="alert" className="text-sm text-destructive">{error}</p>}
