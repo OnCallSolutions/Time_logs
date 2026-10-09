@@ -15,8 +15,8 @@ import { Button } from "@/components/ui/button"
  * @param props.onSelect - Callback that selects a status without changing records.
  * @returns JSX.Element with employee workflow controls.
  */
-export function EmployeeWorkspace({ entries, selected, onSelect }: {
-  entries: TimeEntry[]; selected: EntryStatus | "all"; onSelect: (status: EntryStatus | "all") => void
+export function EmployeeWorkspace({ entries, selected, onSelect, contractor=false }: {
+  entries: TimeEntry[]; selected: EntryStatus | "all"; onSelect: (status: EntryStatus | "all") => void; contractor?:boolean
 }) {
   const options = [
     { status: "all", label: "All my entries", icon: ListChecks },
@@ -25,7 +25,8 @@ export function EmployeeWorkspace({ entries, selected, onSelect }: {
     { status: "rejected", label: "Needs correction", icon: XCircle },
     { status: "approved", label: "Approved", icon: CheckCircle2 },
   ] as const
-  return <section aria-label="Personal workflow" className="flex flex-wrap gap-2">
+  return <section aria-label={contractor?"Contractor workflow":"Personal workflow"} className="flex flex-wrap items-center gap-2">
+    <h2 className="mr-2 text-sm font-semibold">{contractor?"Contractor submissions":"Internal staff time"}</h2>
     {options.map(({status,label,icon:Icon}) => <Button key={status} variant={selected === status ? "default" : "outline"} aria-pressed={selected === status} onClick={() => onSelect(status)}>
       <Icon className="size-4" aria-hidden="true" />{label}
       <span className="tabular-nums">{status === "all" ? entries.length : entries.filter(entry => entry.status === status).length}</span>

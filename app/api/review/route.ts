@@ -19,12 +19,14 @@ const schema = z.object({ recommendations: z.array(z.object({
  * No client-provided entry data is trusted and no approval mutation is performed.
  * @returns Promise<Response> containing grounded recommendations or a safe error.
  */
-export async function POST(): Promise<Response> {
+export async function POST(req?:Request): Promise<Response> {
   try {
     const email = (await auth())?.user?.email
     const access = await getEffectivePermissions(email)
-    if (!email || !access.permissions.ai_review) return Response.json({error:"Forbidden."},{status:403})
-    const pending = (await listTimeEntries(email,access.permissions.view_team)).filter(entry => entry.status === "submitted")
+    if (!email || !(access.role==="manager"||access.role==="admin") || !access.permissions.ai_review) return Response.json({error:"Forbidden."},{status:403})
+    const text=req?await req.text():""
+    const input=z.object({ids:z.array(z.string().uuid()).min(1).max(50).optional()}).parse(text?JSON.parse(text):{})
+    const pending = (await listTimeEntries(email,access.permissions.view_team)).filter(entry => entry.status === "submitted"&&entry.ownerEmail?.toLowerCase()!==email.toLowerCase()&&(!input.ids||input.ids.includes(entry.id)))
     const entries = pending.slice(0,50)
     if (!entries.length) return Response.json({recommendations:[],reviewedCount:0,totalPending:0})
     const {output} = await generateText({model:"openai/gpt-4.1-mini",output:Output.object({schema}),
