@@ -20,6 +20,7 @@ import { permissionLabels, resolvePermissions, type Permission, type PermissionO
 import { AdminWorkspace } from "@/components/admin-workspace"
 import { SecurityRiskWindow } from "@/components/security-risk-window"
 import { WindowSurface } from "@/components/window-surface"
+import { WorkspaceUtilities } from "@/components/workspace-utilities"
 import {
   Activity,
   BarChart3,
@@ -180,6 +181,7 @@ export function TimesheetApp({
   const messageInbox=useMessageInbox(permissionsLoaded&&!accessDenied)
   const [entries, setEntries] = useState<TimeEntry[]>([])
   const [view, setView] = useState<View>(role === "admin" ? "admin" : role === "manager" ? "approvals" : "log")
+  const [messagesOpen,setMessagesOpen]=useState(false)
   const [loadingEntries, setLoadingEntries] = useState(true)
   const [syncError, setSyncError] = useState<string | null>(null)
   const [personalStatus, setPersonalStatus] = useState<EntryStatus | "all">("all")
@@ -435,12 +437,13 @@ export function TimesheetApp({
   ]
 
   return (
-    <main className="mx-auto flex min-h-svh w-full max-w-[1600px] flex-col gap-5 px-4 py-5 md:px-8 md:py-7">
+    <main className="mx-auto flex min-h-svh w-full max-w-[1800px] flex-col gap-4 px-4 pb-24 pt-4 md:pl-6 md:pr-24 md:pt-6">
+      {!accessDenied&&<WorkspaceUtilities unread={messageInbox.unread} onMessages={()=>setMessagesOpen(true)}/>}
+      {!accessDenied&&messagesOpen&&<WindowSurface title="Messages" onBack={()=>setMessagesOpen(false)}><section className="min-h-0 w-full overflow-auto bg-background p-3 sm:p-5"><MessagesPanel inbox={messageInbox} canSend={permissions.send_messages&&(role==="admin"||role==="manager")}/></section></WindowSurface>}
       <header className="flex flex-col gap-3 border-b border-border pb-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <Brand />
           <div className="flex min-w-0 items-center justify-end gap-3">
-            {!accessDenied&&<Button variant="ghost" size="icon-sm" title="Messages" aria-label={`Messages${messageInbox.unread?`, ${messageInbox.unread} unread`:""}`} onClick={()=>setView("messages")} className="relative"><MessageSquare className="size-5"/>{messageInbox.unread>0&&<span className="absolute -right-1 -top-1 rounded-full bg-primary px-1 text-xs text-white">{messageInbox.unread>99?"99+":messageInbox.unread}</span>}</Button>}
             <AccountProfile
               email={userEmail}
               fallbackName={userName}
@@ -449,7 +452,7 @@ export function TimesheetApp({
             <SignOutButton />
           </div>
         </div>
-        {!accessDenied&&<MessageNotifications inbox={messageInbox} onOpen={()=>setView("messages")}/>}
+        {!accessDenied&&<MessageNotifications inbox={messageInbox} onOpen={()=>setMessagesOpen(true)}/>}
         <h1 className="text-2xl font-semibold text-balance">
           {role === "admin" ? "Technology management" : role === "account_manager" ? "Business accounts" : role === "manager" ? "Team workspace" : "My timesheet"}
         </h1>
