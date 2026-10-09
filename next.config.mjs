@@ -10,6 +10,7 @@
 const nextConfig = {
   allowedDevOrigins: ["127.0.0.1"],
   basePath: "/tanovo-time",
+  distDir: process.env.APP_E2E_SERVER === "1" ? ".next-e2e" : ".next",
   async redirects() {
     return [
       {

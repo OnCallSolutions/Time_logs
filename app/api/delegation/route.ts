@@ -40,7 +40,7 @@ export async function PATCH(req:Request): Promise<Response> {
       if (!Object.hasOwn(permissionLabels,key) || key === "delegate_permissions" || key === "send_messages" || (value && !access.permissions[key as Permission]))
         return Response.json({error:"You cannot delegate this right."},{status:403})
     }
-    const user = await delegateEmployeePermissions(target.email,target.role as "employee"|"user",body.permissions,email)
+    const user = await delegateEmployeePermissions(target.email,target.role as "employee"|"contractor",body.permissions,email)
     await recordAuditEvent({actorEmail:email,action:"user_access_updated",targetType:"managed_user_access",targetId:target.email,metadata:{changedPermissions:Object.keys(body.permissions),delegated:true},...getAuditContext(req)})
     return Response.json({user})
   } catch { return Response.json({error:"Unable to save delegated rights."},{status:400}) }

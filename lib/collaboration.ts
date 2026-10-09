@@ -16,7 +16,7 @@ let messageSchema:Promise<void>|undefined
  * @returns Promise of email and role pairs, excluding managers and administrators.
  */
 export async function employeeRoster() {
-  return (await actorRoster()).filter(user=>user.accessStatus === "active" && (user.role === "employee" || user.role === "user")).map(user=>({email:user.email,role:user.role}))
+  return (await actorRoster()).filter(user=>user.accessStatus === "active" && (user.role === "employee" || user.role === "contractor")).map(user=>({email:user.email,role:user.role}))
 }
 /**
  * Lists every configured, managed, or observed actor without security-log data.

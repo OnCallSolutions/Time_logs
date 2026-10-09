@@ -54,7 +54,7 @@ import type {
 
 type View = "log" | "approvals" | "report" | "admin" | "messages" | "permissions"
 
-const manageableRoles: UserRole[] = ["admin", "manager", "employee", "user"]
+const manageableRoles: UserRole[] = ["admin", "manager", "account_manager", "employee", "contractor"]
 const manageableStatuses: AccessStatus[] = ["active", "denied", "blocked"]
 
 /**
@@ -261,8 +261,9 @@ export function TimesheetApp({
   const roleLabel = {
     admin: "Administrator",
     manager: "Manager",
+    account_manager: "Account Manager",
     employee: "Employee",
-    user: "User",
+    contractor: "Contractor",
   }[role]
 
   useEffect(() => {
@@ -430,7 +431,6 @@ export function TimesheetApp({
     ...(canViewAdmin
       ? [{ key: "admin" as const, label: "Admin", icon: ShieldCheck }]
       : []),
-    ...(!accessDenied ? [{key:"messages" as const,label:"Messages",icon:MessageSquare}] : []),
     ...(permissions.delegate_permissions && (role === "admin" || role === "manager") ? [{key:"permissions" as const,label:"Employee rights",icon:KeyRound}] : []),
   ]
 
@@ -440,6 +440,7 @@ export function TimesheetApp({
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <Brand />
           <div className="flex min-w-0 items-center justify-end gap-3">
+            {!accessDenied&&<Button variant="ghost" size="icon-sm" title="Messages" aria-label={`Messages${messageInbox.unread?`, ${messageInbox.unread} unread`:""}`} onClick={()=>setView("messages")} className="relative"><MessageSquare className="size-5"/>{messageInbox.unread>0&&<span className="absolute -right-1 -top-1 rounded-full bg-primary px-1 text-xs text-white">{messageInbox.unread>99?"99+":messageInbox.unread}</span>}</Button>}
             <AccountProfile
               email={userEmail}
               fallbackName={userName}
@@ -450,7 +451,7 @@ export function TimesheetApp({
         </div>
         {!accessDenied&&<MessageNotifications inbox={messageInbox} onOpen={()=>setView("messages")}/>}
         <h1 className="text-2xl font-semibold text-balance">
-          {role === "admin" ? "Technology management" : role === "manager" ? "Team workspace" : "My timesheet"}
+          {role === "admin" ? "Technology management" : role === "account_manager" ? "Business accounts" : role === "manager" ? "Team workspace" : "My timesheet"}
         </h1>
       </header>
 
@@ -471,7 +472,7 @@ export function TimesheetApp({
         role={role}
       />}
       </div></section></WindowSurface>}
-      {(role === "employee" || role === "user") && <EmployeeWorkspace entries={entries} selected={personalStatus} onSelect={setPersonalStatus} />}
+      {(role === "employee" || role === "contractor") && <EmployeeWorkspace entries={entries} selected={personalStatus} onSelect={setPersonalStatus} />}
       {!accessDenied && (canReviewEntries || permissions.ai_review || canViewTeamReports) && <ManagerWorkspace canReview={canReviewEntries} canReports={canViewTeamReports} canAI={permissions.ai_review} pending={pendingEntries.length} entries={pendingEntries} onApprovals={() => setView("approvals")} onReports={() => setView("report")} onRecommendation={(entry,decision,reason) => setSuggestedReview({entry,decision,reason})} />}
       {suggestedReview && <EntryReviewDialog entry={suggestedReview.entry} decision={suggestedReview.decision} initialNote={suggestedReview.reason} onCancel={() => setSuggestedReview(null)} onConfirm={note => {
         changeEntryStatus(suggestedReview.entry.id,suggestedReview.decision,note || undefined)
@@ -537,7 +538,7 @@ export function TimesheetApp({
 
       {view === "log" ? (
         <EntriesLog
-          entries={(role === "employee" || role === "user") && personalStatus !== "all" ? entries.filter(entry => entry.status === personalStatus) : entries}
+          entries={(role === "employee" || role === "contractor") && personalStatus !== "all" ? entries.filter(entry => entry.status === personalStatus) : entries}
           onUpdate={updateEntry}
           onStatusChange={changeEntryStatus}
           onDelete={deleteEntry}
@@ -619,6 +620,10 @@ export function TimesheetApp({
  */
 function RoleOverview({ role }: { role: UserRole }) {
   const content = {
+    account_manager: {
+      title: "Business accounts",
+      body: "Account management access is assigned by administrators. Contractor payment review and fund release are not yet available.",
+    },
     admin: {
       title: "Admin access",
       body: "You can view all entries, approve or reject submitted time, use reports, and access admin controls.",
@@ -631,8 +636,8 @@ function RoleOverview({ role }: { role: UserRole }) {
       title: "Employee access",
       body: "You can create, edit, and submit your own time entries for manager approval.",
     },
-    user: {
-      title: "User access",
+    contractor: {
+      title: "Contractor access",
       body: "You can create and submit your own time entries for review.",
     },
   }[role]
@@ -1611,8 +1616,9 @@ function AdminStat({
 function roleSeniority(role: UserRole | "none") {
   if (role === "admin") return 4
   if (role === "manager") return 3
+  if (role === "account_manager") return 3
   if (role === "employee") return 2
-  if (role === "user") return 1
+  if (role === "contractor") return 1
   return 0
 }
 
@@ -1643,6 +1649,7 @@ function sortAdminDirectoryUsers(users: AdminDirectoryUser[]) {
  * @returns Human-readable rights labels for the role.
  */
 function roleRights(role: UserRole | "none") {
+  if (role === "account_manager") return ["admin-assigned business account rights"]
   if (role === "admin") {
     return ["all entries", "approvals", "reports", "users", "audit"]
   }
@@ -1652,7 +1659,7 @@ function roleRights(role: UserRole | "none") {
   if (role === "employee") {
     return ["own entries", "submit time"]
   }
-  if (role === "user") {
+  if (role === "contractor") {
     return ["own entries", "submit time"]
   }
   return ["no assigned rights"]
@@ -1665,6 +1672,7 @@ function roleRights(role: UserRole | "none") {
  * @returns Tailwind classes for the role badge.
  */
 function roleBadgeClass(role: UserRole | "none") {
+  if (role === "account_manager") return "border-rose-200 bg-rose-50 text-rose-700"
   if (role === "admin") {
     return "border-blue-200 bg-blue-50 text-blue-700"
   }
@@ -1674,7 +1682,7 @@ function roleBadgeClass(role: UserRole | "none") {
   if (role === "employee") {
     return "border-green-200 bg-green-50 text-green-700"
   }
-  if (role === "user") {
+  if (role === "contractor") {
     return "border-slate-200 bg-slate-50 text-slate-700"
   }
   return "border-slate-200 bg-slate-100 text-slate-500"
