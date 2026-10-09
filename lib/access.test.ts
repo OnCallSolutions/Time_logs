@@ -20,6 +20,7 @@ const managedAccessMock = vi.mocked(getManagedAccessUser)
 const accessEnvKeys = [
   "ADMIN_EMAILS",
   "MANAGER_EMAILS",
+  "ACCOUNT_MANAGER_EMAILS",
   "EMPLOYEE_EMAILS",
   "WORKER_EMAILS",
   "ALLOWED_EMAILS",

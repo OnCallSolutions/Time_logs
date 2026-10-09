@@ -56,6 +56,7 @@ export function getAllowedEmails() {
 function getRoleEmails(role: UserRole) {
   if (role === "admin") return parseEmailList(process.env.ADMIN_EMAILS)
   if (role === "manager") return parseEmailList(process.env.MANAGER_EMAILS)
+  if (role === "account_manager") return parseEmailList(process.env.ACCOUNT_MANAGER_EMAILS)
   if (role === "employee") {
     return [
       ...parseEmailList(process.env.EMPLOYEE_EMAILS),
@@ -78,7 +79,7 @@ function getRoleEmails(role: UserRole) {
 export function getConfiguredAccessUsers() {
   const users = new Map<string, UserRole>()
 
-  for (const role of ["admin", "manager", "employee"] as const) {
+  for (const role of ["admin", "manager", "account_manager", "employee"] as const) {
     for (const email of getRoleEmails(role)) {
       if (!users.has(email)) {
         users.set(email, role)
@@ -109,6 +110,7 @@ function hasEnvironmentAccessPolicy() {
     getAllowedEmails().length > 0 ||
     getRoleEmails("admin").length > 0 ||
     getRoleEmails("manager").length > 0 ||
+    getRoleEmails("account_manager").length > 0 ||
     getRoleEmails("employee").length > 0
   )
 }
@@ -130,6 +132,7 @@ export function getUserRole(email?: string | null): UserRole | null {
 
   if (getRoleEmails("admin").includes(normalizedEmail)) return "admin"
   if (getRoleEmails("manager").includes(normalizedEmail)) return "manager"
+  if (getRoleEmails("account_manager").includes(normalizedEmail)) return "account_manager"
   if (getRoleEmails("employee").includes(normalizedEmail)) return "employee"
   if (getAllowedEmails().includes(normalizedEmail)) return "contractor"
 

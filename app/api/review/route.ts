@@ -37,7 +37,8 @@ export async function POST(req?:Request): Promise<Response> {
     const returnedIds = output.recommendations.map(item => item.entryId)
     if (returnedIds.some(id => !ids.has(id)) || new Set(returnedIds).size !== returnedIds.length) throw new Error("Invalid evidence references")
     return Response.json({...output,reviewedCount:entries.length,totalPending:pending.length},{headers:{"Cache-Control":"no-store"}})
-  } catch {
+  } catch(error) {
+    if(error instanceof z.ZodError||error instanceof SyntaxError)return Response.json({error:"Invalid review selection."},{status:400})
     return Response.json({error:"AI review unavailable. Manual review remains available."},{status:503})
   }
 }
