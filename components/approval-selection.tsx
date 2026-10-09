@@ -7,6 +7,7 @@
 import { useState } from "react"
 import { Button } from "./ui/button"
 import { WindowSurface } from "./window-surface"
+import { EntryReviewDialog } from "./manager-workspace"
 import { apiPath } from "@/lib/paths"
 import type { TimeEntry } from "@/lib/types"
 
@@ -25,6 +26,7 @@ export function ApprovalSelection({entries,email,canReview,canAI,onUpdated}:{ent
   const [busy,setBusy]=useState(false)
   const [error,setError]=useState("")
   const [suggestions,setSuggestions]=useState<{entryId:string;decision:string;reason:string}[]>([])
+  const [rejection,setRejection]=useState<{entry:TimeEntry;reason:string}|null>(null)
   const eligible=entries.filter(entry=>entry.status==="submitted"&&entry.ownerEmail?.toLowerCase()!==email.toLowerCase())
   const selected=eligible.filter(entry=>ids.includes(entry.id)).slice(0,50)
   /** @returns Promise<void> after loading advisory suggestions for selected server records. */
@@ -39,9 +41,17 @@ export function ApprovalSelection({entries,email,canReview,canAI,onUpdated}:{ent
     try{for(const entry of records){const response=await fetch(apiPath(`/api/entries/${entry.id}`),{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({status:"approved"})});const data=await response.json();if(!response.ok)throw new Error(`${entry.contractor}: ${data.error}`);onUpdated(data.entry);setIds(previous=>previous.filter(id=>id!==entry.id))}setDialog(null)}
     catch(error){setError(error instanceof Error?error.message:"Approval unavailable.")}finally{setBusy(false)}
   }
+  /** @param note - Required human-confirmed rejection reason. @returns Promise<void> after scoped server mutation. */
+  async function reject(note:string){
+    if(!rejection||busy)return
+    setBusy(true);setError("")
+    try{const response=await fetch(apiPath(`/api/entries/${rejection.entry.id}`),{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({status:"rejected",reviewNote:note})});const data=await response.json();if(!response.ok)throw new Error(data.error);onUpdated(data.entry);setRejection(null)}
+    catch(error){setError(error instanceof Error?error.message:"Rejection unavailable.");setRejection(null)}finally{setBusy(false)}
+  }
   return <section aria-label="Approval selection" className="space-y-3 border-y py-3">
     <div className="flex flex-wrap items-center gap-2"><h2 className="text-sm font-semibold">Contractor and staff review</h2><Button variant="outline" size="sm" disabled={busy||!eligible.length} onClick={()=>setIds(eligible.slice(0,50).map(entry=>entry.id))}>Select all eligible (up to 50)</Button><Button variant="outline" size="sm" disabled={busy||!ids.length} onClick={()=>setIds([])}>Clear selection</Button>{canAI&&<Button size="sm" disabled={busy||!selected.length} onClick={advise}>AI suggestions</Button>}{canReview&&<Button size="sm" disabled={busy||!selected.length} onClick={()=>{setError("");setDialog("approve")}}>Review selected ({selected.length})</Button>}</div>
     <div className="max-h-64 overflow-auto"><table className="w-full text-left text-sm"><thead><tr><th className="p-2">Select</th><th className="p-2">Contractor / staff</th><th className="p-2">Date</th><th className="p-2">Hours</th></tr></thead><tbody>{eligible.map(entry=><tr key={entry.id} className="border-t"><td className="p-2"><input type="checkbox" aria-label={`Select ${entry.contractor} ${entry.date}`} disabled={busy||(!ids.includes(entry.id)&&selected.length>=50)} checked={ids.includes(entry.id)} onChange={event=>setIds(previous=>event.target.checked?[...previous,entry.id]:previous.filter(id=>id!==entry.id))}/></td><td className="p-2">{entry.contractor}</td><td className="p-2">{entry.date}</td><td className="p-2">{entry.hours}</td></tr>)}</tbody></table></div>
-    {dialog&&<WindowSurface title={dialog==="ai"?"AI approval suggestions":"Confirm selected approvals"} disabled={busy} onBack={()=>setDialog(null)}><section className="flex w-full flex-col bg-white p-4"><h2 className="font-semibold">{dialog==="ai"?"AI approval suggestions":"Confirm selected approvals"}</h2><div className="min-h-0 flex-1 overflow-auto py-4">{busy&&<p role="status">Processing...</p>}{error&&<p role="alert" className="text-destructive">{error}</p>}{dialog==="approve"?selected.map(entry=><p key={entry.id}>{entry.contractor} · {entry.date} · {entry.hours}h</p>):suggestions.map(item=><article key={item.entryId} className="border-b py-3"><p>{eligible.find(entry=>entry.id===item.entryId)?.contractor}: {item.decision}</p><p className="text-sm">{item.reason}</p>{canReview&&item.decision==="approved"&&<Button disabled={busy} variant="outline" onClick={()=>{const entry=eligible.find(entry=>entry.id===item.entryId);if(entry)void approve([entry])}}>Confirm this approval</Button>}</article>)}</div>{dialog==="approve"&&<Button disabled={busy||!selected.length||!canReview} onClick={()=>void approve(selected)}>Confirm {selected.length} approvals</Button>}</section></WindowSurface>}
+    {dialog&&<WindowSurface title={dialog==="ai"?"AI approval suggestions":"Confirm selected approvals"} disabled={busy} onBack={()=>setDialog(null)}><section className="flex w-full flex-col bg-white p-4"><h2 className="font-semibold">{dialog==="ai"?"AI approval suggestions":"Confirm selected approvals"}</h2><div className="min-h-0 flex-1 overflow-auto py-4">{busy&&<p role="status">Processing...</p>}{error&&<p role="alert" className="text-destructive">{error}</p>}{dialog==="approve"?selected.map(entry=><p key={entry.id}>{entry.contractor} · {entry.date} · {entry.hours}h</p>):suggestions.map(item=><article key={item.entryId} className="border-b py-3"><p>{eligible.find(entry=>entry.id===item.entryId)?.contractor}: {item.decision}</p><p className="text-sm">{item.reason}</p>{canReview&&item.decision==="approved"&&<Button disabled={busy} variant="outline" onClick={()=>{const entry=eligible.find(entry=>entry.id===item.entryId);if(entry)void approve([entry])}}>Confirm this approval</Button>}{canReview&&item.decision!=="approved"&&<Button disabled={busy} variant="outline" onClick={()=>{const entry=eligible.find(entry=>entry.id===item.entryId);if(entry)setRejection({entry,reason:item.reason})}}>Review rejection</Button>}</article>)}</div>{dialog==="approve"&&<Button disabled={busy||!selected.length||!canReview} onClick={()=>void approve(selected)}>Confirm {selected.length} approvals</Button>}</section></WindowSurface>}
+    {rejection&&<EntryReviewDialog entry={rejection.entry} decision="rejected" initialNote={rejection.reason} onCancel={()=>{if(!busy)setRejection(null)}} onConfirm={note=>{if(canReview)void reject(note)}}/>}
   </section>
 }

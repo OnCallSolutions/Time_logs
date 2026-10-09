@@ -1,5 +1,10 @@
 # Business Account Wing
 
+The `business_accounts` feature branch now implements an assigned evidence-handoff
+queue, not payment calculation or fund release. See [CONTRACTOR_WORKFLOW.md](CONTRACTOR_WORKFLOW.md)
+for implemented eligibility, snapshot, rights, and stale-source rules. The sections
+below describe the original scaffold and remaining financial workflow design.
+
 Account Manager (`account_manager`) is a distinct manager-level category, assigned
 through the existing administrator-only role editor. Internal employees and
 outsourced contractors remain separate roles. Ordinary managers cannot assign
