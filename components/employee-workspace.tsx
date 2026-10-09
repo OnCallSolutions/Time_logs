@@ -26,7 +26,7 @@ export function EmployeeWorkspace({ entries, selected, onSelect }: {
     { status: "approved", label: "Approved", icon: CheckCircle2 },
   ] as const
   return <section aria-label="Personal workflow" className="flex flex-wrap gap-2">
-    {options.map(({status,label,icon:Icon}) => <Button key={status} variant={selected === status ? "default" : "outline"} aria-pressed={selected === status} onClick={() => onSelect(status)}>
+    {options.map(({status,label,icon:Icon}) => <Button key={status} className="feature-control" data-feature={status} variant="outline" aria-pressed={selected === status} onClick={() => onSelect(status)}>
       <Icon className="size-4" aria-hidden="true" />{label}
       <span className="tabular-nums">{status === "all" ? entries.length : entries.filter(entry => entry.status === status).length}</span>
     </Button>)}

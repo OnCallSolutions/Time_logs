@@ -47,9 +47,9 @@ export function ManagerWorkspace({ pending, entries, canReview = true, canReport
   }
   return <section aria-label="Manager workflow" className="space-y-3">
     <div className="flex flex-wrap gap-2">
-    {canAI && <Button disabled={loading || !pending} onClick={prepareReview}><Sparkles className="size-4" />{loading ? "Preparing review..." : "Prepare AI review"}</Button>}
-    {canReview && <Button onClick={onApprovals}><CheckCircle2 className="size-4" />Review queue <span>{pending}</span></Button>}
-    {canReports && <Button variant="outline" onClick={onReports}><BarChart3 className="size-4" />Team report</Button>}
+    {canAI && <Button className="feature-control" data-feature="ai" variant="outline" disabled={loading || !pending} onClick={prepareReview}><Sparkles className="size-4" />{loading ? "Preparing review..." : "Prepare AI review"}</Button>}
+    {canReview && <Button className="feature-control" data-feature="approved" variant="outline" onClick={onApprovals}><CheckCircle2 className="size-4" />Review queue <span>{pending}</span></Button>}
+    {canReports && <Button className="feature-control" data-feature="report" variant="outline" onClick={onReports}><BarChart3 className="size-4" />Team report</Button>}
     </div>
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     {recommendations.filter(item => entries.some(entry => entry.id === item.entryId && entry.status === "submitted")).map(item => {

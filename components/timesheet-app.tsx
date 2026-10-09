@@ -437,10 +437,10 @@ export function TimesheetApp({
   ]
 
   return (
-    <main className="mx-auto flex min-h-svh w-full max-w-[1800px] flex-col gap-4 px-4 pb-24 pt-4 md:pl-6 md:pr-24 md:pt-6">
+    <main className="app-workspace tech-surface flex min-h-svh w-full min-w-0 flex-col gap-4 bg-background px-3 pb-24 pt-4 sm:pl-5 md:pr-20 md:pt-5">
       {!accessDenied&&<WorkspaceUtilities unread={messageInbox.unread} onMessages={()=>setMessagesOpen(true)}/>}
       {!accessDenied&&messagesOpen&&<WindowSurface title="Messages" onBack={()=>setMessagesOpen(false)}><section className="min-h-0 w-full overflow-auto bg-background p-3 sm:p-5"><MessagesPanel inbox={messageInbox} canSend={permissions.send_messages&&(role==="admin"||role==="manager")}/></section></WindowSurface>}
-      <header className="flex flex-col gap-3 border-b border-border pb-5">
+      <header className="workspace-header flex flex-col gap-3 border-b border-border pb-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <Brand />
           <div className="flex min-w-0 items-center justify-end gap-3">

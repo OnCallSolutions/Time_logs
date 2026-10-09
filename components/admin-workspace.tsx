@@ -19,8 +19,8 @@ export function AdminWorkspace({ onDirectory, onSecurity }: {
   return <section aria-label="Technology management" className="tech-surface flex flex-wrap items-center gap-3 border-y border-slate-200 bg-white py-2 text-slate-950">
     <h2 className="text-sm font-semibold">Access and security</h2>
     <div className="flex flex-wrap gap-2">
-      <Button variant="outline" className="border-slate-300 bg-white text-slate-950" onClick={onDirectory}><Users className="size-4" />Employee access</Button>
-      <Button variant="outline" className="border-slate-300 bg-white text-slate-950" onClick={onSecurity}><ShieldCheck className="size-4" />AI security reports</Button>
+      <Button variant="outline" className="feature-control" data-feature="access" onClick={onDirectory}><Users className="size-4" />Employee access</Button>
+      <Button variant="outline" className="feature-control" data-feature="security" onClick={onSecurity}><ShieldCheck className="size-4" />AI security reports</Button>
     </div>
   </section>
 }

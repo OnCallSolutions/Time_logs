@@ -61,7 +61,7 @@ export function WindowSurface({ title, onBack, disabled = false, children }: {
     <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title}
       data-window-expanded={expanded}
       className={`window-surface tech-surface fixed inset-0 z-[70] flex min-h-0 flex-col bg-background ${expanded ? "p-0" : "p-3 sm:p-6"}`}>
-      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border bg-white px-3 py-2">
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-orange-200 bg-orange-50 px-3 py-2">
         <Button variant="outline" size="sm" disabled={disabled} onClick={onBack}><ArrowLeft className="size-4" />Back</Button>
         <Button variant="outline" size="icon-sm" title={expanded ? "Restore window" : "Expand window"}
           aria-label={expanded ? "Restore window" : "Expand window"} onClick={() => setExpanded(value => !value)}>
