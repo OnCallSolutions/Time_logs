@@ -6,15 +6,23 @@
 
 `Development` is the shared source of truth for integrated work. Create future feature branches from its latest commit and open feature pull requests targeting `Development`. After review and testing, release changes through a pull request from `Development` to `main`. Keep feature branches after integration; do not merge feature branches directly into `main`.
 
-- `audit_logging_security`: employee administration, audit capture, white admin activity views, and event details. IP addresses appear only in selected event details.
+- `audit_logging`: audit capture, white admin activity views, and event details. IP addresses appear only in selected event details.
 - `security`: builds on the admin branch; advisory AI assessments and future server-side cybersecurity controls. Assessments never automatically grant, revoke, or block access.
 - `Per_user_entries` was retired after its commits were preserved in the three role branches. New feature work belongs in `employee`, `manager`, or `admin`.
-- `ui_widescreen_layout`: shared appearance and responsive layout.
-- `testing_framework`: external testing tools and automation.
+- `user_Interface`: shared appearance and responsive layout.
+- `testing`: external testing tools and automation, including the richer live table and test explanations.
+- `messages`: messaging logic and chat controls; merged into remote Development at `8463b58` and retained.
+- `database_management`: local, unmerged database reliability and AI-readiness groundwork.
 - `main`: reviewed releases.
 - `Development`: integrated UI, employee workflows, administration, security monitoring, and testing tools.
 
-The supporting audit, security, UI, and testing branches are retained history; use the three role branches for new feature changes, then integrate into `Development`. Rebrand settings from remote PR #5 are applied to `Development` only, with the user-approved corrected path `/tanovo-time`. Other branches are not being renamed or synchronized. The PR's older application implementation is not replacing Development's current functionality.
+Use the relevant active feature branch for new work, then integrate into
+`Development`. Role changes do not require a separate branch per runtime role.
+Contractor, employee, manager, account manager, and admin are authorization roles,
+not deployment environments. Development and branches created from its rebranded
+code use `/tanovo-time`; unchanged older branches retain their own routes.
+The historical remote rebrand branch is now `rebrand`; PR #5 is closed as
+superseded. Its older implementation does not replace Development functionality.
 
 # Storage and Configuration
 
