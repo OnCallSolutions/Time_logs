@@ -1,6 +1,6 @@
 # Tanovo Time
 
-AI-assisted time logging, review, and employee administration built with Next.js, Microsoft Entra ID, and Neon PostgreSQL.
+AI-assisted contractor time logging, manager review, and internal staff administration built with Next.js, Microsoft Entra ID, and Neon PostgreSQL.
 
 **AI prepares the work; people review and confirm decisions.** The application is served at `/tanovo-time`.
 
@@ -10,6 +10,11 @@ controls; administrators manage technology and access. The former baseline `user
 role is now `contractor`; generic account identifiers and audit target names remain
 unchanged. Existing stored `user` assignments are read as contractors without
 rewriting their permissions or deleting historical records.
+
+Account Manager is a separate, administrator-assigned business-account role. It
+cannot enter timesheets or perform operational time approvals. Payment calculation
+and authorization to release funds are planned, not implemented; see
+[BUSINESS_ACCOUNTS.md](BUSINESS_ACCOUNTS.md).
 
 For GitHub, Vercel, and Microsoft Entra name/URL migration, see [REBRANDING.md](REBRANDING.md). This rebrand applies to `Development` only; other branches retain their existing names and routes.
 
@@ -33,12 +38,18 @@ For the exact Development URL, Azure callbacks, local ports, and branch-specific
 | `employee` | Personal time logging, draft review, and employee experience | `Development` |
 | `manager` | AI-assisted review, delegated workflow rights, and messaging | `Development` |
 | `admin` | Technology management, access administration, and operational visibility | `Development` |
+| `messages` | Messaging behavior, chat controls, and contractor/account-manager groundwork | `Development` |
+| `user_Interface` | Shared visual design and responsive interaction | `Development` |
+| `testing` | Standalone testing framework and detailed test console | `Development` |
+| `database_management` | Database initialization, migration planning, and future AI storage | `Development` |
 | `Development` | Shared source of truth for integrated features and testing | `main` for releases |
 | `main` | Reviewed release code | Receives release PRs from `Development` |
 
 Keep feature branches after integration. `Per_user_entries` has been retired; use the three role branches for feature work. Branch names organize development, while authenticated roles and server-checked permissions determine the UI a person sees.
 
-This README is shared by `main` and `Development`. Features described as development features are not released simply because they appear in this document.
+This README describes the Development-based checkout. It does not update `main`
+or imply its features have been released. `messages` was merged into remote
+`Development` at `8463b58`; database-management changes remain local and unmerged.
 
 | Capability | Released baseline on `main` | Integrated in `Development` |
 | --- | --- | --- |
@@ -50,6 +61,11 @@ This README is shared by `main` and `Development`. Features described as develop
 | Manager delegation and employee messages | Not yet | Yes |
 | Audit detail windows and periodic AI risk reports | Not yet | Yes |
 | Automated unit/component/API tests and test console | Not yet | Yes |
+| Contractor role and account-manager scaffold | Not yet | Yes |
+| Quiet message settings, search, and conversation filters | Not yet | Yes |
+| Trusted-device automatic encryption unlock | No | Not implemented |
+| Contractor payments and fund-release approval | No | Not implemented |
+| Retry-safe database initialization improvements | No | Local `database_management` only |
 
 ## Role Workspaces
 
@@ -57,8 +73,10 @@ The following describes the integrated `Development` experience. Existing capabi
 
 | Role | Main responsibilities |
 | --- | --- |
+| Contractor | Outsourced worker: log own time, submit work, correct rejected entries, and read authorized messages |
 | Employee | Extract notes into drafts, review/edit eligible entries, submit or recall work, correct rejected entries, maintain a profile, and read authorized messages |
 | Manager | Review team entries, ask AI to prepare recommendations, confirm approvals/rejections, use reports, delegate permitted workflow rights, and send individual or broadcast employee messages |
+| Account Manager | Admin-assigned business-account category; no timesheet mutation or operational approval; financial workflow planned separately |
 | Admin / technology manager | Manage identities, roles, and control permissions through Edit/Save; inspect audit details and stored AI security reports; retain existing entry and reporting capabilities |
 
 Managers may delegate only workflow rights they hold. They cannot promote account roles, unblock employees, or delegate technical-admin access. Team visibility and approval are separate rights.
@@ -94,10 +112,14 @@ For a production-style local run:
 
 ```powershell
 pnpm build
-pnpm start
+pnpm start --port 3002
 ```
 
-Stop the server before changing branches and rebuild before using `pnpm start`. A build from another branch can show stale features or routes.
+Open `http://localhost:3002/tanovo-time`. For Microsoft login on this port, set
+local `AUTH_URL=http://localhost:3002` and register its matching Azure callback.
+Stop the server before changing branches and rebuild before using `pnpm start`.
+A build from another branch can show stale features or routes. Use separate
+worktrees and browser profiles for concurrent branch testing.
 
 ## Configuration and Microsoft Sign-In
 
@@ -113,6 +135,7 @@ Keep secrets in `.env.local` locally and server-side environment settings on Ver
 | `AUTH_MICROSOFT_ENTRA_ID_ISSUER` | Tenant issuer URL, normally `https://login.microsoftonline.com/<tenant-id>/v2.0` |
 | `AI_GATEWAY_API_KEY` | AI Gateway credential for local or externally authenticated AI requests |
 | `ALLOWED_EMAILS` | Optional comma-separated baseline access list |
+| `CONTRACTOR_EMAILS` | Optional outsourced-contractor access list; baseline `ALLOWED_EMAILS` also resolves to contractors |
 | `ADMIN_EMAILS` | Admin bootstrap/recovery identities |
 | `MANAGER_EMAILS` | Optional environment-backed manager identities |
 | `EMPLOYEE_EMAILS` | Employee identities in `Development` |
@@ -128,6 +151,8 @@ Register these as **Web** redirect URIs in the same Entra application used by th
 ```text
 http://localhost:3000/tanovo-time/api/auth/callback/microsoft-entra-id
 https://<stable-deployment-domain>/tanovo-time/api/auth/callback/microsoft-entra-id
+http://localhost:3002/tanovo-time/api/auth/callback/microsoft-entra-id
+https://tanovo-time-git-development-devoncall.vercel.app/tanovo-time/api/auth/callback/microsoft-entra-id
 ```
 
 The URI must match the actual scheme, host, port, and path. Use stable branch aliases for previews rather than deployment-specific URLs that change after redeploys. Scope preview `AUTH_URL` values to the corresponding branch so one branch does not redirect into another.
@@ -149,7 +174,13 @@ The automated framework is available on `Development` and the integrated role br
 | `pnpm test:e2e:url <url>` | Browser smoke test against a deployed `/tanovo-time` URL |
 | `pnpm test:ui` | Standalone local test console, outside the application |
 
-The test console runs at `http://127.0.0.1:4317`. Automated tests mock database/model responses; they do not establish that a live Microsoft, Neon, or AI configuration works. Test those integrations with distinct authorized employee, manager, and admin accounts.
+The test console runs at `http://127.0.0.1:4317`; it is not an authentication target.
+Local Playwright runs use isolated port 3100 and `.next-e2e`, refusing to reuse
+another running server. The richer live table/detail console is on `testing`;
+Development retains its existing console. Automated tests mock database/model
+responses and do not establish that live Microsoft, Neon, or AI configuration works.
+Test those integrations with distinct authorized contractor, employee, manager,
+account-manager, and admin accounts.
 
 Run TypeScript explicitly: the current Next.js configuration skips type failures during production builds, so a successful build alone is insufficient validation.
 
@@ -170,9 +201,15 @@ On `Development`, see `TESTING.md`, `ROLE_WORKSPACES.md`, and `BRANCH_OWNERSHIP.
 
 `main` stores time entries and profiles. `Development` additionally stores managed access with JSONB permission overrides, audit events, security reports, and in-app messages. Schema helpers create required tables/columns idempotently; the database credential must permit those operations. Use separate development/test and production databases.
 
+Local `database_management` adds retry-safe, process-cached schema initialization
+and avoids replacing current access-role constraints on every cold start. It does
+not yet provide versioned migrations, cursor pagination, or AI job storage. See
+[DATABASE_MANAGEMENT.md](DATABASE_MANAGEMENT.md). No live database maintenance has
+been performed during this groundwork.
+
 ## Deployment and Releases
 
-1. Develop on `employee`, `manager`, or `admin`, keeping shared changes aligned with `Development`.
+1. Develop on the relevant role, messaging, UI, testing, or database branch, keeping shared changes aligned with `Development`.
 2. Open feature PRs into `Development`; preserve the feature branches.
 3. Validate the integrated application with automated checks and live role/permission tests.
 4. Update the feature-status table for the release and open a PR from `Development` into `main`.
@@ -180,13 +217,32 @@ On `Development`, see `TESTING.md`, `ROLE_WORKSPACES.md`, and `BRANCH_OWNERSHIP.
 
 Vercel environment changes require a new deployment to take effect. Employee rights stored in the database do not require environment-variable changes or a redeploy.
 
+The integrated `vercel.json` disables automatic Git deployments except for `main`.
+Deploy Development manually through Vercel's Create Deployment using the branch
+`Development`; redeploying an older deployment rebuilds its older commit. Rules
+apply to branches containing that configuration, not automatically to unchanged
+branches. Keep Production unchanged until a reviewed release. Development's
+Preview `AUTH_URL` override is `https://tanovo-time-git-development-devoncall.vercel.app`.
+
 The development security monitor is configured for daily execution at 06:00 UTC. Vercel cron executes on production deployments, not previews. Preview/local monitoring must be invoked separately with the configured bearer secret. Reports inspect at most 250 recorded events from the previous 24 hours and expose coverage limitations; this is not comprehensive malware or infrastructure monitoring.
 
 The manager AI review endpoint processes up to 50 submitted records per request. Humans must confirm each resulting workflow decision.
 
 ## Security and Troubleshooting
 
-The local `user_Interface` messaging update adds one-hour sender editing, confirmed deletion, delivery/read receipts, unread badges, optional in-app popups/sound, and client-side encryption with passphrase-protected multi-device recovery. New sends require every recipient to initialize encryption. Existing plaintext is explicitly labeled legacy. See [MESSAGING_SECURITY.md](MESSAGING_SECURITY.md) for the protocol, storage changes, operating limits, recovery warnings, and required independent security review before production use. This feature is not yet merged into `Development` or released on `main`.
+Development messaging includes one-hour sender editing, confirmed deletion,
+delivery/read receipts, unread badges, optional popups/sound, chat bubbles,
+search, and conversation filtering. Messages opens from the top-right header;
+encryption controls live in Message settings. Recovery unlocking is still required
+after reload because private keys are memory-only. Trusted-device unlock, OS-aware
+themes, and the richer conversation controls remain future work.
+
+New sends require every recipient to initialize encryption. Historical plaintext
+may still exist; the quiet chat view does not label every bubble's encryption state.
+See [MESSAGING_SECURITY.md](MESSAGING_SECURITY.md) for protocol limits and recovery
+warnings. This custom development protocol is not WhatsApp's protocol and requires
+independent security review before production use. No message plaintext or recovery
+secret should be passed to AI.
 
 - Keep secrets server-side and `.env.local` untracked. Rotate any credential that has been exposed; hiding a file later does not remove it from Git history.
 - Technical audit/security tools remain admin-only. IP addresses and full audit JSON appear in selected-event details rather than compact activity rows.

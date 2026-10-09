@@ -12,11 +12,31 @@ Manager AI review examines up to 50 submitted entries. Its recommendations are t
 
 ## Dynamic Rights and Messages
 
+Contractors are outsourced workers; employees are internal staff. Both retain
+their personal time-entry workflows. Legacy stored `user` assignments resolve to
+`contractor`. Account Manager is a separate admin-assigned business-account role,
+without timesheet mutation or operational approval. Financial review and release
+of funds remain planned; see [BUSINESS_ACCOUNTS.md](BUSINESS_ACCOUNTS.md).
+
 Admins edit individual control permissions in the existing access editor and click Save. Rights are stored as JSONB overrides in `managed_user_access`; role defaults preserve existing functionality until an explicit override is saved. Same-browser workspaces refresh immediately through local events/BroadcastChannel; other devices refresh every 15 seconds and on browser focus. Routes enforce current database rights on each request, so stale buttons do not bypass revocation. Technical-admin controls remain admin-only.
 
-Employee rights lists every actor ordered by seniority. Managers edit active employee/user rows through a full-screen rights window and Save; other roles and inactive rows stay visible but read-only. They may grant only workflow rights they hold, and cannot promote roles, unblock users, or delegate delegation/message-sending authority. Admins use the complete directory editor for all roles. Team visibility and review remain separate rights. Concurrent blocking/promotion prevents delegation from overwriting account state.
+Employee rights lists every actor ordered by seniority. Managers edit active
+employee/contractor rows through a full-screen rights window and Save; other roles
+and inactive rows stay visible but read-only. They may grant only workflow rights
+they hold and cannot promote roles, assign account managers, unblock accounts, or
+delegate delegation/message-sending authority. Admins use the complete directory
+editor for all roles. Team visibility and review remain separate rights.
+Concurrent blocking/promotion prevents delegation from overwriting account state.
 
-Managers/admins with sending rights use Messages -> New message window -> select All employees or one employee -> Send message. New messages require participant encryption setup; see `MESSAGING_SECURITY.md`. All active accounts retain their scoped inbox, with ten-second/focus refresh and delivery/read receipts. Broadcasts remain scoped to original encrypted participants; private messages stay scoped to sender/recipient. Sends, edits, deletions, and encryption setup are audited without recording plaintext or recovery secrets.
+Managers/admins with sending rights use the top-right Messages icon, then New
+message, select the broadcast audience or an eligible employee/contractor, and Send.
+New messages require participant encryption setup; see `MESSAGING_SECURITY.md`.
+Message settings holds recovery and identity controls. All active accounts retain
+their scoped inbox, with ten-second/focus refresh and delivery/read receipts.
+Broadcasts remain scoped to original encrypted participants; private messages stay
+scoped to sender/recipient. Sends, edits, deletions, and encryption setup are audited
+without recording plaintext or recovery secrets. Automatic trusted-device unlocking
+is not yet implemented.
 
 Access updates use a serializable database transaction to preserve at least one active administrator, including concurrent edits. Environment-configured `ADMIN_EMAILS` remain protected recovery administrators; configure at least one valid recovery identity before deployment. Application guards cannot prevent an operator from removing deployment configuration or manually corrupting database records outside the app.
 

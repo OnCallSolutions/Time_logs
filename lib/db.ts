@@ -7,6 +7,7 @@
  */
 import "server-only"
 import { LastAdministratorError } from "@/lib/admin-policy"
+import { createDatabaseInitializer } from "@/lib/database-initializer"
 
 import { neon } from "@neondatabase/serverless"
 import type { PermissionOverrides } from "@/lib/permissions"
@@ -154,10 +155,10 @@ type AuditEventRow = {
   occurred_at: string | Date
 }
 
-let schemaReady: Promise<void> | null = null
-let profileSchemaReady: Promise<void> | null = null
-let auditSchemaReady: Promise<void> | null = null
-let accessSchemaReady: Promise<void> | null = null
+const schemaReady = createDatabaseInitializer()
+const profileSchemaReady = createDatabaseInitializer()
+const auditSchemaReady = createDatabaseInitializer()
+const accessSchemaReady = createDatabaseInitializer()
 
 /**
  * Maps a database row into the client-facing time entry shape.
@@ -255,7 +256,7 @@ function toManagedAccessUser(row: ManagedAccessUserRow): ManagedAccessUser {
  * @returns A promise that resolves after the time entries table and indexes exist.
  */
 export function ensureTimeEntriesTable() {
-  schemaReady ??= (async () => {
+  return schemaReady(async () => {
     await sql`
       CREATE TABLE IF NOT EXISTS time_entries (
         id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -318,9 +319,7 @@ export function ensureTimeEntriesTable() {
       CREATE INDEX IF NOT EXISTS time_entries_status_work_date_idx
       ON time_entries (status, work_date DESC)
     `
-  })()
-
-  return schemaReady
+  })
 }
 
 /**
@@ -333,7 +332,7 @@ export function ensureTimeEntriesTable() {
  * @returns A promise that resolves after the user profiles table exists.
  */
 export function ensureUserProfilesTable() {
-  profileSchemaReady ??= (async () => {
+  return profileSchemaReady(async () => {
     await sql`
       CREATE TABLE IF NOT EXISTS user_profiles (
         owner_email text PRIMARY KEY,
@@ -343,9 +342,7 @@ export function ensureUserProfilesTable() {
         updated_at timestamptz NOT NULL DEFAULT now()
       )
     `
-  })()
-
-  return profileSchemaReady
+  })
 }
 
 /**
@@ -358,7 +355,7 @@ export function ensureUserProfilesTable() {
  * @returns A promise that resolves after the audit events table and indexes exist.
  */
 export function ensureAuditEventsTable() {
-  auditSchemaReady ??= (async () => {
+  return auditSchemaReady(async () => {
     await sql`
       CREATE TABLE IF NOT EXISTS audit_events (
         id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -384,9 +381,7 @@ export function ensureAuditEventsTable() {
       CREATE INDEX IF NOT EXISTS audit_events_target_idx
       ON audit_events (target_type, target_id)
     `
-  })()
-
-  return auditSchemaReady
+  })
 }
 
 /**
@@ -399,7 +394,7 @@ export function ensureAuditEventsTable() {
  * @returns A promise that resolves after the access table and indexes exist.
  */
 export function ensureManagedAccessTable() {
-  accessSchemaReady ??= (async () => {
+  return accessSchemaReady(async () => {
     await sql`
       CREATE TABLE IF NOT EXISTS managed_user_access (
         email text PRIMARY KEY,
@@ -418,13 +413,22 @@ export function ensureManagedAccessTable() {
     `
     await sql`ALTER TABLE managed_user_access ADD COLUMN IF NOT EXISTS permissions jsonb NOT NULL DEFAULT '{}'::jsonb`
     // Keep legacy rows readable while older deployments still use the shared database.
-    await sql.transaction([
-      sql`ALTER TABLE managed_user_access DROP CONSTRAINT IF EXISTS managed_user_access_role_check`,
-      sql`ALTER TABLE managed_user_access ADD CONSTRAINT managed_user_access_role_check CHECK (role IN ('admin', 'manager', 'account_manager', 'employee', 'contractor', 'user'))`,
-    ])
-  })()
-
-  return accessSchemaReady
+    await sql`DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint
+          WHERE conrelid = 'managed_user_access'::regclass
+            AND conname = 'managed_user_access_role_check'
+            AND pg_get_constraintdef(oid) LIKE '%account_manager%'
+            AND pg_get_constraintdef(oid) LIKE '%contractor%'
+        ) THEN
+          ALTER TABLE managed_user_access DROP CONSTRAINT IF EXISTS managed_user_access_role_check;
+          ALTER TABLE managed_user_access ADD CONSTRAINT managed_user_access_role_check
+            CHECK (role IN ('admin', 'manager', 'account_manager', 'employee', 'contractor', 'user'));
+        END IF;
+      END
+    $$`
+  })
 }
 
 /**
