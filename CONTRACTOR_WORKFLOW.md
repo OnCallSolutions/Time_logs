@@ -90,9 +90,10 @@ Save Vercel environment changes and create a new deployment to apply them.
 ## Branches and Verification
 
 `manager` contains operational review groundwork. `business_accounts` builds on it
-for financial handoff. `user_Interface` retains separate white/orange visual changes;
-`messages` retains recipient audiences. These latest feature changes have not been
-merged into Development. Consult Git branch tracking for publication status.
+for financial handoff. Both are now merged into local Development; publication of
+that integration is separate. `user_Interface` retains separate white/orange visual
+changes; `messages` retains recipient audiences. Consult Git branch tracking for
+publication status.
 
 Unit/API tests cover self-review denial, selection confirmation, handoff rights,
 contractor eligibility, and account-manager queue scoping. Live Azure/Neon/AI tests,

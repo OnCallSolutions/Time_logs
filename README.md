@@ -7,7 +7,7 @@ AI-assisted contractor time logging, manager review, and internal staff administ
 For the contractor-centered operational review and business-account handoff changes
 under development, including reviewer separation and Vercel role-list names, see
 [CONTRACTOR_WORKFLOW.md](CONTRACTOR_WORKFLOW.md). These changes are currently on
-the manager/business-account feature branches, not released functionality.
+local Development through the manager/business-account integration, not released functionality.
 
 Contractors are outsourced workers who log their own time and submit it for review.
 Employees are internal company staff. Managers review work and delegate permitted
