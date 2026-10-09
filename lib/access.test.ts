@@ -6,6 +6,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { getManagedAccessUser } from "@/lib/db"
+import { getAccountLifecycle } from "@/lib/access-lifecycle-store"
 import {
   getConfiguredAccessUsers,
   getEffectiveUserRole,
@@ -15,6 +16,7 @@ import {
 vi.mock("@/lib/db", () => ({
   getManagedAccessUser: vi.fn(),
 }))
+vi.mock("@/lib/access-lifecycle-store",()=>({getAccountLifecycle:vi.fn(async()=>null)}))
 
 const managedAccessMock = vi.mocked(getManagedAccessUser)
 const accessEnvKeys = [
@@ -43,6 +45,7 @@ describe("access resolution", () => {
     clearAccessEnv()
     managedAccessMock.mockReset()
     managedAccessMock.mockResolvedValue(null)
+    vi.mocked(getAccountLifecycle).mockResolvedValue(null)
   })
 
   it("distinguishes outsourced contractors from internal employees",async()=>{
@@ -51,6 +54,11 @@ describe("access resolution", () => {
     await expect(getEffectiveUserRole("supplier@example.com")).resolves.toBe("contractor")
     await expect(getEffectiveUserRole("staff@example.com")).resolves.toBe("employee")
     await expect(getEffectiveUserRole("unknown@example.com")).resolves.toBeNull()
+  })
+  it("scheduled cutoff overrides an environment allowlist",async()=>{
+    process.env.CONTRACTOR_EMAILS="supplier@example.com"
+    vi.mocked(getAccountLifecycle).mockResolvedValue({email:"supplier@example.com",cutoffAt:"2020-01-01T00:00:00Z",suspended:false,reviewAt:null,reason:"Contract ended",updatedBy:"admin@example.com"})
+    await expect(getEffectiveUserRole("supplier@example.com")).resolves.toBeNull()
   })
 
   it("keeps environment administrators as the highest recovery role", async () => {

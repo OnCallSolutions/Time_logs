@@ -8,6 +8,8 @@
 import "server-only"
 
 import { getManagedAccessUser } from "@/lib/db"
+import { getAccountLifecycle } from "@/lib/access-lifecycle-store"
+import { lifecycleDeniesAccess } from "@/lib/access-lifecycle-policy"
 import type { UserRole } from "@/lib/types"
 
 /**
@@ -162,6 +164,8 @@ export async function getEffectiveUserRole(
   }
 
   const managedAccess = await getManagedAccessUser(normalizedEmail)
+  // Administrators remain outside automatic lifecycle changes to preserve recovery.
+  if(managedAccess?.role!=="admin"&&lifecycleDeniesAccess(await getAccountLifecycle(normalizedEmail)))return null
 
   if (managedAccess) {
     return managedAccess.accessStatus === "active"

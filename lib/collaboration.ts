@@ -30,7 +30,7 @@ export async function actorRoster() {
   const users = await Promise.all([...emails].map(async email=>{
     const effective=await getEffectiveUserRole(email)
     const assignment=managed.find(user=>user.email.toLowerCase()===email)
-    return {email,role:effective??assignment?.role??configured.find(user=>user.email.toLowerCase()===email)?.role??"none",accessStatus:effective?"active":assignment?.accessStatus??"observed",displayName:known.find(user=>user.email.toLowerCase()===email)?.displayName??""}
+    return {email,role:effective??assignment?.role??configured.find(user=>user.email.toLowerCase()===email)?.role??"none",accessStatus:effective?"active":assignment?.accessStatus==="active"?"denied":assignment?.accessStatus??"observed",displayName:known.find(user=>user.email.toLowerCase()===email)?.displayName??""}
   }))
   const rank:Record<string,number>={admin:4,manager:3,account_manager:3,employee:2,contractor:1,none:0}
   return users.sort((a,b)=>(rank[b.role]??0)-(rank[a.role]??0)||a.email.localeCompare(b.email))

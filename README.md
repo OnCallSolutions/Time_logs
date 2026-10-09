@@ -4,6 +4,11 @@ AI-assisted contractor time logging, manager review, and internal staff administ
 
 **AI prepares the work; people review and confirm decisions.** The application is served at `/tanovo-time`.
 
+Account cutoff schedules, suspension, and temporary operational assignments are
+under development on `access_lifecycle` with presentation on `user_Interface`.
+See [ACCESS_LIFECYCLE.md](ACCESS_LIFECYCLE.md) for scope, precedence, administrator
+protection, and the separate Microsoft offboarding checklist.
+
 For the contractor-centered operational review and business-account handoff changes
 under development, including reviewer separation and Vercel role-list names, see
 [CONTRACTOR_WORKFLOW.md](CONTRACTOR_WORKFLOW.md). These changes are currently on
