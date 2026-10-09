@@ -990,6 +990,9 @@ export async function updateTimeEntry(
       AND (${includeAll} OR owner_email = ${ownerEmail})
       AND (${patch.status ?? null} NOT IN ('approved', 'rejected') OR ${patch.status ?? null} IS NULL
         OR (status = 'submitted' AND lower(owner_email) <> lower(${ownerEmail}) AND ${reviewerEmail ?? null} IS NOT NULL))
+      AND (lower(owner_email) <> lower(${ownerEmail}) OR status IN ('draft','rejected')
+        OR (status='submitted' AND ${patch.status ?? null}='draft'
+          AND ${patch.contractor===undefined&&patch.date===undefined&&patch.hours===undefined&&patch.project===undefined&&patch.description===undefined}))
     RETURNING
       id,
       owner_email,
@@ -1030,6 +1033,7 @@ export async function deleteTimeEntry(
     DELETE FROM time_entries
     WHERE id = ${id}
       AND (${includeAll} OR owner_email = ${ownerEmail})
+      AND (lower(owner_email) <> lower(${ownerEmail}) OR status IN ('draft','rejected'))
   `
 }
 
@@ -1049,6 +1053,7 @@ export async function clearTimeEntries(ownerEmail: string, includeAll = false) {
 
   await sql`
     DELETE FROM time_entries
-    WHERE ${includeAll} OR owner_email = ${ownerEmail}
+    WHERE (${includeAll} OR owner_email = ${ownerEmail})
+      AND (lower(owner_email) <> lower(${ownerEmail}) OR status IN ('draft','rejected'))
   `
 }
