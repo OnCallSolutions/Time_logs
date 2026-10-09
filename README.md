@@ -1,8 +1,10 @@
-# OnCall Timesheet
+# TanovoTime
 
 AI-assisted time logging, review, and employee administration built with Next.js, Microsoft Entra ID, and Neon PostgreSQL.
 
-**AI prepares the work; people review and confirm decisions.** The application is served at `/timelog`.
+**AI prepares the work; people review and confirm decisions.** The application is served at `/tanovotime`.
+
+For GitHub, Vercel, and Microsoft Entra name/URL migration, see [REBRANDING.md](REBRANDING.md). This rebrand applies to `Development` only; other branches retain their existing names and routes.
 
 ## Contents
 
@@ -65,8 +67,8 @@ AI recommendations are advisory. They cannot verify that work happened and do no
 - A Neon PostgreSQL database, a Microsoft Entra application registration, and AI Gateway credentials for live AI operations.
 
 ```powershell
-git clone https://github.com/OnCallSolutions/Time_logs.git
-cd Time_logs
+git clone https://github.com/maurice-devnet/ONCALL_SOLUTIONS.git
+cd ONCALL_SOLUTIONS
 git switch Development
 pnpm install --frozen-lockfile
 ```
@@ -77,7 +79,7 @@ Create an untracked `.env.local` with the values described below, then start the
 pnpm dev
 ```
 
-Open [http://localhost:3000/timelog](http://localhost:3000/timelog).
+Open [http://localhost:3000/tanovotime](http://localhost:3000/tanovotime).
 
 For a production-style local run:
 
@@ -115,8 +117,8 @@ Configure explicit access lists for restricted environments. Without environment
 Register these as **Web** redirect URIs in the same Entra application used by the deployment:
 
 ```text
-http://localhost:3000/timelog/api/auth/callback/microsoft-entra-id
-https://<stable-deployment-domain>/timelog/api/auth/callback/microsoft-entra-id
+http://localhost:3000/tanovotime/api/auth/callback/microsoft-entra-id
+https://<stable-deployment-domain>/tanovotime/api/auth/callback/microsoft-entra-id
 ```
 
 The URI must match the actual scheme, host, port, and path. Use stable branch aliases for previews rather than deployment-specific URLs that change after redeploys. Scope preview `AUTH_URL` values to the corresponding branch so one branch does not redirect into another.
@@ -135,7 +137,7 @@ The automated framework is available on `Development` and the integrated role br
 | `pnpm verify` | TypeScript, tests, and production build |
 | `pnpm test:install` | Install Playwright Chromium |
 | `pnpm test:e2e` | Local browser sign-in smoke test |
-| `pnpm test:e2e:url <url>` | Browser smoke test against a deployed `/timelog` URL |
+| `pnpm test:e2e:url <url>` | Browser smoke test against a deployed `/tanovotime` URL |
 | `pnpm test:ui` | Standalone local test console, outside the application |
 
 The test console runs at `http://127.0.0.1:4317`. Automated tests mock database/model responses; they do not establish that a live Microsoft, Neon, or AI configuration works. Test those integrations with distinct authorized employee, manager, and admin accounts.
@@ -154,7 +156,7 @@ On `Development`, see `TESTING.md`, `ROLE_WORKSPACES.md`, and `BRANCH_OWNERSHIP.
 | `lib/access.ts` | Identity allowlist and role resolution |
 | `lib/permissions.ts` / `lib/effective-permissions.ts` | Control definitions and server-side rights resolution in `Development` |
 | `auth.ts` | Microsoft Entra ID / Auth.js configuration |
-| `next.config.mjs` / `lib/paths.ts` | `/timelog` routing configuration |
+| `next.config.mjs` / `lib/paths.ts` | `/tanovotime` routing configuration |
 | `e2e/`, `tests/`, `tools/` | Automated tests and external test tools in `Development` |
 
 `main` stores time entries and profiles. `Development` additionally stores managed access with JSONB permission overrides, audit events, security reports, and in-app messages. Schema helpers create required tables/columns idempotently; the database credential must permit those operations. Use separate development/test and production databases.
@@ -182,7 +184,7 @@ The local `user_Interface` messaging update adds one-hour sender editing, confir
 - Local IP values such as `::1` or `127.0.0.1` represent loopback, not a missing address.
 - `EADDRINUSE` means another process owns the server port. Stop that server before starting another, or use a different port and update matching auth/redirect configuration.
 - A missing production build requires `pnpm build` before `pnpm start`.
-- For 404s or stale pages after switching branches, stop the server and rebuild; use `/timelog` consistently.
+- For 404s or stale pages after switching branches, stop the server and rebuild; use `/tanovotime` consistently.
 - For authentication configuration errors, verify environment scope, client-secret value, issuer, and exact redirect URI. A personal Microsoft account may need tenant invitation or a compatible app registration.
 - For unavailable AI analysis, verify AI Gateway authentication. Manual review remains available.
 

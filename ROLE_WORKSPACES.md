@@ -42,7 +42,7 @@ pnpm test -- components/role-navigation.test.tsx
 pnpm test -- app/api/delegation/route.test.ts app/api/messages/route.test.ts lib/permissions.test.ts
 ```
 
-For each role branch: stop the running server, `git switch employee` (or `manager` / `admin`), run `pnpm build`, then `pnpm start` and visit `http://localhost:3000/timelog`. Rebuild after switching branches so production output matches the checkout. Tests use fixtures and mocked AI; testing real AI review requires configured AI Gateway credentials.
+For each role branch: stop the running server, `git switch employee` (or `manager` / `admin`), run `pnpm build`, then `pnpm start` and visit `http://localhost:3000/tanovotime`. Rebuild after switching branches so production output matches the checkout. Tests use fixtures and mocked AI; testing real AI review requires configured AI Gateway credentials.
 
 Employee checklist: extract notes, review drafts, submit, recall, filter corrections, resubmit, and verify other employees' records/admin screens are unavailable. Manager checklist: prepare AI review, inspect suggestions, cancel without mutation, approve explicitly, reject with a reason, and verify team reports remain available. Admin checklist: open the directory, edit without saving, save explicitly, inspect compact audit rows/full details, and open stored AI security reports.
 

@@ -3,26 +3,27 @@
  *
  * NextAuth owns the GET and POST behavior for sign-in, callback, session, and
  * sign-out requests. Re-exporting the configured handlers keeps the route file
- * thin while preserving the /timelog/api/auth path expected by Azure.
+ * thin while preserving the /tanovotime/api/auth path expected by Azure.
  */
 import { handlers } from "@/auth"
 import { NextRequest } from "next/server"
+import { basePath } from "@/lib/paths"
 
 /**
  * Recreates an auth request with the public Next.js base path restored.
  *
- * Next.js strips /timelog before invoking app route handlers, but Auth.js parses
+ * Next.js strips /tanovotime before invoking app route handlers, but Auth.js parses
  * actions relative to the configured public base path. Restoring the pathname
  * keeps local, preview, and Azure callback URLs aligned.
  *
  * @param req - Incoming route handler request from Next.js.
- * @returns A request whose URL pathname includes /timelog before /api/auth.
+ * @returns A request whose URL pathname includes /tanovotime before /api/auth.
  */
 function withPublicAuthBasePath(req: NextRequest) {
   const url = new URL(req.url)
 
   if (url.pathname.startsWith("/api/auth")) {
-    url.pathname = `/timelog${url.pathname}`
+    url.pathname = `${basePath}${url.pathname}`
   }
 
   return new NextRequest(url, {

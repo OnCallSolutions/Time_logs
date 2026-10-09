@@ -15,9 +15,9 @@ const geistSans = Geist({ subsets: ['latin'], variable: '--font-geist-sans' })
 const geistMono = Geist_Mono({ subsets: ['latin'], variable: '--font-geist-mono' })
 
 export const metadata: Metadata = {
-  title: 'DevOnCall Timesheet',
+  title: 'TanovoTime | DevOnCall',
   description:
-    'DevOnCall employee time logging, review, and administration.',
+    'TanovoTime by DevOnCall: employee time logging, review, and administration.',
   icons: {
     icon: `${basePath}/devoncall-favicon.ico`,
   },

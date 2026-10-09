@@ -19,23 +19,23 @@ it("loads only the authenticated employee inbox and eligible broadcasts",async()
   expect(listMessages).toHaveBeenCalledWith("employee@example.com",true)
 })
 it("denies employee broadcast sending",async()=>{
-  expect((await POST(new Request("http://localhost/timelog/api/messages",{method:"POST",body:JSON.stringify({recipient:null,body:"Announcement"})}))).status).toBe(403)
+  expect((await POST(new Request("http://localhost/tanovotime/api/messages",{method:"POST",body:JSON.stringify({recipient:null,body:"Announcement"})}))).status).toBe(403)
   expect(sendMessage).not.toHaveBeenCalled()
 })
 it("rejects a private message to an ineligible recipient",async()=>{
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"manager",permissions:resolvePermissions("manager")})
   vi.mocked(employeeRoster).mockResolvedValue([])
-  expect((await POST(new Request("http://localhost/timelog/api/messages",{method:"POST",body:JSON.stringify({recipient:"admin@example.com",body:"Hello"})}))).status).toBe(400)
+  expect((await POST(new Request("http://localhost/tanovotime/api/messages",{method:"POST",body:JSON.stringify({recipient:"admin@example.com",body:"Hello"})}))).status).toBe(400)
   expect(sendMessage).not.toHaveBeenCalled()
 })
 it("denies sending immediately after manager sending rights are revoked",async()=>{
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"manager",permissions:resolvePermissions("manager",{send_messages:false})})
-  expect((await POST(new Request("http://localhost/timelog/api/messages",{method:"POST",body:JSON.stringify({recipient:null,body:"Announcement"})}))).status).toBe(403)
+  expect((await POST(new Request("http://localhost/tanovotime/api/messages",{method:"POST",body:JSON.stringify({recipient:null,body:"Announcement"})}))).status).toBe(403)
   expect(sendMessage).not.toHaveBeenCalled()
 })
 const messageId="123e4567-e89b-42d3-a456-426614174000"
 /** @param method - Mutation method. @param body - JSON action fields. @returns Request for the message route. */
-function request(method:string,body:object):Request{return new Request("http://localhost/timelog/api/messages",{method,body:JSON.stringify(body)})}
+function request(method:string,body:object):Request{return new Request("http://localhost/tanovotime/api/messages",{method,body:JSON.stringify(body)})}
 it("records read receipts with authenticated identity rather than request identity",async()=>{
   expect((await PATCH(request("PATCH",{action:"read",ids:[messageId],email:"victim@example.com"}))).status).toBe(200)
   expect(readMessages).toHaveBeenCalledWith("employee@example.com",true,[messageId])

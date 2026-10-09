@@ -4,7 +4,7 @@ The parent organization's visual reference is [devoncall.net](https://www.devonc
 
 ## Shared Identity
 
-- Use `components/brand.tsx` for the DevOnCall wordmark and Timesheet descriptor.
+- Use `components/brand.tsx` for the DevOnCall wordmark and TanovoTime product name on `Development`.
 - Use white surfaces, dark ink text, neutral separators, and orange accents.
 - The brand accent is `#f97316`; action orange is the darker `#c2410c` for readable white labels. Main ink is `#050720`.
 - Keep success, warning, error, and chart colors distinct from brand colors.
@@ -27,7 +27,7 @@ Employee rights shows every actor. Managers can edit only active employee/user w
 
 ## Authentication
 
-Microsoft Entra ID remains the only sign-in provider. Do not add password collection to the application. Keep existing provider identifiers, reauthentication parameters, cookie cleanup, and `/timelog` routes.
+Microsoft Entra ID remains the only sign-in provider. Do not add password collection to the application. Keep existing provider identifiers, reauthentication parameters, cookie cleanup, and `/tanovotime` routes.
 
 `AuthSubmitButton` reads the parent form's pending state, prevents repeat clicks, and announces progress. Sign-out keeps the same server action and fixed control dimensions. Help text must remain concise and relevant to account access.
 

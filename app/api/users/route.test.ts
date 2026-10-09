@@ -34,7 +34,7 @@ beforeEach(() => {
  * @returns Request containing an otherwise valid employee access assignment.
  */
 function request(permissions?: unknown): Request {
-  return new Request("http://localhost/timelog/api/users", {
+  return new Request("http://localhost/tanovotime/api/users", {
     method: "PATCH", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email: "employee@example.com", role: "employee", accessStatus: "active", permissions }),
   })
@@ -86,7 +86,7 @@ it("returns a policy conflict when storage rejects removing the last admin",asyn
 })
 it("keeps recovery administrators active and displays a safe conflict",async()=>{
   vi.mocked(getConfiguredAccessUsers).mockReturnValue([{email:"admin@example.com",role:"admin"}])
-  const response=await PATCH(new Request("http://localhost/timelog/api/users",{method:"PATCH",body:JSON.stringify({email:"admin@example.com",role:"manager",accessStatus:"active"})}))
+  const response=await PATCH(new Request("http://localhost/tanovotime/api/users",{method:"PATCH",body:JSON.stringify({email:"admin@example.com",role:"manager",accessStatus:"active"})}))
   expect(response.status).toBe(409)
   expect(upsertManagedAccessUser).not.toHaveBeenCalled()
 })

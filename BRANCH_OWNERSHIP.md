@@ -14,7 +14,7 @@
 - `main`: reviewed releases.
 - `Development`: integrated UI, employee workflows, administration, security monitoring, and testing tools.
 
-The supporting audit, security, UI, and testing branches are retained history; use the three role branches for new feature changes, then integrate into `Development`. Synchronize active feature branches with `Development` when they need shared changes. The remote rebrand branch is excluded so the application remains at `/timelog`.
+The supporting audit, security, UI, and testing branches are retained history; use the three role branches for new feature changes, then integrate into `Development`. The TanovoTime rebrand applies to `Development` only, at `/tanovotime`. Other branches are not being renamed or synchronized as part of this change. The separate remote rebrand branch is not being merged.
 
 # Storage and Configuration
 

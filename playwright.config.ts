@@ -1,13 +1,13 @@
 /**
  * Configures Playwright for browser-level regression tests.
  *
- * Local runs start the Next dev server and visit /timelog. Remote runs can set
+ * Local runs start the Next dev server and visit /tanovotime. Remote runs can set
  * TEST_TARGET_URL to a full deployed page URL, which skips the local server and
  * lets the same smoke tests validate Vercel previews or production URLs.
  */
 import { defineConfig, devices } from "@playwright/test"
 
-const targetUrl = process.env.TEST_TARGET_URL ?? "/timelog"
+const targetUrl = process.env.TEST_TARGET_URL ?? "/tanovotime"
 const usesRemoteTarget = /^https?:\/\//i.test(targetUrl)
 
 export default defineConfig({
@@ -26,7 +26,7 @@ export default defineConfig({
     ? undefined
     : {
         command: "pnpm dev",
-        url: "http://127.0.0.1:3000/timelog",
+        url: "http://127.0.0.1:3000/tanovotime",
         reuseExistingServer: !process.env.CI,
         timeout: 120_000,
       },

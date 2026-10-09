@@ -7,13 +7,13 @@
  */
 import { expect, test } from "@playwright/test"
 
-const targetUrl = process.env.TEST_TARGET_URL ?? "/timelog"
+const targetUrl = process.env.TEST_TARGET_URL ?? "/tanovotime"
 
 test("shows the Microsoft sign-in entry point", async ({ page }) => {
   await page.goto(targetUrl)
 
   await expect(
-    page.getByRole("heading", { name: /sign in to devoncall/i }),
+    page.getByRole("heading", { name: /sign in to (tanovotime|devoncall|manage contractor hours)/i }),
   ).toBeVisible()
   await expect(
     page.getByRole("button", { name: /sign in with microsoft/i }),

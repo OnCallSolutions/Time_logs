@@ -1,5 +1,5 @@
 /**
- * Redirects bare-root requests into the /timelog application base path.
+ * Redirects bare-root requests into the /tanovotime application base path.
  *
  * The Next.js basePath handles normal app routing, while this proxy provides a
  * lightweight server-side guard for direct root visits in environments where the
@@ -7,9 +7,10 @@
  */
 import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
+import { basePath } from "@/lib/paths"
 
 /**
- * Allows /timelog requests and redirects every matched root request to /timelog.
+ * Allows /tanovotime requests and redirects every matched root request to /tanovotime.
  *
  * @param request - Incoming request inspected before route rendering.
  * @returns Next response that continues or redirects to the app base path.
@@ -17,11 +18,11 @@ import type { NextRequest } from "next/server"
 export function proxy(request: NextRequest) {
   const pathname = new URL(request.url).pathname
 
-  if (pathname === "/timelog" || pathname.startsWith("/timelog/")) {
+  if (pathname === basePath || pathname.startsWith(`${basePath}/`)) {
     return NextResponse.next()
   }
 
-  return NextResponse.redirect(new URL("/timelog", request.url))
+  return NextResponse.redirect(new URL(basePath, request.url))
 }
 
 /**

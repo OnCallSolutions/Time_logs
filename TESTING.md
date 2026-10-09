@@ -15,7 +15,7 @@ pnpm test
 pnpm test:coverage
 pnpm test:install
 pnpm test:e2e
-pnpm test:e2e:url https://your-branch.vercel.app/timelog
+pnpm test:e2e:url https://your-branch.vercel.app/tanovotime
 pnpm test:ui
 pnpm verify
 ```
@@ -24,7 +24,7 @@ pnpm verify
 
 `pnpm test:e2e` runs browser tests in `e2e/` against the local app. Run `pnpm test:install` once on a new machine to install Chromium.
 
-`pnpm test:e2e:url <url>` runs the same browser smoke tests against any deployed branch page URL. Include `/timelog` in the URL.
+`pnpm test:e2e:url <url>` runs the same browser smoke tests against any deployed branch page URL. Include `/tanovotime` in the URL.
 
 `pnpm test:ui` starts the standalone ONCALL Test Console at `http://127.0.0.1:4317`. This is not part of the app. It is a local dashboard with buttons and event listeners for local verification, coverage, local browser smoke tests, and deployed branch URL smoke tests. You can launch it from PowerShell, Command Prompt, or the VS Code terminal.
 

@@ -16,7 +16,7 @@ jobs:
       AUTH_MICROSOFT_ENTRA_ID_ID: test-client-id
       AUTH_MICROSOFT_ENTRA_ID_SECRET: test-client-secret
       AUTH_MICROSOFT_ENTRA_ID_ISSUER: https://login.microsoftonline.com/common/v2.0
-      DATABASE_URL: postgresql://user:password@localhost:5432/timelog_test
+      DATABASE_URL: postgresql://user:password@localhost:5432/tanovotime_test
     steps:
       - name: Checkout
         uses: actions/checkout@v4

@@ -1,13 +1,14 @@
 /**
  * Configures NextAuth with Microsoft Entra ID and exports auth helpers.
  *
- * The configuration pins the app's auth routes under /timelog/api/auth so they
+ * The configuration pins the app's auth routes under /tanovotime/api/auth so they
  * match the public Next.js base path and Azure redirect URI. The route handler
  * wrapper re-adds that public base path before requests reach Auth.js locally.
  */
 import "server-only"
 import NextAuth from "next-auth"
 import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id"
+import { apiPath } from "@/lib/paths"
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   debug: false,
@@ -21,7 +22,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     },
   },
   trustHost: true,
-  basePath: "/timelog/api/auth",
+  basePath: apiPath("/api/auth"),
   providers: [
     MicrosoftEntraID({
       clientId: process.env.AUTH_MICROSOFT_ENTRA_ID_ID,

@@ -9,6 +9,7 @@
 import { signOut } from "@/auth"
 import { cookies } from "next/headers"
 import { redirect } from "next/navigation"
+import { basePath } from "@/lib/paths"
 
 const authCookieNames = [
   "authjs.session-token",
@@ -79,7 +80,7 @@ function expireCookie(name: string, path: string) {
 }
 
 /**
- * Expires Auth.js and NextAuth cookies on both root and /timelog paths.
+ * Expires Auth.js and NextAuth cookies on both root and /tanovotime paths.
  *
  * This is intentionally more aggressive than a default sign-out because preview
  * and local testing can leave cookies on different paths after base-path changes.
@@ -98,7 +99,7 @@ async function clearAuthCookies() {
     cookieStore.set(expireCookie(name, "/"))
 
     if (!name.startsWith("__Host-")) {
-      cookieStore.set(expireCookie(name, "/timelog"))
+      cookieStore.set(expireCookie(name, basePath))
     }
   }
 }
