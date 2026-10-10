@@ -517,8 +517,10 @@ export function TimesheetApp({
       {/* View switch */}
       <div aria-label="Workspace views" className="sticky top-0 z-10 grid grid-cols-2 gap-1 border-y border-border bg-card p-1 sm:flex sm:flex-wrap sm:items-center">
         {tabs.map(({ key, label, icon: Icon }) => (
-          <button
+          <Button
             key={key}
+            variant="ghost"
+            help={`Open ${label.toLowerCase()} using your current role and permissions.`}
             type="button"
             onClick={() => setView(key)}
             aria-pressed={view === key}
@@ -553,7 +555,7 @@ export function TimesheetApp({
                 {pendingEntries.length}
               </span>
             )}
-          </button>
+          </Button>
         ))}
       </div>
 
