@@ -612,7 +612,7 @@ export function TimesheetApp({
           <ManagerReport entries={entries} />
         )
       ) : view === "accounts" ? (
-        <BusinessAccounts key={`${role}:${permissions.send_to_accounts}:${permissions.view_accounts}`} canSend={permissions.send_to_accounts&&(role==="manager"||role==="admin")}/>
+        <BusinessAccounts key={`${role}:${permissions.send_to_accounts}:${permissions.view_accounts}:${permissions.review_accounts}:${permissions.ai_accounts}`} canSend={permissions.send_to_accounts&&(role==="manager"||role==="admin")} canReview={permissions.view_accounts&&permissions.review_accounts&&(role==="account_manager"||role==="admin")} canAI={permissions.view_accounts&&permissions.ai_accounts&&(role==="account_manager"||role==="admin")}/>
       ) : view === "messages" ? (
         <MessagesPanel inbox={messageInbox} canSend={permissions.send_messages && (role === "admin" || role === "manager")} />
       ) : view === "permissions" ? (
