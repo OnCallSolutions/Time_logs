@@ -36,7 +36,7 @@ const patchSchema = z
     reviewNote: z.string().trim().max(500).optional(),
     expectedRevision: z.string().min(1).max(100).optional(),
   })
-  .refine((patch) => Object.keys(patch).length > 0, {
+  .refine((patch) => Object.keys(patch).some(key=>key!=="expectedRevision"), {
     message: "At least one field is required.",
   })
 

@@ -951,6 +951,8 @@ export async function getTimeEntry(
  * @param id - Database id of the entry to update.
  * @param patch - Partial time entry fields to apply.
  * @param includeAll - Whether elevated roles should bypass owner scoping.
+ * @param reviewerEmail - Authenticated independent reviewer for decisions.
+ * @param expectedRevision - Optional evidence timestamp checked atomically in SQL.
  * @returns The updated entry, or null when no visible entry matches.
  */
 export async function updateTimeEntry(
