@@ -58,3 +58,16 @@ it("does not let manager privileges reopen their own approved time",async()=>{
   expect(response.status).toBe(403)
   expect(updateTimeEntry).not.toHaveBeenCalled()
 })
+it("rejects revision-only patches without touching evidence",async()=>{
+  const response=await PATCH(new Request("http://localhost/api/entries/entry",{method:"PATCH",body:JSON.stringify({expectedRevision:"2026-10-10 00:00:00+00"})}),{params:Promise.resolve({id:"entry"})})
+  expect(response.status).toBe(400);expect(updateTimeEntry).not.toHaveBeenCalled()
+})
+it("returns conflict when the expected evidence revision no longer matches",async()=>{
+  vi.mocked(getEffectivePermissions).mockResolvedValue({role:"account_manager",permissions:resolvePermissions("account_manager",{review_manager_entries:true})})
+  vi.mocked(getTimeEntry).mockResolvedValue({id:"entry",ownerEmail:"other@example.com",status:"submitted"} as never)
+  vi.mocked(updateTimeEntry).mockResolvedValue(null)
+  const revision="2026-10-10 00:00:00.123456+00"
+  const response=await PATCH(new Request("http://localhost/api/entries/entry",{method:"PATCH",body:JSON.stringify({status:"approved",expectedRevision:revision})}),{params:Promise.resolve({id:"entry"})})
+  expect(response.status).toBe(409)
+  expect(updateTimeEntry).toHaveBeenCalledWith("manager@example.com","entry",expect.anything(),true,"manager@example.com",revision)
+})
