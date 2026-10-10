@@ -117,6 +117,8 @@ type ManagedAccessUserRow = {
 
 export type AuditAction =
   | "account_handoff_created"
+  | "account_handoff_reviewed"
+  | "account_handoff_ai_reviewed"
   | "message_sent"
   | "message_edited"
   | "message_deleted"
