@@ -1,49 +1,39 @@
-# Messaging Devices and Browser Caching
+# Automatic Encrypted Messaging
 
-## Encryption and Recovery
+Normal messaging has no encryption password, recovery form, or unlock action.
+After Microsoft sign-in, the application generates nonextractable device keys,
+stores them in browser IndexedDB, and registers public keys automatically. This
+runs for all signed-in actors, even before they open the messaging window.
 
-Messages continue to use the existing signed, end-to-end encrypted envelopes.
-The server receives ciphertext, public identities, and an encrypted recovery
-backup, never a recovery passphrase or unencrypted private key.
+Version 2 messages encrypt one content key separately for every enrolled device
+of each selected recipient. Signatures bind the recipient device envelopes as
+well as the ciphertext and conversation metadata. Private keys and message text
+are never sent to the server. Up to five device identities per account are stored
+in `app_message_devices`; existing legacy identities are preserved separately.
 
-At first setup or recovery, **Remember encryption on this personal device** stores
-nonextractable Web Crypto private-key handles in IndexedDB. The passphrase is not
-stored. Subsequent visits restore matching keys only after the authenticated
-key-directory request succeeds. Remembered fingerprints must match the server's
-published identity; changes fail closed.
+Recipients need to sign in at least once to publish a device key. A selected group
+cannot be silently reduced when a recipient has no device. Connection failures
+remain visible, and no plaintext fallback is permitted.
 
-One-time setup/recovery is still required on a new device. Browser profiles,
-ports, and deployment hostnames are separate origins and do not share trust.
-Use a stable deployment hostname for consistent device access. Clearing browser
-site data removes remembered keys. Lock messages deletes local trust and clears
-plaintext memory, but does not reset the server identity or encrypted backup.
+Browser profiles, ports, and hostnames have separate storage. New devices receive
+future messages but do not automatically recover past history. Existing legacy
+ciphertext and matching remembered keys remain supported; keys are never reset
+to disguise an inability to decrypt. Clearing site data can make past history
+unavailable. Microsoft sign-out ends the session but does not erase device keys.
 
-Do not remember keys on shared computers. Microsoft sign-out clears the session
-and browser response cache but deliberately retains personal-device key handles
-for the next matching login. Nonextractable keys are not hardware-backed security:
-malicious same-origin code or a compromised browser can still invoke them.
-This protocol is not the WhatsApp Signal protocol and does not claim equivalent
-forward secrecy or independent security certification.
+This design trusts authenticated device enrollment and the server's public-key
+directory. It does not provide the Signal protocol, hardware-backed keys, or
+independent security certification. Same-origin malicious code or a compromised
+browser can invoke nonextractable keys. A security review is required before
+claiming resistance to an actively malicious directory or account takeover.
 
-## Sending and Review Feedback
+## Cache and Verification
 
-Compose defaults to an individual recipient. Every selected participant must
-publish an encryption identity before sending. Missing setup is reported rather
-than silently dropping recipients or sending plaintext. Send success is reported
-only after server confirmation. Opening AI review shows progress, explicit empty
-results, recommendations, or a service error; it never approves work by itself.
+Public directory and profile reads use short-lived, account-scoped memory caches.
+Permission checks and mutations remain fresh. Plaintext is cached only in mounted
+component memory and invalidated by envelope changes, deletions, or loss of keys.
+Background inbox polling pauses while the page is hidden.
 
-## Cache Boundaries
-
-Response caching is account-scoped and memory-only, with a maximum of 30 seconds.
-Profiles retain results for 15 seconds and recipient directories for 3 seconds.
-Key directories refresh on participant changes, focus, and visible-tab timers.
-Unchanged inbox responses retain their array identity. Unchanged verified message
-envelopes reuse decrypted text in component memory only; edits/deletions invalidate
-those entries. Background inbox polling pauses when the tab is hidden.
-
-Profile saves invalidate profile reads. Sign-out clears response caches. Failed
-responses are never cached. Permissions, mutations, and financial evidence retain
-fresh server validation; no global server cache or localStorage plaintext cache
-has been introduced. Verification uses mocks and real Web Crypto primitive tests;
-authenticated deployment acceptance and independent crypto review remain needed.
+Tests cover real Web Crypto, recipient/device isolation, envelope tampering,
+public-only enrollment, automatic connection, and absence of recovery controls.
+Live browser/database acceptance and external security review remain separate.

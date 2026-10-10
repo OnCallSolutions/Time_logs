@@ -12,10 +12,10 @@ vi.mock("./use-message-encryption",()=>({useMessageEncryption:()=>({own:null,key
 afterEach(()=>{vi.unstubAllGlobals();vi.restoreAllMocks()})
 it("keeps encryption controls out of the everyday inbox",async()=>{
   requests();render(<MessagesPanel canSend inbox={inbox()}/>)
-  expect(screen.queryByText("Messaging encryption unlocked")).not.toBeInTheDocument()
+  expect(screen.queryByText("End-to-end encryption connected")).not.toBeInTheDocument()
   await userEvent.click(screen.getByRole("button",{name:"Message settings"}))
   expect(screen.getByRole("dialog",{name:"Message settings"})).toBeVisible()
-  expect(screen.getByText("Messaging encryption unlocked")).toBeVisible()
+  expect(screen.getByText("End-to-end encryption connected")).toBeVisible()
 })
 it("filters message text and announcements without exposing mismatched conversations",async()=>{
   requests();render(<MessagesPanel canSend inbox={inbox()}/>);const user=userEvent.setup()

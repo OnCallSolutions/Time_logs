@@ -15,6 +15,7 @@ import { ApprovalSelection } from "@/components/approval-selection"
 import { BusinessAccounts } from "@/components/business-accounts"
 import { EmployeeRightsPanel, MessagesPanel } from "@/components/collaboration-panel"
 import { useMessageInbox } from "@/components/use-message-inbox"
+import { useMessageEncryption } from "@/components/use-message-encryption"
 import { MessageNotifications } from "@/components/message-notifications"
 import { notifyPermissionsChanged } from "@/lib/permission-events"
 import { EntryReviewDialog, ManagerWorkspace } from "@/components/manager-workspace"
@@ -182,6 +183,7 @@ export function TimesheetApp({
   const [accessDenied,setAccessDenied] = useState(false)
   const [permissionsLoaded,setPermissionsLoaded] = useState(false)
   const messageInbox=useMessageInbox(permissionsLoaded&&!accessDenied)
+  const messageEncryption=useMessageEncryption(accessDenied?"":messageInbox.email,messageInbox.messages)
   const [entries, setEntries] = useState<TimeEntry[]>([])
   const [view, setView] = useState<View>(role === "admin" ? "admin" : role === "manager" ? "approvals" : "log")
   const [messagesOpen,setMessagesOpen]=useState(false)
@@ -454,7 +456,7 @@ export function TimesheetApp({
 
   return (
     <main className="app-workspace tech-surface flex min-h-svh w-full min-w-0 flex-col gap-4 bg-background px-3 pb-8 pt-4 sm:px-5 md:pt-5">
-      {!accessDenied&&messagesOpen&&<WindowSurface title="Messages" onBack={()=>setMessagesOpen(false)}><section className="min-h-0 w-full overflow-auto bg-background p-3 sm:p-5"><MessagesPanel inbox={messageInbox} canSend={permissions.send_messages&&(role==="admin"||role==="manager")}/></section></WindowSurface>}
+      {!accessDenied&&messagesOpen&&<WindowSurface title="Messages" onBack={()=>setMessagesOpen(false)}><section className="min-h-0 w-full overflow-auto bg-background p-3 sm:p-5"><MessagesPanel inbox={messageInbox} encryption={messageEncryption} canSend={permissions.send_messages&&(role==="admin"||role==="manager")}/></section></WindowSurface>}
       <header className="workspace-header flex flex-col gap-3 border-b border-border pb-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <Brand />
