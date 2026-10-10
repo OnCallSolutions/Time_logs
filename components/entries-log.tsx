@@ -17,7 +17,7 @@ import {
   Trash2,
   XCircle,
 } from "lucide-react"
-import { useEffect,useState } from "react"
+import { Fragment,useEffect,useState } from "react"
 import { EntryReviewDialog } from "@/components/manager-workspace"
 import { Button } from "@/components/ui/button"
 import type { EntryStatus, TimeEntry } from "@/lib/types"
@@ -123,7 +123,7 @@ export function EntriesLog({
   const visibleEntries = entries.filter(entry =>
     (status === "all" || entry.status === status) &&
     [entry.contractor, entry.project, entry.description, entry.date].join(" ").toLowerCase().includes(query.trim().toLowerCase()),
-  )
+  ).sort((a,b)=>a.project.localeCompare(b.project)||a.date.localeCompare(b.date))
   if (entries.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card/50 px-6 py-16 text-center">
@@ -191,7 +191,7 @@ export function EntriesLog({
             </tr>
           </thead>
           <tbody>
-            {visibleEntries.map((entry) => {
+            {visibleEntries.map((entry,index) => {
               const canEditEntry =
                 canEdit && (canReview ||
                 entry.status === "draft" ||
@@ -199,6 +199,8 @@ export function EntriesLog({
               const canDeleteEntry = canDelete && (canReview || entry.status === "draft" || entry.status === "rejected")
 
               return (
+                <Fragment key={entry.id}>
+                {(index===0||visibleEntries[index-1].project!==entry.project)&&<tr className="bg-orange-50"><th colSpan={7} className="px-3 py-2 text-left text-sm">Project: {entry.project} / {visibleEntries.filter(row=>row.project===entry.project).length} entries / {visibleEntries.filter(row=>row.project===entry.project).reduce((sum,row)=>sum+row.hours,0)}h</th></tr>}
                 <tr
                   key={entry.id}
                   className="border-b border-border/60 last:border-0 hover:bg-muted/40"
@@ -308,7 +310,7 @@ export function EntriesLog({
                           <ClipboardList className="size-3.5" aria-hidden="true" />
                         </Button>
                       )}
-                      {canReview && entry.status === "submitted" && (
+                      {canReview && entry.reviewEligible!==false && entry.status === "submitted" && (
                         <>
                           <Button
                             variant="outline"
@@ -350,6 +352,7 @@ export function EntriesLog({
                     </div>
                   </td>
                 </tr>
+                </Fragment>
               )
             })}
           </tbody>

@@ -257,12 +257,13 @@ export function TimesheetApp({
     return () => {
       active = false
     }
-  }, [role,permissions.view_team,accessDenied])
+  }, [role,permissions.view_team,permissions.review_manager_entries,accessDenied])
 
   const canViewTeamReports = permissions.view_reports
   const canViewAdmin = role === "admin" && !accessDenied
   const canClearVisibleEntries = permissions.delete_entries && permissions.view_team
-  const canReviewEntries = permissions.review_entries
+  const canReviewEntries = permissions.review_entries||(role==="account_manager"&&permissions.review_manager_entries)
+  const canAIReview = permissions.ai_review||(role==="account_manager"&&permissions.review_manager_entries&&permissions.ai_accounts)
   const canSubmitEntries = permissions.submit_entries
   useEffect(() => {
     if (!canReviewEntries) setSuggestedReview(null)
@@ -278,7 +279,7 @@ export function TimesheetApp({
   useEffect(() => {
     if (!permissionsLoaded) return
     if (view === "report" && !canViewTeamReports) setView("log")
-    if (view === "approvals" && !canReviewEntries && !permissions.ai_review) setView("log")
+    if (view === "approvals" && !canReviewEntries && !canAIReview) setView("log")
     if (view === "admin" && !canViewAdmin) setView("log")
     if (view === "permissions" && (!permissions.delegate_permissions || (role !== "admin" && role !== "manager"))) setView("log")
     if (accessDenied && view === "messages") setView("log")
@@ -318,7 +319,7 @@ export function TimesheetApp({
    * @param patch - Partial entry fields to apply.
    * @returns Nothing; local state and API sync happen as side effects.
    */
-  function updateEntry(id: string, patch: Partial<TimeEntry>) {
+  function updateEntry(id: string, patch: Partial<TimeEntry>, expectedRevision?:string) {
     const previous = entries
     setEntries((prev) =>
       prev.map((e) => (e.id === id ? { ...e, ...patch } : e)),
@@ -327,7 +328,7 @@ export function TimesheetApp({
     fetch(apiPath(`/api/entries/${id}`), {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(patch),
+      body: JSON.stringify({...patch,expectedRevision:expectedRevision??entries.find(entry=>entry.id===id)?.revision}),
     })
       .then(async (res) => {
         const data = await res.json()
@@ -361,8 +362,9 @@ export function TimesheetApp({
     id: string,
     status: EntryStatus,
     reviewNote?: string,
+    expectedRevision?:string,
   ) {
-    updateEntry(id, { status, reviewNote })
+    updateEntry(id, { status, reviewNote },expectedRevision)
   }
 
   /**
@@ -425,7 +427,7 @@ export function TimesheetApp({
   }
 
   const totalHours = entries.reduce((s, e) => s + (Number(e.hours) || 0), 0)
-  const pendingEntries = entries.filter((entry) => entry.status === "submitted")
+  const pendingEntries = entries.filter((entry) => entry.status === "submitted"&&entry.reviewEligible!==false)
   const approvedEntries = entries.filter((entry) => entry.status === "approved")
   const rejectedEntries = entries.filter((entry) => entry.status === "rejected")
   const draftEntries = entries.filter((entry) => entry.status === "draft")
@@ -438,7 +440,7 @@ export function TimesheetApp({
       label: permissions.view_team ? "Team entries" : "My entries",
       icon: ListChecks,
     },
-    ...(canReviewEntries || ((role==="manager"||role==="admin")&&permissions.ai_review)
+    ...(canReviewEntries || canAIReview
       ? [{ key: "approvals" as const, label: canReviewEntries?"Approvals":"AI review", icon: CheckCircle2 }]
       : []),
     ...(canViewTeamReports
@@ -493,13 +495,13 @@ export function TimesheetApp({
       </div></section></WindowSurface>}
       {(role === "employee" || role === "contractor") && <EmployeeWorkspace contractor={role==="contractor"} entries={entries} selected={personalStatus} onSelect={setPersonalStatus} />}
       {role==="manager"&&view==="personal"&&<EmployeeWorkspace entries={entries.filter(entry=>entry.ownerEmail?.toLowerCase()===userEmail?.toLowerCase())} selected={personalStatus} onSelect={setPersonalStatus}/>}
-      {!accessDenied && (canReviewEntries || permissions.ai_review || canViewTeamReports) && <ManagerWorkspace canReview={canReviewEntries} canReports={canViewTeamReports} canAI={permissions.ai_review} pending={pendingEntries.length} entries={pendingEntries} onApprovals={() => setView("approvals")} onReports={() => setView("report")} onRecommendation={(entry,decision,reason) => setSuggestedReview({entry,decision,reason})} />}
+      {!accessDenied && (canReviewEntries || canAIReview || canViewTeamReports) && <ManagerWorkspace canReview={canReviewEntries} canReports={canViewTeamReports} canAI={canAIReview} pending={pendingEntries.length} entries={pendingEntries} onApprovals={() => setView("approvals")} onReports={() => setView("report")} onRecommendation={(entry,decision,reason) => setSuggestedReview({entry,decision,reason})} />}
       {suggestedReview && <EntryReviewDialog entry={suggestedReview.entry} decision={suggestedReview.decision} initialNote={suggestedReview.reason} onCancel={() => setSuggestedReview(null)} onConfirm={note => {
-        changeEntryStatus(suggestedReview.entry.id,suggestedReview.decision,note || undefined)
+        changeEntryStatus(suggestedReview.entry.id,suggestedReview.decision,note || undefined,suggestedReview.entry.revision)
         setSuggestedReview(null)
       }} />}
       {accessDenied && <p role="alert">Access is unavailable. Contact your administrator.</p>}
-      {!accessDenied&&view==="approvals"&&(role==="manager"||role==="admin")&&(canReviewEntries||permissions.ai_review)&&<ApprovalSelection entries={pendingEntries} email={userEmail??""} canReview={canReviewEntries} canAI={permissions.ai_review} onUpdated={entry=>setEntries(previous=>previous.map(current=>current.id===entry.id?entry:current))}/>}
+      {!accessDenied&&view==="approvals"&&(role==="manager"||role==="admin"||role==="account_manager")&&(canReviewEntries||permissions.ai_review)&&<ApprovalSelection entries={pendingEntries} email={userEmail??""} canReview={canReviewEntries} canAI={canAIReview} onUpdated={entry=>setEntries(previous=>previous.map(current=>current.id===entry.id?entry:current))}/>}
 
       {(loadingEntries || syncError) && (
         <div
@@ -647,11 +649,11 @@ function RoleOverview({ role }: { role: UserRole }) {
   const content = {
     account_manager: {
       title: "Business accounts",
-      body: "Account management access is assigned by administrators. Contractor payment review and fund release are not yet available.",
+      body: "Account review and manager-timesheet approval require administrator-granted rights. Financial evidence review does not release funds.",
     },
     admin: {
       title: "Admin access",
-      body: "You can view all entries, approve or reject submitted time, use reports, and access admin controls.",
+      body: "Manage technology access and review operational work. Manager timesheets require an authorized account manager.",
     },
     manager: {
       title: "Manager access",

@@ -13,10 +13,6 @@ import { Button } from "@/components/ui/button"
 import { apiPath } from "@/lib/paths"
 import type { ParsedEntry } from "@/lib/types"
 
-const SAMPLE = `Maria Alvarez: Mon worked 9-5 on the Acme website redesign, Tue only a half day (sick).
-Deepak logged full days Wednesday and Thursday building the payments API for Northwind.
-Sarah — Friday, roughly 6 hrs, QA testing + a client call for the Acme project.
-Tom did 3 hours of on-call support yesterday, nothing else this week.`
 
 /**
  * Captures messy time notes and sends them to the parser API.
@@ -31,12 +27,23 @@ Tom did 3 hours of on-call support yesterday, nothing else this week.`
  */
 export function NoteInput({
   onParsed,
+  previewOnly=false,
 }: {
   onParsed: (entries: ParsedEntry[]) => void | Promise<void>
+  previewOnly?:boolean
 }) {
   const [notes, setNotes] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /**
+   * Loads synthetic examples scoped by the authenticated server identity.
+   * @returns Promise<void> after replacing notes or displaying a safe error.
+   */
+  async function loadSample(){
+    setLoading(true);setError(null)
+    try{const response=await fetch(apiPath("/api/samples"),{cache:"no-store"});const data=await response.json();if(!response.ok)throw new Error(data.error);setNotes(data.notes)}
+    catch(error){setError(error instanceof Error?error.message:"Samples unavailable.")}finally{setLoading(false)}
+  }
 
   /**
    * Parses the current notes and forwards any extracted entries to the parent.
@@ -48,7 +55,7 @@ export function NoteInput({
    * @returns A promise that resolves after parsing, saving, or error handling.
    */
   async function handleParse() {
-    if (!notes.trim() || loading) return
+    if (!notes.trim() || loading || previewOnly) return
     setLoading(true)
     setError(null)
     try {
@@ -90,7 +97,8 @@ export function NoteInput({
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => setNotes(SAMPLE)}
+          onClick={loadSample}
+          help="Load synthetic sample notes scoped to your role. Samples are not proof of actual work."
           disabled={loading}
         >
           <WandSparkles className="size-3.5" aria-hidden="true" />
@@ -135,7 +143,7 @@ export function NoteInput({
             </>
           )}
         </p>
-        <Button onClick={handleParse} disabled={loading || !notes.trim()} size="lg">
+        {!previewOnly&&<Button onClick={handleParse} disabled={loading || !notes.trim()} size="lg">
           {loading ? (
             <>
               <Loader2 className="size-4 animate-spin" aria-hidden="true" />
@@ -147,7 +155,7 @@ export function NoteInput({
               Extract entries
             </>
           )}
-        </Button>
+        </Button>}
       </div>
     </section>
   )

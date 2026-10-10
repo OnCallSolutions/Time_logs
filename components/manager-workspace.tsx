@@ -28,7 +28,7 @@ export function ManagerWorkspace({ pending, entries, canReview = true, canReport
   pending: number; entries: TimeEntry[]; onApprovals: () => void; onReports: () => void;
   onRecommendation: (entry: TimeEntry, decision: "approved" | "rejected", reason: string) => void
 }) {
-  const [recommendations,setRecommendations] = useState<{entryId:string;decision:"approved"|"rejected"|"needs_review";reason:string}[]>([])
+  const [recommendations,setRecommendations] = useState<{entryId:string;decision:"approved"|"rejected"|"needs_review";reason:string;revision?:string}[]>([])
   const [loading,setLoading] = useState(false)
   const [error,setError] = useState<string|null>(null)
   /**
@@ -53,7 +53,7 @@ export function ManagerWorkspace({ pending, entries, canReview = true, canReport
     {canReports && <Button className="feature-control" data-feature="report" variant="outline" onClick={onReports}><BarChart3 className="size-4" />Team report</Button>}
     </div>
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-    {recommendations.filter(item => entries.some(entry => entry.id === item.entryId && entry.status === "submitted")).map(item => {
+    {recommendations.filter(item => entries.some(entry => entry.id === item.entryId && entry.status === "submitted" && entry.revision === item.revision)).map(item => {
       const entry = entries.find(entry => entry.id === item.entryId)!
       return <div key={item.entryId} className="flex flex-wrap items-center justify-between gap-3 border-b border-border py-3">
         <div className="min-w-0 flex-1"><p className="text-sm font-medium">{entry.contractor} - {entry.date} - {entry.hours}h</p><p className="text-sm">Suggested: {item.decision.replace("_"," ")}</p><p className="break-words text-sm text-muted-foreground">{item.reason}</p></div>

@@ -10,6 +10,7 @@ import { Button } from "./ui/button"
 import { WindowSurface } from "./window-surface"
 import { apiPath } from "@/lib/paths"
 import type { TimeEntry } from "@/lib/types"
+import { NoteInput } from "./note-input"
 import type { AccountHandoff } from "@/lib/account-handoffs"
 type Handoff=AccountHandoff
 
@@ -26,6 +27,7 @@ export function BusinessAccounts({canSend,canReview=false,canAI=false}:{canSend:
   const [search,setSearch]=useState(""),[category,setCategory]=useState("all"),[manager,setManager]=useState("all"),[sort,setSort]=useState("newest"),[state,setState]=useState("all")
   const [detail,setDetail]=useState<Handoff|null>(null),[review,setReview]=useState<Handoff|null>(null),[outcome,setOutcome]=useState("needs_information"),[note,setNote]=useState("")
   const [aiOpen,setAiOpen]=useState(false),[report,setReport]=useState<{summary:string;recommendations:{handoffId:string;severity:string;reason:string}[]}|null>(null)
+  const [samplesOpen,setSamplesOpen]=useState(false)
   const rows=data.handoffs.filter(row=>(category==="all"||(row.evidence.workerCategory??"contractor")===category)&&(manager==="all"||row.evidence.reviewedBy===manager)&&(state==="all"||(state==="stale"?!row.current:row.review_state===state))&&`${row.evidence.contractor} ${row.evidence.project} ${row.evidence.reviewedBy}`.toLowerCase().includes(search.toLowerCase())).sort((a,b)=>sort==="hours"?b.evidence.hours-a.evidence.hours:sort==="oldest"?a.evidence.date.localeCompare(b.evidence.date):b.evidence.date.localeCompare(a.evidence.date))
   const managers=Array.from(new Set(data.handoffs.map(row=>row.evidence.reviewedBy))).sort()
   /**
@@ -53,6 +55,8 @@ export function BusinessAccounts({canSend,canReview=false,canAI=false}:{canSend:
     catch(error){setError(error instanceof Error?error.message:"Handoff failed.")}finally{setBusy(false)}
   }
   return <section aria-label="Business accounts" className="space-y-3"><header className="flex flex-wrap items-center justify-between gap-2"><h2 className="font-semibold">Business accounts</h2><Button variant="outline" onClick={()=>setRevision(previous=>previous+1)}>Refresh queue</Button></header>
+    {!canSend&&<Button variant="outline" help="Preview synthetic multi-person timesheet examples without creating or submitting evidence." onClick={()=>setSamplesOpen(true)}>Sample preview</Button>}
+    {samplesOpen&&<WindowSurface title="Synthetic timesheet samples" onBack={()=>setSamplesOpen(false)}><section className="w-full overflow-auto bg-white p-4"><NoteInput previewOnly onParsed={()=>{}}/></section></WindowSurface>}
     {!confirm&&error&&<p role="alert" className="text-destructive">{error}</p>}{result&&<p role="status">{result}</p>}
     {canSend&&<><div className="flex flex-wrap gap-2"><label className="text-sm">Account manager<select className="ml-2 rounded-md border p-2" value={recipient} onChange={event=>setRecipient(event.target.value)}><option value="">Choose account manager</option>{data.assignees.map(actor=><option key={actor.email}>{actor.email}</option>)}</select></label><Button variant="outline" onClick={()=>setIds(data.candidates.slice(0,50).map(entry=>entry.id))}>Select all eligible (up to 50)</Button><Button disabled={!ids.length||!recipient} onClick={()=>setConfirm(true)}>Review handoff ({ids.length})</Button></div>
     <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr><th className="p-2">Select</th><th className="p-2">Contractor</th><th className="p-2">Date</th><th className="p-2">Approved hours</th></tr></thead><tbody>{data.candidates.map(entry=><tr key={entry.id} className="border-t"><td className="p-2"><input type="checkbox" aria-label={`Hand off ${entry.contractor} ${entry.date}`} checked={ids.includes(entry.id)} disabled={!ids.includes(entry.id)&&ids.length>=50} onChange={event=>setIds(previous=>event.target.checked?[...previous,entry.id]:previous.filter(id=>id!==entry.id))}/></td><td className="p-2">{entry.contractor}</td><td className="p-2">{entry.date}</td><td className="p-2">{entry.hours}</td></tr>)}</tbody></table></div></>}
