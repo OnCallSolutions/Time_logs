@@ -9,12 +9,12 @@ import { createHash,generateKeyPairSync } from "node:crypto"
 vi.mock("@/auth",()=>({auth:vi.fn()}))
 vi.mock("@/lib/effective-permissions",()=>({getEffectivePermissions:vi.fn()}))
 vi.mock("@/lib/collaboration",()=>({actorRoster:vi.fn(),listMessages:vi.fn()}))
-vi.mock("@/lib/message-keys",()=>({ownMessageKey:vi.fn(),publicMessageKeys:vi.fn(),registerMessageKey:vi.fn()}))
+vi.mock("@/lib/message-keys",()=>({ownMessageKey:vi.fn(),publicMessageKeys:vi.fn(),registerMessageKey:vi.fn(),registerMessageDevice:vi.fn()}))
 vi.mock("@/lib/db",()=>({recordAuditEvent:vi.fn()}))
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { actorRoster,listMessages } from "@/lib/collaboration"
-import { ownMessageKey,publicMessageKeys,registerMessageKey } from "@/lib/message-keys"
+import { ownMessageKey,publicMessageKeys,registerMessageKey,registerMessageDevice } from "@/lib/message-keys"
 import { resolvePermissions } from "@/lib/permissions"
 import { recordAuditEvent } from "@/lib/db"
 import { GET,POST } from "./route"
@@ -58,4 +58,13 @@ it("denies revoked accounts before returning or registering keys",async()=>{
   expect((await GET()).status).toBe(403)
   expect((await POST(request(setup))).status).toBe(403)
   expect(ownMessageKey).not.toHaveBeenCalled();expect(registerMessageKey).not.toHaveBeenCalled()
+})
+it("automatically enrolls a device using public material only",async()=>{
+  const {backup,...publicIdentity}=setup
+  const device={...publicIdentity,deviceId:"123e4567-e89b-42d3-a456-426614174000"}
+  vi.mocked(registerMessageDevice).mockResolvedValue(true)
+  expect((await POST(request(device))).status).toBe(201)
+  expect(registerMessageDevice).toHaveBeenCalledWith("employee@example.com",device)
+  expect(registerMessageKey).not.toHaveBeenCalled()
+  expect((await POST(request({...device,privateKey:"not allowed"}))).status).toBe(400)
 })

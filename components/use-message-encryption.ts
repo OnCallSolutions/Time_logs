@@ -10,6 +10,7 @@ import { createMessageIdentity,recoverMessageIdentity,identityFingerprint,encryp
 import type { AppMessage } from "@/lib/message-policy"
 import { loadDeviceIdentity,rememberDeviceIdentity,forgetDeviceIdentity } from "@/lib/message-device-store"
 import { readClientData,invalidateClientData } from "@/lib/client-data-cache"
+import { automaticMessageIdentity } from "@/lib/message-device-setup"
 
 /**
  * Loads scoped identities, unlocks recovery backups, and decrypts signed messages.
@@ -47,34 +48,37 @@ export function useMessageEncryption(email:string,messages:AppMessage[]) {
       if(data.own&&(data.own.email.toLowerCase()!==email.toLowerCase()||await identityFingerprint(data.own.publicKey,data.own.signingKey)!==data.own.fingerprint))throw new Error("Own encryption identity mismatch.")
       for(const key of data.keys as PublicMessageKey[]){
         if(await identityFingerprint(key.publicKey,key.signingKey)!==key.fingerprint)throw new Error("Public identity fingerprint mismatch.")
-        const cacheKey=`message-key:${email}:${key.email}`
-        const pinned=localStorage.getItem(cacheKey)
+        const cacheKey=`message-key:${email}:${key.email}:${key.deviceId??"legacy"}`
+        const pinned=localStorage.getItem(cacheKey)??(!key.deviceId?localStorage.getItem(`message-key:${email}:${key.email}`):null)
         if(pinned&&pinned!==key.fingerprint)throw new Error("A participant's encryption identity changed. Verify it before continuing.")
         localStorage.setItem(cacheKey,key.fingerprint)
       }
       if(!cancelled){
-        setOwn(data.own);setKeys(data.keys);setLoaded(true);setError(null)
+        setOwn(data.own);setKeys(data.keys);setError(null)
         try{
-          const remembered=await loadDeviceIdentity(email)
-          if(!cancelled&&autoRestore.current&&remembered&&data.own){
-            if(remembered.fingerprint!==data.own.fingerprint||remembered.publicKey!==data.own.publicKey||remembered.signingKey!==data.own.signingKey||remembered.encryption.extractable||remembered.signing.extractable)throw new Error("Trusted-device identity changed. Recover or verify it before continuing.")
-            setIdentity(remembered)
+          if(autoRestore.current){
+            const connected=await automaticMessageIdentity(email,data.own?[...data.keys,data.own]:data.keys)
+            if(!cancelled&&autoRestore.current){setIdentity(connected);setKeys(previous=>previous.some(key=>key.email===email&&key.fingerprint===connected.fingerprint)?previous:[...previous,{email,publicKey:connected.publicKey,signingKey:connected.signingKey,fingerprint:connected.fingerprint,deviceId:connected.deviceId}]);setLoaded(true)}
           }
-        }catch(error){if(!cancelled&&error instanceof Error&&error.message.includes("identity changed")){setIdentity(null);setError(error.message)}}
+        }catch(error){if(!cancelled){setIdentity(null);setLoaded(false);setError(error instanceof Error?error.message:"Unable to connect secure messaging.")}}
       }
     }).catch(error=>{if(!cancelled){setIdentity(null);setKeys([]);setLoaded(false);setError(error instanceof Error?error.message:"Encryption unavailable.")}})
     return ()=>{cancelled=true}
   },[email,revision,peers])
   useEffect(()=>{
     let cancelled=false
-    if(!identity){setPlaintext({});return}
+    if(!identity){decrypted.current.clear();setPlaintext({});return}
     /** @returns Promise<void> after decrypting authorized messages without changing receipts. */
     async function decrypt():Promise<void>{
       const next:Record<string,string>={}
       for(const message of messages){
         if(!message.encrypted_payload||message.deleted_at)continue
-        const author=keys.find(key=>key.email===message.encrypted_payload!.author)
+        const payload=message.encrypted_payload
+        const authorFingerprint=payload.version===2?payload.authorFingerprint:payload.keys[payload.author]?.fingerprint
+        const author=keys.find(key=>key.email===payload.author&&key.fingerprint===authorFingerprint)
         if(!author)continue
+        const available=payload.version===2?!!payload.keys[email]?.devices?.[identity!.fingerprint]:payload.keys[email]?.fingerprint===identity!.fingerprint
+        if(!available)continue
         try{
           if(message.encrypted_payload.sender!==message.sender_email || message.encrypted_payload.recipient!==message.recipient_email)throw new Error("Message identity mismatch.")
           const evidence=JSON.stringify([message.encrypted_payload,author.fingerprint])
@@ -116,10 +120,10 @@ export function useMessageEncryption(email:string,messages:AppMessage[]) {
   async function encrypt(text:string,recipient:string|null,recipients:string[],sender=email){
     if(!identity)throw new Error("Unlock messaging encryption first.")
     if(new Set(recipients.map(value=>value.toLowerCase())).size>100)throw new Error("A message can include at most 100 participants, including the sender.")
-    const participants=[...new Set(recipients.map(value=>value.toLowerCase()))].map(value=>{
-      const key=keys.find(key=>key.email===value);if(!key)throw new Error(`${value} must set up messaging encryption first.`);return key
+    const participants=[...new Set(recipients.map(value=>value.toLowerCase()))].flatMap(value=>{
+      const devices=keys.filter(key=>key.email===value);if(!devices.length)throw new Error(`${value} must sign in once to connect secure messaging.`);return devices
     })
-    return encryptMessage(text,identity,email,sender,recipient,participants)
+    return encryptMessage(text,identity,email,sender,recipient,participants,true)
   }
   /** @returns Promise<void> after forgetting local keys and clearing plaintext memory. */
   async function lock():Promise<void>{
@@ -127,5 +131,7 @@ export function useMessageEncryption(email:string,messages:AppMessage[]) {
     autoRestore.current=false
     try{await forgetDeviceIdentity(email)}catch{setError("Unable to forget this device. Clear browser site data before using a shared device.")}
   }
-  return {own,keys,plaintext,error,busy,loaded,unlocked:!!identity,unlock,encrypt,lock}
+  /** @returns void after scheduling automatic reconnection without a user secret. */
+  function retry():void{autoRestore.current=true;invalidateClientData(email,apiPath("/api/messages/keys"));setRevision(value=>value+1)}
+  return {own,keys,plaintext,error,busy,loaded,unlocked:!!identity,unlock,encrypt,lock,retry}
 }

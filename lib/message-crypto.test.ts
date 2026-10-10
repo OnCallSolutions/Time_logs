@@ -9,7 +9,7 @@ import { webcrypto } from "node:crypto"
 vi.mock("@/lib/message-keys",()=>({publicMessageKeys:vi.fn()}))
 import { publicMessageKeys } from "./message-keys"
 import { validateEnvelope } from "./message-envelope"
-import { createMessageIdentity,recoverMessageIdentity,encryptMessage,decryptMessage,type PublicMessageKey } from "./message-crypto"
+import { createMessageIdentity,createDeviceIdentity,recoverMessageIdentity,encryptMessage,decryptMessage,type PublicMessageKey } from "./message-crypto"
 import { canEditMessage,MESSAGE_EDIT_MINUTES } from "./message-policy"
 let sender:Awaited<ReturnType<typeof createMessageIdentity>>
 let recipient:Awaited<ReturnType<typeof createMessageIdentity>>
@@ -41,6 +41,21 @@ it("verifies browser signatures on the server and rejects participant substituti
   expect(await validateEnvelope(payload,keys[0].email,keys[0].email,keys[1].email,keys.map(key=>key.email))).toBe(true)
   expect(await validateEnvelope(payload,keys[1].email,keys[0].email,keys[1].email,keys.map(key=>key.email))).toBe(false)
   expect(await validateEnvelope(payload,keys[0].email,keys[0].email,keys[1].email,[keys[0].email])).toBe(false)
+})
+it("automatically encrypts for multiple devices and binds their envelopes to the signature",async()=>{
+  const device=await createDeviceIdentity()
+  expect(device.encryption.extractable).toBe(false);expect(device.signing.extractable).toBe(false)
+  const directory=[...keys,{email:keys[1].email,publicKey:device.publicKey,signingKey:device.signingKey,fingerprint:device.fingerprint,deviceId:device.deviceId}]
+  vi.mocked(publicMessageKeys).mockResolvedValue(directory)
+  const payload=await encryptMessage("Multi-device message",sender.identity,keys[0].email,keys[0].email,keys[1].email,directory,true)
+  expect(payload.version).toBe(2)
+  expect(await decryptMessage(payload,recipient.identity,keys[1].email,keys[0])).toBe("Multi-device message")
+  expect(await decryptMessage(payload,device,keys[1].email,keys[0])).toBe("Multi-device message")
+  expect(await validateEnvelope(payload,keys[0].email,keys[0].email,keys[1].email,keys.map(key=>key.email))).toBe(true)
+  const tampered=structuredClone(payload)
+  tampered.keys[keys[1].email].devices![device.fingerprint]=tampered.keys[keys[0].email].wrapped
+  await expect(decryptMessage(tampered,recipient.identity,keys[1].email,keys[0])).rejects.toThrow("signature")
+  expect(await validateEnvelope(tampered,keys[0].email,keys[0].email,keys[1].email,keys.map(key=>key.email))).toBe(false)
 })
 it("closes sender editing at one hour while keeping admin exemption",()=>{
   const message={id:"one",sender_email:keys[0].email,recipient_email:null,body:"text",created_at:"2026-10-08T12:00:00Z"}

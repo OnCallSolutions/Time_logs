@@ -6,13 +6,14 @@
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { actorRoster,listMessages } from "@/lib/collaboration"
-import { ownMessageKey,publicMessageKeys,registerMessageKey } from "@/lib/message-keys"
+import { ownMessageKey,publicMessageKeys,registerMessageKey,registerMessageDevice } from "@/lib/message-keys"
 import { z } from "zod"
 import { createHash,createPublicKey } from "node:crypto"
 import { recordAuditEvent } from "@/lib/db"
 import { getAuditContext } from "@/lib/audit"
 const base64=z.string().regex(/^[A-Za-z0-9+/]+={0,2}$/)
 const schema=z.object({publicKey:base64.max(2048),signingKey:base64.max(1024),fingerprint:z.string().regex(/^[a-f0-9]{64}$/),backup:z.object({salt:base64.length(24),nonce:base64.length(16),ciphertext:base64.min(100).max(12000),iterations:z.literal(600000)})}).strict()
+const deviceSchema=schema.omit({backup:true}).extend({deviceId:z.string().uuid()}).strict()
 /** @returns Authenticated own encrypted backup and scoped public-key directory. */
 export async function GET():Promise<Response>{
   try{
@@ -29,11 +30,16 @@ export async function POST(req:Request):Promise<Response>{
   try{
     const email=(await auth())?.user?.email;const access=await getEffectivePermissions(email)
     if(!email||!access.role)return Response.json({error:"Forbidden."},{status:403})
-    const input=schema.parse(await req.json())
+    const input=z.union([deviceSchema,schema]).parse(await req.json())
     const encryption=createPublicKey({key:Buffer.from(input.publicKey,"base64"),format:"der",type:"spki"})
     const signing=createPublicKey({key:Buffer.from(input.signingKey,"base64"),format:"der",type:"spki"})
     if(encryption.asymmetricKeyType!=="rsa"||encryption.asymmetricKeyDetails?.modulusLength!==3072||signing.asymmetricKeyType!=="ec"||signing.asymmetricKeyDetails?.namedCurve!=="prime256v1"||createHash("sha256").update(`${input.publicKey}:${input.signingKey}`).digest("hex")!==input.fingerprint)return Response.json({error:"Invalid public identity."},{status:400})
-    if(!await registerMessageKey(email,input))return Response.json({error:"Encryption is already set up. Unlock with your recovery passphrase."},{status:409})
+    if("deviceId" in input){
+      if(!await registerMessageDevice(email,input))return Response.json({error:"Automatic device enrollment is unavailable or the five-device limit has been reached. Existing encryption identities were not changed."},{status:409})
+      await recordAuditEvent({actorEmail:email,action:"message_encryption_initialized",targetType:"user",targetId:email.toLowerCase(),metadata:{fingerprint:input.fingerprint,deviceId:input.deviceId,automatic:true},...getAuditContext(req)})
+      return Response.json({ok:true},{status:201,headers:{"Cache-Control":"no-store"}})
+    }
+    if(!await registerMessageKey(email,input))return Response.json({error:"Encryption is already set up. Existing identities were not changed."},{status:409})
     await recordAuditEvent({actorEmail:email,action:"message_encryption_initialized",targetType:"user",targetId:email.toLowerCase(),metadata:{fingerprint:input.fingerprint},...getAuditContext(req)})
     return Response.json({ok:true},{status:201})
   }catch(error){return Response.json({error:error instanceof z.ZodError||error instanceof SyntaxError?"Invalid encryption setup.":"Encryption setup failed."},{status:error instanceof z.ZodError||error instanceof SyntaxError?400:500})}
