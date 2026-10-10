@@ -29,3 +29,14 @@ it("reports missing encryption setup without posting or excluding anyone",async(
   expect(screen.getByRole("alert")).toHaveTextContent("No recipients were silently excluded")
   expect(request.mock.calls.some(call=>call[0].endsWith("/api/messages"))).toBe(false)
 })
+it("preserves the draft and explains uncertain delivery after a timeout",async()=>{
+  requests()
+  vi.mocked(fetch).mockImplementation(async input=>{
+    if(String(input).includes("delegation"))return new Response(JSON.stringify({users:[{email:"employee@example.com",role:"employee",accessStatus:"active"}]}))
+    throw Object.assign(new Error("timeout"),{name:"TimeoutError"})
+  })
+  render(<MessagesPanel canSend inbox={inbox}/>);await compose();await userEvent.click(screen.getByRole("button",{name:"Send message"}))
+  expect(await screen.findByRole("alert")).toHaveTextContent("server outcome is unknown")
+  expect(screen.getByRole("textbox",{name:"Message"})).toHaveValue("Private hello")
+  expect(screen.getByRole("button",{name:"Send message"})).toBeEnabled()
+})

@@ -36,7 +36,7 @@ export function ApprovalSelection({entries,email,canReview,canAI,onUpdated}:{ent
   /** @returns Promise<void> after loading advisory suggestions for selected server records. */
   async function advise(){
     setBusy(true);setError("");setSuggestions([]);setDialog("ai")
-    try{const response=await fetch(apiPath("/api/review"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ids:selected.map(entry=>entry.id)})});const data=await response.json();if(!response.ok)throw new Error(data.error);setSuggestions(data.recommendations)}
+    try{const response=await fetch(apiPath("/api/review"),{method:"POST",signal:AbortSignal.timeout(35000),headers:{"Content-Type":"application/json"},body:JSON.stringify({ids:selected.map(entry=>entry.id)})});const data=await response.json();if(!response.ok)throw new Error(data.error);setSuggestions(data.recommendations)}
     catch(error){setError(error instanceof Error?error.message:"Review unavailable.")}finally{setBusy(false)}
   }
   /** @param records - Explicitly confirmed records. @returns Promise<void> after per-record server confirmation. */

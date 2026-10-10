@@ -80,10 +80,14 @@ export function MessagesPanel({canSend,inbox}:{canSend:boolean;inbox?:MessageInb
   async function mutate(method:string,payload:object):Promise<boolean> {
     setBusy(true);setError(null)
     try {
-      const response=await fetch(apiPath("/api/messages"),{method,headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})
+      const response=await fetch(apiPath("/api/messages"),{method,signal:AbortSignal.timeout(20000),headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})
       const data=await response.json();if(!response.ok)throw new Error(data.error || "Message action failed.")
       state.refresh();return true
-    } catch(error){setError(error instanceof Error?error.message:"Message action failed.");return false}
+    } catch(error){
+      if(error instanceof Error&&["TimeoutError","AbortError"].includes(error.name)){state.refresh();setError("The message request timed out. Its server outcome is unknown; refresh the conversation before retrying to avoid a duplicate.")}
+      else setError(error instanceof Error?error.message:"Message action failed.")
+      return false
+    }
     finally{setBusy(false)}
   }
   /**

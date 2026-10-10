@@ -28,3 +28,9 @@ it("shows service errors within the explicit review window",async()=>{
   render(<ManagerWorkspace pending={1} entries={[row]} {...callbacks}/>);await userEvent.click(screen.getByRole("button",{name:"Prepare AI review"}))
   expect(await screen.findByRole("alert")).toHaveTextContent("AI review unavailable")
 })
+it("reports timed-out analysis without leaving the button busy",async()=>{
+  vi.stubGlobal("fetch",vi.fn(async()=>{throw Object.assign(new Error("timeout"),{name:"TimeoutError"})}))
+  render(<ManagerWorkspace pending={1} entries={[row]} {...callbacks}/>);await userEvent.click(screen.getByRole("button",{name:"Prepare AI review"}))
+  expect(await screen.findByRole("alert")).toHaveTextContent("No decisions were applied")
+  expect(screen.getByRole("button",{name:"Back"})).toBeEnabled()
+})

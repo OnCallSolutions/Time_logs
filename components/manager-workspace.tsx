@@ -44,12 +44,12 @@ export function ManagerWorkspace({ pending, entries, canReview = true, canReport
     if(!eligible.length){setFeedback("No submitted entries are eligible for your review lane. Your own work requires an independent reviewer.");return}
     setLoading(true)
     try {
-      const response = await fetch(apiPath("/api/review"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ids:eligible.map(entry=>entry.id)})})
+      const response = await fetch(apiPath("/api/review"),{method:"POST",signal:AbortSignal.timeout(35000),headers:{"Content-Type":"application/json"},body:JSON.stringify({ids:eligible.map(entry=>entry.id)})})
       const data = await response.json()
       if (!response.ok) throw new Error(data.error)
       setRecommendations(data.recommendations)
       setFeedback(data.recommendations.length?`${data.reviewedCount??eligible.length} records analyzed. Confirm any decisions separately.`:"AI returned no recommendations. Manual review remains available.")
-    } catch(error) { setError(error instanceof Error ? error.message : "AI review unavailable.") }
+    } catch(error) { setError(error instanceof Error&&["TimeoutError","AbortError"].includes(error.name)?"The review request timed out. No decisions were applied; try a smaller selection.":error instanceof Error ? error.message : "AI review unavailable.") }
     finally { setLoading(false) }
   }
   return <section aria-label="Manager workflow" className="space-y-3">
