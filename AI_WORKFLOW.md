@@ -30,6 +30,12 @@ carry evidence revisions; review commands can bind decisions to those revisions.
 Database revision conditions reject stale decisions without applying them.
 AI never auto-approves work, and uncertain evidence requires human investigation.
 
+Model calls have a 22-second analysis deadline and no automatic retry loop.
+Configuration, throttling, timeout, and generic failure responses use safe codes
+and never include raw provider bodies or credentials. Access is rechecked after
+analysis. Owner-role lookups are reused only within the current request, not
+across requests or accounts.
+
 Logic is developed on `AI`. UI is developed on `user_Interface`. Tests use
 synthetic identities and mocked model/database calls. Live deployment validation
 and financial automation are not implied.
