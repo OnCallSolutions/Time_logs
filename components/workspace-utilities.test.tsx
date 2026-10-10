@@ -19,3 +19,9 @@ it("bounds the badge without losing the accessible count",()=>{
   expect(screen.getByText("99+")).toBeVisible()
   expect(screen.getByRole("button",{name:"Messages, 125 unread"})).toBeVisible()
 })
+it("shows zero unread messages without a floating navigation rail",()=>{
+  render(<WorkspaceUtilities unread={0} onMessages={()=>{}}/>)
+  expect(screen.getByText("0")).toBeVisible()
+  expect(screen.getByRole("button",{name:"Messages, 0 unread"})).toBeVisible()
+  expect(screen.getByRole("navigation")).not.toHaveClass("fixed")
+})

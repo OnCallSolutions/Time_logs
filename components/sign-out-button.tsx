@@ -8,6 +8,7 @@
  */
 import { signOutAction } from "@/app/actions"
 import { AuthSubmitButton } from "@/components/auth-submit-button"
+import { invalidateClientData } from "@/lib/client-data-cache"
 
 /**
  * Renders the server-backed sign-out control.
@@ -19,7 +20,7 @@ import { AuthSubmitButton } from "@/components/auth-submit-button"
  */
 export function SignOutButton() {
   return (
-    <form action={signOutAction} className="shrink-0">
+    <form action={signOutAction} onSubmit={()=>invalidateClientData()} className="shrink-0">
       <AuthSubmitButton mode="signout" />
     </form>
   )

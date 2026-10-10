@@ -2,7 +2,7 @@
  * Verifies recovery forms actually submit through the shared button primitive.
  * The browser-only passphrase reaches the crypto hook, never a request payload.
  */
-import { render,screen,waitFor } from "@testing-library/react"
+import { fireEvent,render,screen,waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { expect,it,vi } from "vitest"
 import { MessagesPanel } from "./messages-panel"
@@ -19,7 +19,7 @@ it("allows unlocking from the composer without losing its draft",async()=>{
   await user.type(screen.getByRole("textbox",{name:"Message"}),"Draft remains private")
   expect(screen.getByRole("button",{name:"Send message"})).toBeDisabled()
   await user.click(screen.getByRole("button",{name:"Unlock messages"}))
-  await user.type(screen.getByLabelText("Recovery passphrase"),"Disposable recovery passphrase")
+  fireEvent.change(screen.getByLabelText("Recovery passphrase"),{target:{value:"Disposable recovery passphrase"}})
   await user.click(screen.getByRole("button",{name:"Unlock messages"}))
   await waitFor(()=>expect(screen.queryByRole("dialog",{name:"Message settings"})).not.toBeInTheDocument())
   expect(screen.getByRole("textbox",{name:"Message"})).toHaveValue("Draft remains private")
@@ -31,9 +31,9 @@ it("submits a recovery passphrase only to the browser crypto hook",async()=>{
   const inbox:MessageInbox={messages:[],email:"employee@example.com",admin:false,error:null,loading:false,unread:0,notification:null,dismissNotification:vi.fn(),refresh:vi.fn()}
   render(<MessagesPanel canSend={false} inbox={inbox}/>)
   const user=userEvent.setup();await user.click(screen.getByRole("button",{name:"Unlock messages"}))
-  await user.type(screen.getByLabelText("Recovery passphrase"),"Disposable recovery passphrase")
+  fireEvent.change(screen.getByLabelText("Recovery passphrase"),{target:{value:"Disposable recovery passphrase"}})
   expect(screen.getByRole("button",{name:"Unlock messages"})).toHaveAttribute("type","submit")
   await user.click(screen.getByRole("button",{name:"Unlock messages"}))
-  await waitFor(()=>expect(unlock).toHaveBeenCalledWith("Disposable recovery passphrase"))
+  await waitFor(()=>expect(unlock).toHaveBeenCalledWith("Disposable recovery passphrase",true))
   expect(screen.queryByRole("dialog",{name:"Message settings"})).not.toBeInTheDocument()
 })

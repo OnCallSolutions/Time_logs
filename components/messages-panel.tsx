@@ -13,6 +13,7 @@ import { useMessageInbox, type MessageInbox } from "@/components/use-message-inb
 import { apiPath } from "@/lib/paths"
 import { audienceEmails,type MessageAudience } from "@/lib/message-audience"
 import { canEditMessage, MESSAGE_EDIT_MINUTES, type AppMessage } from "@/lib/message-policy"
+import { readClientData } from "@/lib/client-data-cache"
 
 /**
  * Renders inbox controls and message lifecycle actions for current permissions.
@@ -26,8 +27,9 @@ export function MessagesPanel({canSend,inbox}:{canSend:boolean;inbox?:MessageInb
   const encryption=useMessageEncryption(state.email,state.messages)
   const [passphrase,setPassphrase]=useState("")
   const [confirmation,setConfirmation]=useState("")
+  const [rememberDevice,setRememberDevice]=useState(true)
   const [users,setUsers] = useState<{email:string;role:string;accessStatus:string}[]>([])
-  const [audience,setAudience]=useState<MessageAudience>("workforce")
+  const [audience,setAudience]=useState<MessageAudience>("individual")
   const [rosterLoading,setRosterLoading]=useState(canSend)
   const [recipient,setRecipient] = useState("")
   const [body,setBody] = useState("")
@@ -60,15 +62,15 @@ export function MessagesPanel({canSend,inbox}:{canSend:boolean;inbox?:MessageInb
     return ()=>window.clearInterval(timer)
   },[])
   useEffect(() => {
-    if(!canSend)return
+    if(!canSend||!state.email)return
     setRosterLoading(true)
     const controller=new AbortController()
-    fetch(apiPath("/api/delegation"),{cache:"no-store",signal:controller.signal})
-      .then(async response=>{const data=await response.json();if(!response.ok)throw new Error(data.error);setUsers(data.users.filter((user:{accessStatus:string})=>user.accessStatus==="active"))})
+    readClientData<{users:{email:string;role:string;accessStatus:string}[]}>(apiPath("/api/delegation"),state.email,3000)
+      .then(data=>{if(!controller.signal.aborted)setUsers(data.users.filter(user=>user.accessStatus==="active"))})
       .catch(error=>{if(!controller.signal.aborted)setError(error.message)})
       .finally(()=>{if(!controller.signal.aborted)setRosterLoading(false)})
     return ()=>controller.abort()
-  },[canSend])
+  },[canSend,state.email])
   /**
    * Submits an explicit message mutation without optimistic success indicators.
    * @param method - HTTP method for sending, editing, or deleting.
@@ -100,7 +102,11 @@ export function MessagesPanel({canSend,inbox}:{canSend:boolean;inbox?:MessageInb
   /** @returns Promise<void> after encrypting and sending the composed message. */
   async function send():Promise<void>{
     if(operation.current)return
-    if(!canSend||rosterLoading||!encryption.unlocked||missingRecipients.length||!body.trim())return
+    if(!canSend){setError("Your current rights do not allow sending messages.");return}
+    if(rosterLoading){setError("Recipients are still loading. Please try again shortly.");return}
+    if(!encryption.unlocked){setSecurityOpen(true);return}
+    if(!body.trim())return
+    if(missingRecipients.length){setError(`Cannot send securely yet. Messaging setup is required for: ${missingRecipients.join(", ")}. No recipients were silently excluded.`);return}
     operation.current=true;setBusy(true);setError(null)
     try{
       const target=audience==="individual"?recipient:null
@@ -129,9 +135,10 @@ export function MessagesPanel({canSend,inbox}:{canSend:boolean;inbox?:MessageInb
     {securityOpen&&<WindowSurface title="Message settings" onBack={()=>setSecurityOpen(false)} disabled={encryption.busy}><div className="w-full max-w-xl overflow-auto p-4">
       <div className="flex flex-wrap items-center justify-between gap-2"><p className="flex items-center gap-2 text-sm font-medium"><LockKeyhole className="size-4 text-primary"/>{encryption.unlocked?"Messaging encryption unlocked":"Messaging encryption locked"}</p>{encryption.unlocked&&<Button size="sm" variant="outline" onClick={encryption.lock}>Lock messages</Button>}</div>
       {encryption.error&&<p role="alert" className="mt-2 text-sm text-destructive">{encryption.error}</p>}
-      {!encryption.unlocked&&encryption.loaded&&<form className="mt-3 grid max-w-lg gap-2" onSubmit={async event=>{event.preventDefault();if(!encryption.own&&passphrase!==confirmation){setError("Recovery passphrases must match.");return}if(await encryption.unlock(passphrase)){setPassphrase("");setConfirmation("");setSecurityOpen(false)}}}>
+      {!encryption.unlocked&&encryption.loaded&&<form className="mt-3 grid max-w-lg gap-2" onSubmit={async event=>{event.preventDefault();if(!encryption.own&&passphrase!==confirmation){setError("Recovery passphrases must match.");return}if(await encryption.unlock(passphrase,rememberDevice)){setPassphrase("");setConfirmation("");setSecurityOpen(false)}}}>
         <label className="text-sm">Recovery passphrase<input type="password" autoComplete="off" minLength={encryption.own?1:16} required value={passphrase} onChange={event=>setPassphrase(event.target.value)} className="mt-1 block w-full rounded-md border p-2"/></label>
         {!encryption.own&&<><label className="text-sm">Confirm recovery passphrase<input type="password" autoComplete="off" minLength={16} required value={confirmation} onChange={event=>setConfirmation(event.target.value)} className="mt-1 block w-full rounded-md border p-2"/></label><p className="text-xs text-muted-foreground">Use at least 16 characters. Keep this separate from your Microsoft password. Losing it means losing access to encrypted messages.</p></>}
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={rememberDevice} onChange={event=>setRememberDevice(event.target.checked)}/>Remember encryption on this personal device</label><p className="text-xs text-muted-foreground">Trusted devices unlock automatically after Microsoft sign-in. Do not enable this on a shared computer. Lock messages to forget this device.</p>
         <Button type="submit" className="w-fit" disabled={encryption.busy}>{encryption.busy?"Unlocking...":encryption.own?"Unlock messages":"Set up encryption"}</Button>
       </form>}
       {encryption.own&&<Button variant="ghost" size="sm" className="mt-2" onClick={()=>setIdentitiesOpen(true)}><LockKeyhole className="size-3"/>Encryption identities</Button>}
@@ -147,7 +154,8 @@ export function MessagesPanel({canSend,inbox}:{canSend:boolean;inbox?:MessageInb
       <label className="text-sm">Audience<select value={audience} disabled={busy} onChange={event=>{setAudience(event.target.value as MessageAudience);setRecipient("")}} className="mt-1 block w-full rounded-md border border-border bg-background p-2"><option value="workforce">Employees and contractors</option><option value="everyone">Everyone</option><option value="contractor">All contractors</option><option value="employee">All employees</option><option value="manager">All managers</option><option value="admin">All admins</option><option value="individual">Individual</option></select></label>
       {audience==="individual"&&<label className="text-sm">Recipient<select value={recipient} disabled={busy} onChange={event=>setRecipient(event.target.value)} className="mt-1 block w-full rounded-md border border-border bg-background p-2"><option value="">Choose a person</option>{users.map(user=><option key={user.email} value={user.email}>{user.email}</option>)}</select></label>}
       <label className="text-sm">Message<textarea value={body} disabled={busy} maxLength={4000} onChange={event=>setBody(event.target.value)} className="mt-1 min-h-28 w-full rounded-md border border-border bg-background p-2"/></label>
-      <Button className="w-fit" disabled={busy||rosterLoading||!body.trim()||!encryption.unlocked||missingRecipients.length>0} onClick={send}><Send className="size-4"/>{busy?"Sending...":"Send message"}</Button>
+      {audience==="individual"&&!recipient&&<p className="text-sm text-muted-foreground">Choose a recipient before sending.</p>}
+      <Button className="w-fit" disabled={busy||rosterLoading||!body.trim()||!encryption.unlocked||!canSend||(audience==="individual"&&!recipient)} onClick={send}><Send className="size-4"/>{busy?"Sending...":"Send message"}</Button>
       {error&&<p role="alert" className="text-sm text-destructive">{error}</p>}
     </div></section></WindowSurface>}
     {identitiesOpen&&<WindowSurface title="Encryption identities" onBack={()=>setIdentitiesOpen(false)}><section className="w-full overflow-auto bg-white p-4"><h2 className="font-semibold">Encryption identities</h2><p className="my-3 text-sm text-muted-foreground">Compare fingerprints with participants using another trusted channel.</p><table className="w-full text-left text-sm"><thead><tr className="border-b"><th className="p-2">Actor</th><th className="p-2">Fingerprint</th></tr></thead><tbody>{encryption.keys.map(key=><tr key={key.email} className="border-b"><td className="p-2">{key.email}</td><td className="break-all p-2 font-mono text-xs">{key.fingerprint}</td></tr>)}</tbody></table></section></WindowSurface>}

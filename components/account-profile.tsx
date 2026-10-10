@@ -11,6 +11,7 @@ import { useEffect, useRef, useState } from "react"
 import { Camera, ImagePlus, Trash2, UserRound, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { apiPath } from "@/lib/paths"
+import { readClientData,invalidateClientData } from "@/lib/client-data-cache"
 
 type Profile = {
   displayName: string
@@ -51,6 +52,7 @@ export function AccountProfile({
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
+    if(!email)return
     let active = true
 
     /**
@@ -63,9 +65,7 @@ export function AccountProfile({
      */
     async function loadProfile() {
       try {
-        const res = await fetch(apiPath("/api/profile"), { cache: "no-store" })
-        const data = await res.json()
-        if (!res.ok) throw new Error(data.error ?? "Failed to load profile.")
+        const data = await readClientData<{profile:Profile}>(apiPath("/api/profile"),email!,15000)
 
         if (active) {
           const loadedProfile = data.profile as Profile
@@ -87,7 +87,7 @@ export function AccountProfile({
     return () => {
       active = false
     }
-  }, [fallbackName])
+  }, [fallbackName,email])
 
   /**
    * Opens the edit popover with draft fields reset to the current profile.
@@ -157,6 +157,7 @@ export function AccountProfile({
       if (!res.ok) throw new Error(data.error ?? "Failed to save profile.")
 
       setProfile(data.profile)
+      invalidateClientData(email??undefined,apiPath("/api/profile"))
       setMenuOpen(false)
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "Failed to save profile.")
