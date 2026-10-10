@@ -25,7 +25,7 @@ export function useMessageInbox(enabled = true) {
   const newest = useRef(0)
   const refresh = useCallback(() => setRevision(value => value + 1), [])
   useEffect(() => {
-    if (!enabled) { setMessages([]);setNotification(null);setLoading(false);seen.current=null;newest.current=0;return }
+    if (!enabled) { setMessages([]);setEmail("");setAdmin(false);setError(null);setNotification(null);setLoading(false);seen.current=null;newest.current=0;return }
     const controller = new AbortController()
     let fetching = false
     /**
@@ -50,12 +50,12 @@ export function useMessageInbox(enabled = true) {
         setNotification(previous=>previous&&next.some(message=>message.id===previous.id&&!message.read_at&&!message.deleted_at)?previous:null)
         seen.current = new Set([...(seen.current ?? []),...next.map(message => message.id)])
         newest.current=Math.max(newest.current,...next.map(message=>Date.parse(message.created_at)))
-        setEmail(identity);setAdmin(data.role === "admin");setMessages(next);setError(null)
+        setEmail(identity);setAdmin(data.role === "admin");setMessages(previous=>JSON.stringify(previous)===JSON.stringify(next)?previous:next);setError(null)
       } catch (error) { if (!controller.signal.aborted) setError(error instanceof Error ? error.message : "Inbox unavailable.") }
       finally { if (!controller.signal.aborted) setLoading(false);fetching=false }
     }
     void load()
-    const timer = window.setInterval(load, 10000)
+    const timer = window.setInterval(()=>{if(document.visibilityState==="visible")void load()}, 10000)
     window.addEventListener("focus", load)
     return () => {controller.abort();window.clearInterval(timer);window.removeEventListener("focus",load)}
   }, [enabled, revision])
