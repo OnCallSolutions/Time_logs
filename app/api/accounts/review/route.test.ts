@@ -7,7 +7,7 @@ vi.mock("@/auth",()=>({auth:vi.fn()}))
 vi.mock("@/lib/effective-permissions",()=>({getEffectivePermissions:vi.fn()}))
 vi.mock("@/lib/account-handoffs",()=>({listHandoffs:vi.fn()}))
 vi.mock("@/lib/db",()=>({recordAuditEvent:vi.fn()}))
-vi.mock("ai",()=>({generateText:vi.fn(),Output:{object:vi.fn()}}))
+vi.mock("ai",async importOriginal=>({...await importOriginal<typeof import("ai")>(),generateText:vi.fn(),Output:{object:vi.fn()}}))
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { listHandoffs } from "@/lib/account-handoffs"
