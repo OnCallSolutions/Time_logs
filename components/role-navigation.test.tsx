@@ -48,6 +48,7 @@ it("keeps AI recommendations advisory until a manager confirms",async()=>{
   const dialog = screen.getByRole("dialog",{name:"Approve entry"})
   await userEvent.click(within(dialog).getByRole("button",{name:"Approve entry"}))
   expect(mutations()).toHaveLength(1)
+  await userEvent.click(within(screen.getByRole("dialog",{name:"AI review results"})).getByRole("button",{name:"Back"}))
   expect(screen.getByRole("button",{name:/team entries/i})).toBeInTheDocument()
   expect(screen.getByRole("button",{name:"Reports"})).toBeInTheDocument()
 })
