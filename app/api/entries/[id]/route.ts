@@ -194,7 +194,7 @@ export async function PATCH(
     }
 
     if (
-      !access.canReview &&
+      (!access.canReview || current.ownerEmail?.toLowerCase()===access.email.toLowerCase()) &&
       hasEntryFieldPatch(patch) &&
       current.status !== "draft" &&
       current.status !== "rejected"
@@ -211,7 +211,7 @@ export async function PATCH(
     const statusError = validateStatusChange(
       current,
       patch.status,
-      access.canReview,
+      access.canReview && current.ownerEmail?.toLowerCase()!==access.email.toLowerCase(),
       patch.reviewNote,
     )
     if (statusError) {
@@ -288,7 +288,7 @@ export async function DELETE(
     }
 
     if (
-      !access.canReview &&
+      (!access.canReview || current.ownerEmail?.toLowerCase()===access.email.toLowerCase()) &&
       current.status !== "draft" &&
       current.status !== "rejected"
     ) {
