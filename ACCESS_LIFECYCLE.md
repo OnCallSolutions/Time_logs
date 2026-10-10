@@ -4,6 +4,12 @@ Logic lives on `access_lifecycle`; admin and manager presentation lives on
 `user_Interface`. No Entra revocation, live migration, or deployment is performed
 by this feature implementation.
 
+The UI branch integrates the lifecycle backend for local development, while new
+logic and presentation edits remain committed on their respective owning branches.
+Admin controls open isolated confirmation windows for cutoff, cancellation,
+suspension, reactivation, grant, extension, and revocation. Managers see only
+temporary coverage controls. Input times are browser-local and stored as UTC.
+
 ## Account Access
 
 Administrators can set an exact UTC cutoff, cancel a cutoff, suspend immediately
@@ -78,3 +84,11 @@ concurrency tests and authenticated multi-account UI checks remain required.
 No new Vercel environment variables or secrets are required. Existing database
 bootstrap currently requires schema privileges; versioned migrations and separate
 runtime credentials remain planned database-management work.
+
+## Next Manager Milestones
+
+1. Manager-to-contractor/team assignments and explicit visibility scope.
+2. Submission timestamps, age indicators, and organization-defined escalation rules.
+3. Revision-bound, persisted AI suggestions and stale-evidence invalidation.
+4. Reviewer reassignment and coverage linked to those team scopes.
+5. Cursor-paginated review queues and approved-work financial reconciliation.

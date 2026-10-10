@@ -20,6 +20,7 @@ import { notifyPermissionsChanged } from "@/lib/permission-events"
 import { EntryReviewDialog, ManagerWorkspace } from "@/components/manager-workspace"
 import { permissionLabels, resolvePermissions, type Permission, type PermissionOverrides } from "@/lib/permissions"
 import { AdminWorkspace } from "@/components/admin-workspace"
+import { AccessLifecyclePanel } from "@/components/access-lifecycle-panel"
 import { SecurityRiskWindow } from "@/components/security-risk-window"
 import { WindowSurface } from "@/components/window-surface"
 import { WorkspaceUtilities } from "@/components/workspace-utilities"
@@ -192,6 +193,7 @@ export function TimesheetApp({
   const [personalStatus, setPersonalStatus] = useState<EntryStatus | "all">("all")
   const [suggestedReview,setSuggestedReview] = useState<{entry:TimeEntry;decision:"approved"|"rejected";reason:string}|null>(null)
   const [technologyReports,setTechnologyReports] = useState(false)
+  const [lifecycleOpen,setLifecycleOpen]=useState(false)
   const [directoryRequest,setDirectoryRequest] = useState(0)
   const [workspaceWindow,setWorkspaceWindow] = useState<"overview"|"workflow"|"notes"|null>(null)
 
@@ -475,7 +477,9 @@ export function TimesheetApp({
         <Button variant="outline" size="sm" onClick={()=>setWorkspaceWindow("workflow")}><BarChart3 className="size-4"/>Workflow totals</Button>
         {permissions.create_entries&&<Button variant="outline" size="sm" onClick={()=>setWorkspaceWindow("notes")}><Pencil className="size-4"/>Log time notes</Button>}
       </div>
-      {canViewAdmin && <AdminWorkspace onDirectory={() => {setView("admin");setDirectoryRequest(value=>value+1)}} onSecurity={() => setTechnologyReports(true)} />}
+      {canViewAdmin && <AdminWorkspace onDirectory={() => {setView("admin");setDirectoryRequest(value=>value+1)}} onSecurity={() => setTechnologyReports(true)} onLifecycle={()=>setLifecycleOpen(true)}/>}
+      {!accessDenied&&role==="manager"&&permissions.delegate_permissions&&<Button variant="outline" className="w-fit" onClick={()=>setLifecycleOpen(true)}><KeyRound className="size-4"/>Temporary coverage</Button>}
+      {lifecycleOpen&&!accessDenied&&(canViewAdmin||(role==="manager"&&permissions.delegate_permissions))&&<WindowSurface title={canViewAdmin?"Access lifecycle":"Temporary coverage"} onBack={()=>setLifecycleOpen(false)}><section className="min-h-0 w-full overflow-auto bg-white"><AccessLifecyclePanel key={role} admin={canViewAdmin} permissions={permissions}/></section></WindowSurface>}
       {canViewAdmin && technologyReports && <SecurityRiskWindow onClose={() => setTechnologyReports(false)} />}
 
       {workspaceWindow&&<WindowSurface title={workspaceWindow==="notes"?"Log time notes":workspaceWindow==="overview"?"Workspace overview":"Workflow totals"} onBack={()=>setWorkspaceWindow(null)}><section className="flex min-h-0 w-full max-w-6xl flex-col bg-white"><div className="min-h-0 flex-1 overflow-auto p-4">
