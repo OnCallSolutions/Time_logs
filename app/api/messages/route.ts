@@ -5,7 +5,8 @@
  */
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
-import { changeMessage,editableMessage,employeeRoster,listMessages,readMessages,sendMessage } from "@/lib/collaboration"
+import { changeMessage,editableMessage,actorRoster,listMessages,readMessages,sendMessage } from "@/lib/collaboration"
+import { audienceEmails,messageAudiences } from "@/lib/message-audience"
 import { encryptedMessageSchema,validateEnvelope } from "@/lib/message-envelope"
 import { MESSAGE_EDIT_MINUTES } from "@/lib/message-policy"
 import { recordAuditEvent } from "@/lib/db"
@@ -83,12 +84,14 @@ export async function POST(req:Request): Promise<Response> {
     const email = (await auth())?.user?.email
     const access = await getEffectivePermissions(email)
     if (!email || !(access.role === "admin" || access.role === "manager") || !access.permissions.send_messages) return Response.json({error:"Forbidden."},{status:403})
-    const body = z.object({recipient:z.string().email().nullable(),encrypted:encryptedMessageSchema}).parse(await req.json())
-    const roster=await employeeRoster()
-    if (body.recipient && !roster.some(user=>user.email.toLowerCase() === body.recipient!.toLowerCase())) return Response.json({error:"Select an active employee."},{status:400})
-    if(!await validateEnvelope(body.encrypted,email,email,body.recipient,[email,...(body.recipient?[body.recipient]:roster.map(user=>user.email))]))return Response.json({error:"Every recipient must set up encryption before sending."},{status:400})
+    const body = z.object({recipient:z.string().email().nullable(),audience:z.enum(messageAudiences).optional(),encrypted:encryptedMessageSchema}).parse(await req.json())
+    const audience=body.audience??(body.recipient?"individual":"workforce")
+    if((audience==="individual")!==!!body.recipient)return Response.json({error:"Choose an individual or a group, not both."},{status:400})
+    const recipients=audienceEmails(await actorRoster(),audience,body.recipient)
+    if(!recipients.length)return Response.json({error:"Select an audience with active recipients."},{status:400})
+    if(!await validateEnvelope(body.encrypted,email,email,body.recipient,[email,...recipients]))return Response.json({error:"Every recipient must set up encryption before sending."},{status:400})
     const id = await sendMessage(email,body.recipient,"[Encrypted message]",body.encrypted)
-    await recordAuditEvent({actorEmail:email,action:"message_sent",targetType:"message",targetId:id,metadata:{broadcast:body.recipient === null},...getAuditContext(req)})
+    await recordAuditEvent({actorEmail:email,action:"message_sent",targetType:"message",targetId:id,metadata:{broadcast:body.recipient === null,audience,recipientCount:recipients.length},...getAuditContext(req)})
     return Response.json({id},{status:201})
   } catch(error) { return Response.json({error:error instanceof z.ZodError||error instanceof SyntaxError?"Invalid encrypted message request.":"Message could not be sent."},{status:error instanceof z.ZodError||error instanceof SyntaxError?400:500}) }
 }

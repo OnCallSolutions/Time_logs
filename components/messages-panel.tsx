@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button"
 import { WindowSurface } from "@/components/window-surface"
 import { useMessageInbox, type MessageInbox } from "@/components/use-message-inbox"
 import { apiPath } from "@/lib/paths"
+import { audienceEmails,type MessageAudience } from "@/lib/message-audience"
 import { canEditMessage, MESSAGE_EDIT_MINUTES, type AppMessage } from "@/lib/message-policy"
 
 /**
@@ -25,7 +26,9 @@ export function MessagesPanel({canSend,inbox}:{canSend:boolean;inbox?:MessageInb
   const encryption=useMessageEncryption(state.email,state.messages)
   const [passphrase,setPassphrase]=useState("")
   const [confirmation,setConfirmation]=useState("")
-  const [users,setUsers] = useState<{email:string}[]>([])
+  const [users,setUsers] = useState<{email:string;role:string;accessStatus:string}[]>([])
+  const [audience,setAudience]=useState<MessageAudience>("workforce")
+  const [rosterLoading,setRosterLoading]=useState(canSend)
   const [recipient,setRecipient] = useState("")
   const [body,setBody] = useState("")
   const [error,setError] = useState<string|null>(null)
@@ -49,16 +52,21 @@ export function MessagesPanel({canSend,inbox}:{canSend:boolean;inbox?:MessageInb
   const [now,setNow] = useState(Date.now())
   const [readIds,setReadIds] = useState<Set<string>>(new Set())
   const operation=useRef(false)
+  const missingRecipients=encryption.loaded&&encryption.unlocked
+    ? audienceEmails(users,audience,recipient||null).filter(email=>!encryption.keys.some(key=>key.email.toLowerCase()===email.toLowerCase()))
+    : []
   useEffect(() => {
     const timer = window.setInterval(()=>setNow(Date.now()),1000)
     return ()=>window.clearInterval(timer)
   },[])
   useEffect(() => {
     if(!canSend)return
+    setRosterLoading(true)
     const controller=new AbortController()
     fetch(apiPath("/api/delegation"),{cache:"no-store",signal:controller.signal})
-      .then(async response=>{const data=await response.json();if(!response.ok)throw new Error(data.error);setUsers(data.users.filter((user:{role:string;accessStatus:string})=>(user.role==="employee"||user.role==="contractor")&&user.accessStatus==="active"))})
+      .then(async response=>{const data=await response.json();if(!response.ok)throw new Error(data.error);setUsers(data.users.filter((user:{accessStatus:string})=>user.accessStatus==="active"))})
       .catch(error=>{if(!controller.signal.aborted)setError(error.message)})
+      .finally(()=>{if(!controller.signal.aborted)setRosterLoading(false)})
     return ()=>controller.abort()
   },[canSend])
   /**
@@ -92,10 +100,14 @@ export function MessagesPanel({canSend,inbox}:{canSend:boolean;inbox?:MessageInb
   /** @returns Promise<void> after encrypting and sending the composed message. */
   async function send():Promise<void>{
     if(operation.current)return
+    if(!canSend||rosterLoading||!encryption.unlocked||missingRecipients.length||!body.trim())return
     operation.current=true;setBusy(true);setError(null)
     try{
-      const encrypted=await encryption.encrypt(body,recipient||null,[state.email,...(recipient?[recipient]:users.map(user=>user.email))])
-      if(await mutate("POST",{recipient:recipient||null,encrypted})){setBody("");setComposing(false)}
+      const target=audience==="individual"?recipient:null
+      const recipients=audienceEmails(users,audience,target)
+      if(!recipients.length)throw new Error("Select an audience with active recipients.")
+      const encrypted=await encryption.encrypt(body,target,[state.email,...recipients])
+      if(await mutate("POST",{recipient:target,audience,encrypted})){setBody("");setComposing(false)}
     }catch(error){setError(error instanceof Error?error.message:"Unable to encrypt message.")}
     finally{operation.current=false;setBusy(false)}
   }
@@ -128,9 +140,14 @@ export function MessagesPanel({canSend,inbox}:{canSend:boolean;inbox?:MessageInb
     <div className="flex flex-wrap items-center gap-2"><label className="relative min-w-0 flex-1"><Search aria-hidden="true" className="absolute left-3 top-3 size-4 text-muted-foreground"/><input aria-label="Search messages" value={query} onChange={event=>setQuery(event.target.value)} placeholder="Search messages" className="w-full rounded-md border bg-background py-2 pl-9 pr-3 text-sm"/></label><select aria-label="Conversation" value={conversation} onChange={event=>setConversation(event.target.value)} className="max-w-full rounded-md border bg-background p-2 text-sm"><option value="*">All conversations</option><option value="broadcast">Announcements</option>{contacts.map(email=><option key={email} value={email}>{email}</option>)}</select></div>
     {canSend&&<Button variant="outline" size="sm" onClick={()=>setComposing(true)}><Pencil className="size-3"/>New message</Button>}
     {composing&&<WindowSurface title="New message" onBack={()=>setComposing(false)} disabled={busy}><section className="flex min-h-0 w-full max-w-4xl flex-col bg-white"><h2 className="border-b p-4 font-semibold">New message</h2><div className="grid min-h-0 flex-1 content-start gap-3 overflow-auto p-4">
-      <label className="text-sm">Recipient<select value={recipient} disabled={busy} onChange={event=>setRecipient(event.target.value)} className="mt-1 block w-full rounded-md border border-border bg-background p-2"><option value="">All employees</option>{users.map(user=><option key={user.email} value={user.email}>{user.email}</option>)}</select></label>
+      {!encryption.unlocked&&<Button variant="outline" size="sm" onClick={()=>setSecurityOpen(true)}><LockKeyhole className="size-4"/>Unlock messages</Button>}
+      {encryption.error&&<p role="alert" className="text-sm text-destructive">{encryption.error}</p>}
+      {rosterLoading&&<p role="status" className="text-sm text-muted-foreground">Loading recipients...</p>}
+      {missingRecipients.length>0&&<p role="status" className="text-sm text-muted-foreground">Messaging setup required for: {missingRecipients.join(", ")}. Choose a recipient who has completed setup, or ask these recipients to open Message settings.</p>}
+      <label className="text-sm">Audience<select value={audience} disabled={busy} onChange={event=>{setAudience(event.target.value as MessageAudience);setRecipient("")}} className="mt-1 block w-full rounded-md border border-border bg-background p-2"><option value="workforce">Employees and contractors</option><option value="everyone">Everyone</option><option value="contractor">All contractors</option><option value="employee">All employees</option><option value="manager">All managers</option><option value="admin">All admins</option><option value="individual">Individual</option></select></label>
+      {audience==="individual"&&<label className="text-sm">Recipient<select value={recipient} disabled={busy} onChange={event=>setRecipient(event.target.value)} className="mt-1 block w-full rounded-md border border-border bg-background p-2"><option value="">Choose a person</option>{users.map(user=><option key={user.email} value={user.email}>{user.email}</option>)}</select></label>}
       <label className="text-sm">Message<textarea value={body} disabled={busy} maxLength={4000} onChange={event=>setBody(event.target.value)} className="mt-1 min-h-28 w-full rounded-md border border-border bg-background p-2"/></label>
-      <Button className="w-fit" disabled={busy||!body.trim()||!encryption.unlocked} onClick={send}><Send className="size-4"/>{busy?"Sending...":"Send message"}</Button>
+      <Button className="w-fit" disabled={busy||rosterLoading||!body.trim()||!encryption.unlocked||missingRecipients.length>0} onClick={send}><Send className="size-4"/>{busy?"Sending...":"Send message"}</Button>
       {error&&<p role="alert" className="text-sm text-destructive">{error}</p>}
     </div></section></WindowSurface>}
     {identitiesOpen&&<WindowSurface title="Encryption identities" onBack={()=>setIdentitiesOpen(false)}><section className="w-full overflow-auto bg-white p-4"><h2 className="font-semibold">Encryption identities</h2><p className="my-3 text-sm text-muted-foreground">Compare fingerprints with participants using another trusted channel.</p><table className="w-full text-left text-sm"><thead><tr className="border-b"><th className="p-2">Actor</th><th className="p-2">Fingerprint</th></tr></thead><tbody>{encryption.keys.map(key=><tr key={key.email} className="border-b"><td className="p-2">{key.email}</td><td className="break-all p-2 font-mono text-xs">{key.fingerprint}</td></tr>)}</tbody></table></section></WindowSurface>}

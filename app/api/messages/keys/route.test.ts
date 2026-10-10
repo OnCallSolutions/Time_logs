@@ -8,12 +8,12 @@ import { beforeAll,beforeEach,expect,it,vi } from "vitest"
 import { createHash,generateKeyPairSync } from "node:crypto"
 vi.mock("@/auth",()=>({auth:vi.fn()}))
 vi.mock("@/lib/effective-permissions",()=>({getEffectivePermissions:vi.fn()}))
-vi.mock("@/lib/collaboration",()=>({employeeRoster:vi.fn(),listMessages:vi.fn()}))
+vi.mock("@/lib/collaboration",()=>({actorRoster:vi.fn(),listMessages:vi.fn()}))
 vi.mock("@/lib/message-keys",()=>({ownMessageKey:vi.fn(),publicMessageKeys:vi.fn(),registerMessageKey:vi.fn()}))
 vi.mock("@/lib/db",()=>({recordAuditEvent:vi.fn()}))
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
-import { employeeRoster,listMessages } from "@/lib/collaboration"
+import { actorRoster,listMessages } from "@/lib/collaboration"
 import { ownMessageKey,publicMessageKeys,registerMessageKey } from "@/lib/message-keys"
 import { resolvePermissions } from "@/lib/permissions"
 import { recordAuditEvent } from "@/lib/db"
@@ -27,7 +27,7 @@ beforeAll(()=>{
 beforeEach(()=>{
   vi.resetAllMocks();vi.mocked(auth).mockResolvedValue({user:{email:"employee@example.com"}} as never)
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"employee",permissions:resolvePermissions("employee")})
-  vi.mocked(listMessages).mockResolvedValue([]);vi.mocked(employeeRoster).mockResolvedValue([])
+  vi.mocked(listMessages).mockResolvedValue([]);vi.mocked(actorRoster).mockResolvedValue([])
   vi.mocked(publicMessageKeys).mockResolvedValue([]);vi.mocked(ownMessageKey).mockResolvedValue(null)
 })
 /** @param input - Public identity and encrypted recovery fields. @returns Registration request with JSON body. */
