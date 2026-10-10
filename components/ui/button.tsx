@@ -1,4 +1,15 @@
+/**
+ * Defines the shared Base UI button component and visual variants.
+ *
+ * The app uses one button wrapper so sizing, icon spacing, disabled states, and
+ * focus rings stay consistent across forms, tables, reports, and navigation
+ * controls.
+ */
+"use client"
 import { Button as ButtonPrimitive } from '@base-ui/react/button'
+import { Tooltip } from '@base-ui/react/tooltip'
+import { useId } from 'react'
+import { controlHelp, controlLabel } from '@/components/control-help'
 import { cva, type VariantProps } from 'class-variance-authority'
 
 import { cn } from '@/lib/utils'
@@ -40,19 +51,39 @@ const buttonVariants = cva(
   },
 )
 
+/**
+ * Renders the shared styled button primitive with app variants and sizes.
+ *
+ * The component forwards all Base UI button behavior while applying class-variance
+ * styles. Callers choose semantic variants and sizes instead of repeating long
+ * Tailwind class strings.
+ *
+ * @param props - Base UI button props plus local variant and size options.
+ * @param props.className - Additional class names merged with variant classes.
+ * @param props.variant - Visual style variant for the button.
+ * @param props.size - Size variant for the button.
+ * @returns The styled button primitive.
+ */
 function Button({
   className,
   variant = 'default',
   size = 'default',
+  help,
+  title,
   ...props
-}: ButtonPrimitive.Props & VariantProps<typeof buttonVariants>) {
-  return (
+}: ButtonPrimitive.Props & VariantProps<typeof buttonVariants> & {help?:string}) {
+  const helpId=useId()
+  const description=help??controlHelp(props['aria-label']??controlLabel(props.children))??title
+  const button=(
     <ButtonPrimitive
       data-slot="button"
       className={cn(buttonVariants({ variant, size, className }))}
       {...props}
+      aria-describedby={[props['aria-describedby'],description?helpId:undefined].filter(Boolean).join(' ')||undefined}
     />
   )
+  if(!description)return button
+  return <Tooltip.Provider delay={400}><Tooltip.Root><Tooltip.Trigger render={button}/><Tooltip.Portal><Tooltip.Positioner sideOffset={8} className="z-[10000]"><Tooltip.Popup id={helpId} role="tooltip" className="max-w-[min(20rem,calc(100vw-24px))] rounded-md border border-orange-200 bg-white px-3 py-2 text-sm leading-relaxed text-zinc-900 shadow-lg">{description}</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal></Tooltip.Root></Tooltip.Provider>
 }
 
 export { Button, buttonVariants }

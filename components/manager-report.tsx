@@ -1,14 +1,48 @@
 "use client"
 
+/**
+ * Provides the manager-facing report, approval filters, summaries, and CSV export.
+ *
+ * The report turns visible time entries into contractor totals, project counts,
+ * approval status counts, date ranges, and exportable detail rows. It expects
+ * authorization to have already happened upstream through the API response.
+ */
 import { useMemo, useState } from "react"
 import { Download, Users, Clock, FolderKanban } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import type { TimeEntry } from "@/lib/types"
+import type { EntryStatus, TimeEntry } from "@/lib/types"
 
+const statusOptions: { value: "all" | EntryStatus; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "draft", label: "Draft" },
+  { value: "submitted", label: "Submitted" },
+  { value: "approved", label: "Approved" },
+  { value: "rejected", label: "Rejected" },
+]
+
+/**
+ * Formats decimal hours for display without unnecessary trailing digits.
+ *
+ * Report totals can contain quarter-hour or decimal values, so formatting keeps
+ * numbers compact while preserving meaningful fractions for billing review.
+ *
+ * @param n - Hour value to format.
+ * @returns Localized hour string with up to two decimal places.
+ */
 function fmtHours(n: number) {
   return n.toLocaleString(undefined, { maximumFractionDigits: 2 })
 }
 
+/**
+ * Formats an ISO date string for report tables while preserving invalid input.
+ *
+ * The parser and database normally provide YYYY-MM-DD strings. If a value cannot
+ * be parsed as a date, the original text is returned so the UI remains truthful
+ * instead of hiding malformed data.
+ *
+ * @param iso - Date string formatted as YYYY-MM-DD.
+ * @returns Localized date label, or the original value when invalid.
+ */
 function fmtDate(iso: string) {
   const d = new Date(iso + "T00:00:00")
   if (isNaN(d.getTime())) return iso
@@ -19,9 +53,21 @@ function fmtDate(iso: string) {
   })
 }
 
+/**
+ * Builds a filterable manager report with summary stats and CSV export.
+ *
+ * The component derives all summaries from the currently filtered entry set. This
+ * keeps the stat tiles, contractor bars, date range, detail table, and CSV export
+ * aligned with the same filter state.
+ *
+ * @param props - Component props.
+ * @param props.entries - Entries available to summarize and export.
+ * @returns A filterable report view for manager-facing summaries.
+ */
 export function ManagerReport({ entries }: { entries: TimeEntry[] }) {
   const [contractor, setContractor] = useState("all")
   const [project, setProject] = useState("all")
+  const [status, setStatus] = useState<"all" | EntryStatus>("approved")
 
   const contractors = useMemo(
     () => Array.from(new Set(entries.map((e) => e.contractor))).sort(),
@@ -35,11 +81,12 @@ export function ManagerReport({ entries }: { entries: TimeEntry[] }) {
   const filtered = useMemo(
     () =>
       entries.filter(
-        (e) =>
-          (contractor === "all" || e.contractor === contractor) &&
-          (project === "all" || e.project === project),
+          (e) =>
+            (contractor === "all" || e.contractor === contractor) &&
+            (project === "all" || e.project === project) &&
+            (status === "all" || e.status === status),
       ),
-    [entries, contractor, project],
+    [entries, contractor, project, status],
   )
 
   const totalHours = filtered.reduce((s, e) => s + (Number(e.hours) || 0), 0)
@@ -75,14 +122,32 @@ export function ManagerReport({ entries }: { entries: TimeEntry[] }) {
       : `${fmtDate(dates[0])} – ${fmtDate(dates[dates.length - 1])}`
   }, [filtered])
 
+  /**
+   * Downloads the currently filtered report rows as a CSV file.
+   *
+   * Values are quoted and embedded quotes are escaped so contractor names,
+   * descriptions, or project labels containing commas remain valid CSV fields.
+   *
+   * @returns Nothing; triggers a browser download as a side effect.
+   */
   function exportCsv() {
     const rows = [
-      ["Contractor", "Date", "Project", "Description", "Hours"],
+      [
+        "Contractor",
+        "Date",
+        "Project",
+        "Description",
+        "Status",
+        "Review note",
+        "Hours",
+      ],
       ...filtered.map((e) => [
         e.contractor,
         e.date,
         e.project,
         e.description,
+        e.status,
+        e.reviewNote ?? "",
         String(e.hours),
       ]),
     ]
@@ -106,10 +171,17 @@ export function ManagerReport({ entries }: { entries: TimeEntry[] }) {
     { label: "Projects", value: String(new Set(filtered.map((e) => e.project)).size), icon: FolderKanban },
   ]
 
+  const statusCounts = statusOptions
+    .filter((option) => option.value !== "all")
+    .map((option) => ({
+      label: option.label,
+      count: entries.filter((entry) => entry.status === option.value).length,
+    }))
+
   return (
     <div className="flex flex-col gap-4">
       {/* Filters */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card p-4 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-y border-border bg-card p-4">
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2">
             <label htmlFor="f-contractor" className="text-xs text-muted-foreground">
@@ -147,11 +219,42 @@ export function ManagerReport({ entries }: { entries: TimeEntry[] }) {
               ))}
             </select>
           </div>
+          <div className="flex items-center gap-2">
+            <label htmlFor="f-status" className="text-xs text-muted-foreground">
+              Status
+            </label>
+            <select
+              id="f-status"
+              className={selectCls}
+              value={status}
+              onChange={(e) => setStatus(e.target.value as "all" | EntryStatus)}
+            >
+              {statusOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
         <Button variant="outline" size="sm" onClick={exportCsv}>
           <Download className="size-3.5" aria-hidden="true" />
           Export CSV
         </Button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {statusCounts.map(({ label, count }) => (
+          <div
+            key={label}
+            className="rounded-lg border border-border bg-card px-3 py-2 shadow-sm"
+          >
+            <p className="text-xs text-muted-foreground">{label}</p>
+            <p className="mt-1 font-mono text-lg font-semibold tabular-nums">
+              {count}
+            </p>
+          </div>
+        ))}
       </div>
 
       {/* Stat tiles */}
@@ -176,7 +279,7 @@ export function ManagerReport({ entries }: { entries: TimeEntry[] }) {
       </div>
 
       {/* Per-contractor summary */}
-      <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
+      <div className="border-y border-border bg-card p-4">
         <h3 className="mb-3 text-sm font-semibold">Hours by contractor</h3>
         <ul className="flex flex-col gap-3">
           {byContractor.map((c) => (
@@ -203,7 +306,7 @@ export function ManagerReport({ entries }: { entries: TimeEntry[] }) {
       </div>
 
       {/* Detail table */}
-      <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+      <div className="overflow-hidden border-y border-border bg-card">
         <div className="border-b border-border px-4 py-3">
           <h3 className="text-sm font-semibold">Detailed entries</h3>
           <p className="text-xs text-muted-foreground">
@@ -218,6 +321,8 @@ export function ManagerReport({ entries }: { entries: TimeEntry[] }) {
                 <th className="px-4 py-2 font-medium">Date</th>
                 <th className="px-4 py-2 font-medium">Project</th>
                 <th className="px-4 py-2 font-medium">Description</th>
+                <th className="px-4 py-2 font-medium">Status</th>
+                <th className="px-4 py-2 font-medium">Review note</th>
                 <th className="px-4 py-2 text-right font-medium">Hours</th>
               </tr>
             </thead>
@@ -237,6 +342,10 @@ export function ManagerReport({ entries }: { entries: TimeEntry[] }) {
                     <td className="px-4 py-2">{e.project}</td>
                     <td className="px-4 py-2 text-muted-foreground">
                       {e.description || "—"}
+                    </td>
+                    <td className="px-4 py-2 capitalize">{e.status}</td>
+                    <td className="px-4 py-2 text-muted-foreground">
+                      {e.reviewNote || "—"}
                     </td>
                     <td className="px-4 py-2 text-right font-mono tabular-nums">
                       {fmtHours(Number(e.hours) || 0)}

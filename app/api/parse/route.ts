@@ -1,5 +1,14 @@
+/**
+ * Converts free-form contractor time notes into structured entries using AI.
+ *
+ * This route is intentionally focused on parsing only. It accepts raw notes,
+ * asks the model for a schema-constrained response, and returns entries for the
+ * client to review before they are saved through the entries API.
+ */
 import { generateText, Output } from "ai"
 import { z } from "zod"
+import { auth } from "@/auth"
+import { getEffectivePermissions } from "@/lib/effective-permissions"
 
 export const maxDuration = 30
 
@@ -28,11 +37,25 @@ const entrySchema = z.object({
 const schema = z.object({
   entries: z
     .array(entrySchema)
-    .describe("One item per distinct contractor + date + project combination."),
+    .describe("One item per distinct unit of work. Preserve separate tasks even for the same person, date, and project."),
 })
 
+/**
+ * Parses free-form time notes into structured time entries with the AI model.
+ *
+ * The prompt asks for one entry per contractor, date, and project combination so
+ * a single messy paragraph can become several reviewable timesheet rows. Relative
+ * dates are resolved against the server's current date.
+ *
+ * @param req - Request containing the free-form notes in the JSON body.
+ * @returns JSON response containing parsed entries or an error.
+ */
 export async function POST(req: Request) {
   try {
+    const session=await auth()
+    const email = session?.user?.email
+    if (!email || !(await getEffectivePermissions(email)).permissions.create_entries)
+      return Response.json({error:"Forbidden."},{status:403})
     const { notes } = (await req.json()) as { notes?: string }
 
     if (!notes || !notes.trim()) {
@@ -53,10 +76,13 @@ export async function POST(req: Request) {
       prompt: `Extract the time entries from these notes:\n\n"""\n${notes}\n"""`,
     })
 
-    return Response.json({ entries: output.entries })
+    const access=await getEffectivePermissions(email)
+    if(!access.role||!access.permissions.create_entries)return Response.json({error:"Extraction access changed. Please sign in again."},{status:403})
+    const ownOnly=access.role==="contractor"||access.role==="employee"
+    return Response.json({ entries: output.entries.map(entry=>ownOnly?{...entry,contractor:session?.user?.name?.trim()||email}:entry) })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    console.log("[v0] parse error:", message)
+    console.error("[parse] AI extraction failed")
     const isAuth = /unauthenticat|api key|gateway/i.test(message)
     return Response.json(
       {

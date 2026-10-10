@@ -1,16 +1,27 @@
 "use client"
 
-import { LogOut } from "lucide-react"
+/**
+ * Provides a reusable sign-out button backed by a server action.
+ *
+ * The form submits directly to the server action so sign-out works without adding
+ * client-side auth logic to pages that only need a simple control.
+ */
 import { signOutAction } from "@/app/actions"
-import { Button } from "@/components/ui/button"
+import { AuthSubmitButton } from "@/components/auth-submit-button"
+import { invalidateClientData } from "@/lib/client-data-cache"
 
+/**
+ * Renders the server-backed sign-out control.
+ *
+ * The button is intentionally small and reusable because it appears in both the
+ * main app header and the access-denied screen.
+ *
+ * @returns A form button that signs out through the server action.
+ */
 export function SignOutButton() {
   return (
-    <form action={signOutAction}>
-      <Button type="submit" variant="outline" size="sm">
-        <LogOut className="size-3.5" aria-hidden="true" />
-        Sign out
-      </Button>
+    <form action={signOutAction} onSubmit={()=>invalidateClientData()} className="shrink-0">
+      <AuthSubmitButton mode="signout" />
     </form>
   )
 }

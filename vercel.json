@@ -1,0 +1,14 @@
+{
+  "git": {
+    "deploymentEnabled": {
+      "*": false,
+      "main": true
+    }
+  },
+  "crons": [
+    {
+      "path": "/tanovo-time/api/security?scheduled=1",
+      "schedule": "0 6 * * *"
+    }
+  ]
+}

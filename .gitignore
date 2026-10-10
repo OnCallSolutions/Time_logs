@@ -7,15 +7,20 @@ __v0_jsx-dev-runtime.ts
 .vercel/
 
 # Environment variables
-.env*.local
+.env*
 .env.example
 
 # Common ignores
 node_modules
 .next/
+.next-e2e/
 tsconfig.tsbuildinfo
 .DS_Store
 *.pdf
+AUTH.docx
+coverage/
+playwright-report/
+test-results/
 
 # Local testing helpers and generated records
 /scripts/

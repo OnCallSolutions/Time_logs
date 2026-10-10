@@ -1,0 +1,51 @@
+name: Test
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - "**"
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      AUTH_SECRET: test-secret-for-ci-only
+      AUTH_URL: http://localhost:3000
+      AUTH_MICROSOFT_ENTRA_ID_ID: test-client-id
+      AUTH_MICROSOFT_ENTRA_ID_SECRET: test-client-secret
+      AUTH_MICROSOFT_ENTRA_ID_ISSUER: https://login.microsoftonline.com/common/v2.0
+      DATABASE_URL: postgresql://user:password@localhost:5432/tanovo-time_test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12.4.2
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Unit and component tests
+        run: pnpm test:coverage
+
+      - name: Production build
+        run: pnpm build
+
+      - name: Install Playwright Chromium
+        run: pnpm test:install
+
+      - name: Browser smoke tests
+        run: pnpm test:e2e

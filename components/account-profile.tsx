@@ -1,15 +1,36 @@
 "use client"
 
+/**
+ * Provides the signed-in account summary and editable profile popover.
+ *
+ * The component shows the authenticated email, display name, role label, and a
+ * circular image placeholder. Profile changes are persisted through the profile
+ * API so they survive page reloads and future sessions.
+ */
 import { useEffect, useRef, useState } from "react"
 import { Camera, ImagePlus, Trash2, UserRound, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { apiPath } from "@/lib/paths"
+import { readClientData,invalidateClientData } from "@/lib/client-data-cache"
 
 type Profile = {
   displayName: string
   imageDataUrl: string | null
 }
 
+/**
+ * Renders the profile avatar, account label, and edit menu.
+ *
+ * The parent passes authentication details while this component owns local draft
+ * state for image and display-name edits. Saved values are written to the server
+ * and then reflected immediately in the header.
+ *
+ * @param props - Profile header props.
+ * @param props.email - Signed-in email address shown as the account identity.
+ * @param props.fallbackName - Microsoft profile name used before a saved name exists.
+ * @param props.role - Human-readable role label shown beneath the email.
+ * @returns Account profile control with an editable popover.
+ */
 export function AccountProfile({
   email,
   fallbackName,
@@ -31,13 +52,20 @@ export function AccountProfile({
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
+    if(!email)return
     let active = true
 
+    /**
+     * Loads the saved profile for the current signed-in user.
+     *
+     * The active flag prevents state updates after unmounting while the fetch is
+     * still pending. Load failures are shown inside the profile popover area.
+     *
+     * @returns A promise that resolves after profile state is loaded or an error is stored.
+     */
     async function loadProfile() {
       try {
-        const res = await fetch(apiPath("/api/profile"), { cache: "no-store" })
-        const data = await res.json()
-        if (!res.ok) throw new Error(data.error ?? "Failed to load profile.")
+        const data = await readClientData<{profile:Profile}>(apiPath("/api/profile"),email!,15000)
 
         if (active) {
           const loadedProfile = data.profile as Profile
@@ -59,8 +87,13 @@ export function AccountProfile({
     return () => {
       active = false
     }
-  }, [fallbackName])
+  }, [fallbackName,email])
 
+  /**
+   * Opens the edit popover with draft fields reset to the current profile.
+   *
+   * @returns Nothing; menu and draft state are updated as side effects.
+   */
   function openMenu() {
     setDraftName(profile.displayName || fallbackName || "")
     setDraftImage(profile.imageDataUrl)
@@ -68,6 +101,15 @@ export function AccountProfile({
     setMenuOpen(true)
   }
 
+  /**
+   * Reads and validates an image file selected by the user.
+   *
+   * Only small browser-displayable image files are accepted. The image is stored
+   * as a data URL so the profile API can persist it without separate file storage.
+   *
+   * @param file - Optional file chosen from the hidden file input.
+   * @returns Nothing; draft image or validation message is updated as a side effect.
+   */
   function readImage(file?: File) {
     if (!file) return
 
@@ -90,6 +132,14 @@ export function AccountProfile({
     reader.readAsDataURL(file)
   }
 
+  /**
+   * Saves the current profile draft through the profile API.
+   *
+   * A successful save updates the displayed profile immediately and closes the
+   * popover. Failures leave the draft open so the user can adjust and retry.
+   *
+   * @returns A promise that resolves after the profile save succeeds or fails.
+   */
   async function saveProfile() {
     setSaving(true)
     setMessage(null)
@@ -107,6 +157,7 @@ export function AccountProfile({
       if (!res.ok) throw new Error(data.error ?? "Failed to save profile.")
 
       setProfile(data.profile)
+      invalidateClientData(email??undefined,apiPath("/api/profile"))
       setMenuOpen(false)
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "Failed to save profile.")
@@ -119,9 +170,9 @@ export function AccountProfile({
   const currentImage = profile.imageDataUrl
 
   return (
-    <div className="relative flex items-center justify-end gap-3">
+    <div className="relative flex min-w-0 items-center justify-end gap-3">
       <div className="min-w-0 text-right">
-        <p className="truncate text-sm font-medium text-foreground">
+        <p title={email ?? undefined} className="truncate text-sm font-medium text-foreground">
           {email ?? "Signed in"}
         </p>
         <p className="truncate text-xs text-muted-foreground">
@@ -147,7 +198,7 @@ export function AccountProfile({
       </button>
 
       {menuOpen && (
-        <div className="absolute right-0 top-12 z-20 w-72 rounded-lg border border-border bg-popover p-3 text-left shadow-lg">
+        <div className="fixed inset-x-3 top-20 z-30 max-h-[calc(100dvh-6rem)] overflow-y-auto overscroll-contain rounded-lg border border-border bg-popover p-3 text-left shadow-lg sm:absolute sm:inset-x-auto sm:right-0 sm:top-12 sm:w-72" onKeyDown={event => { if (event.key === "Escape") setMenuOpen(false) }}>
           <div className="flex items-center justify-between gap-3">
             <p className="text-sm font-medium">Profile</p>
             <button
