@@ -37,7 +37,7 @@ const entrySchema = z.object({
 const schema = z.object({
   entries: z
     .array(entrySchema)
-    .describe("One item per distinct contractor + date + project combination."),
+    .describe("One item per distinct unit of work. Preserve separate tasks even for the same person, date, and project."),
 })
 
 /**
@@ -52,7 +52,8 @@ const schema = z.object({
  */
 export async function POST(req: Request) {
   try {
-    const email = (await auth())?.user?.email
+    const session=await auth()
+    const email = session?.user?.email
     if (!email || !(await getEffectivePermissions(email)).permissions.create_entries)
       return Response.json({error:"Forbidden."},{status:403})
     const { notes } = (await req.json()) as { notes?: string }
@@ -75,7 +76,9 @@ export async function POST(req: Request) {
       prompt: `Extract the time entries from these notes:\n\n"""\n${notes}\n"""`,
     })
 
-    return Response.json({ entries: output.entries })
+    const access=await getEffectivePermissions(email)
+    const ownOnly=access.role==="contractor"||access.role==="employee"
+    return Response.json({ entries: output.entries.map(entry=>ownOnly?{...entry,contractor:session?.user?.name?.trim()||email}:entry) })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     console.error("[parse] AI extraction failed")

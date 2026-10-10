@@ -37,7 +37,7 @@ export async function PATCH(req:Request): Promise<Response> {
     const target = (await employeeRoster()).find(user=>user.email.toLowerCase() === body.email.toLowerCase())
     if (!target) return Response.json({error:"Select an active employee."},{status:400})
     for(const [key,value] of Object.entries(body.permissions)) {
-      if (!Object.hasOwn(permissionLabels,key) || ["delegate_permissions","send_messages","send_to_accounts","view_accounts","review_accounts","ai_accounts"].includes(key) || (value && !access.permissions[key as Permission]))
+      if (!Object.hasOwn(permissionLabels,key) || ["delegate_permissions","send_messages","send_to_accounts","view_accounts","review_accounts","ai_accounts","review_manager_entries"].includes(key) || (value && !access.permissions[key as Permission]))
         return Response.json({error:"You cannot delegate this right."},{status:403})
     }
     const user = await delegateEmployeePermissions(target.email,target.role as "employee"|"contractor",body.permissions,email)

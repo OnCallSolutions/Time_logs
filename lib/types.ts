@@ -21,6 +21,10 @@ export type EntryStatus = "draft" | "submitted" | "approved" | "rejected"
  */
 export type TimeEntry = {
   id: string
+  /** Database evidence revision used to reject stale review decisions. */
+  revision?: string
+  /** Server-derived eligibility for the current caller's review lane. */
+  reviewEligible?: boolean
   /** Server-assigned record owner; never inferred from the display contractor name. */
   ownerEmail?: string
   contractor: string
@@ -43,7 +47,7 @@ export type TimeEntry = {
  */
 export type ParsedEntry = Omit<
   TimeEntry,
-  "id" | "ownerEmail" | "status" | "reviewedBy" | "reviewedAt" | "reviewNote"
+  "id" | "revision" | "reviewEligible" | "ownerEmail" | "status" | "reviewedBy" | "reviewedAt" | "reviewNote"
 >
 
 /**

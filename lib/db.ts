@@ -29,6 +29,7 @@ const sql = neon(databaseUrl)
 
 type TimeEntryRow = {
   id: string
+  updated_at?: string | Date
   owner_email?: string
   contractor: string
   work_date: string | Date
@@ -197,6 +198,7 @@ function toTimeEntry(row: TimeEntryRow): TimeEntry {
         ? row.reviewed_at.toISOString()
         : row.reviewed_at,
     reviewNote: row.review_note,
+    revision: row.updated_at instanceof Date ? row.updated_at.toISOString() : row.updated_at,
   }
 }
 
@@ -826,7 +828,8 @@ export async function listTimeEntries(ownerEmail: string, includeAll = false) {
       status,
       reviewed_by,
       reviewed_at,
-      review_note
+      review_note,
+      updated_at::text AS updated_at
     FROM time_entries
     WHERE ${includeAll} OR owner_email = ${ownerEmail}
     ORDER BY work_date DESC, created_at DESC
@@ -926,7 +929,8 @@ export async function getTimeEntry(
       status,
       reviewed_by,
       reviewed_at,
-      review_note
+      review_note,
+      updated_at::text AS updated_at
     FROM time_entries
     WHERE id = ${id}
       AND (${includeAll} OR owner_email = ${ownerEmail})
@@ -958,6 +962,7 @@ export async function updateTimeEntry(
   },
   includeAll = false,
   reviewerEmail?: string,
+  expectedRevision?: string,
 ) {
   await ensureTimeEntriesTable()
 
@@ -994,6 +999,7 @@ export async function updateTimeEntry(
       updated_at = now()
     WHERE id = ${id}
       AND (${includeAll} OR owner_email = ${ownerEmail})
+      AND (${expectedRevision??null}::timestamptz IS NULL OR updated_at=${expectedRevision??null}::timestamptz)
       AND (${patch.status ?? null} NOT IN ('approved', 'rejected') OR ${patch.status ?? null} IS NULL
         OR (status = 'submitted' AND lower(owner_email) <> lower(${ownerEmail}) AND ${reviewerEmail ?? null} IS NOT NULL))
       AND (lower(owner_email) <> lower(${ownerEmail}) OR status IN ('draft','rejected')
@@ -1010,7 +1016,8 @@ export async function updateTimeEntry(
       status,
       reviewed_by,
       reviewed_at,
-      review_note
+      review_note,
+      updated_at::text AS updated_at
   `
 
   const row = (rows as TimeEntryRow[])[0]

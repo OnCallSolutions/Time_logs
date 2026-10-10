@@ -5,17 +5,32 @@
 import { beforeEach,expect,it,vi } from "vitest"
 vi.mock("@/auth",()=>({auth:vi.fn()}))
 vi.mock("@/lib/effective-permissions",()=>({getEffectivePermissions:vi.fn()}))
+vi.mock("@/lib/access",()=>({getEffectiveUserRole:vi.fn()}))
 vi.mock("@/lib/db",()=>({getTimeEntry:vi.fn(),updateTimeEntry:vi.fn(),deleteTimeEntry:vi.fn(),recordAuditEvent:vi.fn()}))
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
+import { getEffectiveUserRole } from "@/lib/access"
 import { getTimeEntry,updateTimeEntry,deleteTimeEntry } from "@/lib/db"
 import { resolvePermissions } from "@/lib/permissions"
 import { PATCH,DELETE } from "./route"
 beforeEach(()=>{
   vi.resetAllMocks()
+  vi.mocked(getEffectiveUserRole).mockResolvedValue("manager")
   vi.mocked(auth).mockResolvedValue({user:{email:"manager@example.com"}} as never)
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"manager",permissions:resolvePermissions("manager")})
   vi.mocked(getTimeEntry).mockResolvedValue({id:"entry",ownerEmail:"manager@example.com",status:"submitted"} as never)
+})
+it("rejects manager-to-manager approval",async()=>{
+  vi.mocked(getTimeEntry).mockResolvedValue({id:"entry",ownerEmail:"other@example.com",status:"submitted"} as never)
+  const response=await PATCH(new Request("http://localhost/api/entries/entry",{method:"PATCH",body:JSON.stringify({status:"approved"})}),{params:Promise.resolve({id:"entry"})})
+  expect(response.status).toBe(403);expect(updateTimeEntry).not.toHaveBeenCalled()
+})
+it("permits an explicitly authorized account manager to review manager work",async()=>{
+  vi.mocked(getEffectivePermissions).mockResolvedValue({role:"account_manager",permissions:resolvePermissions("account_manager",{review_manager_entries:true})})
+  vi.mocked(getTimeEntry).mockResolvedValue({id:"entry",ownerEmail:"other@example.com",status:"submitted"} as never)
+  vi.mocked(updateTimeEntry).mockResolvedValue({id:"entry",status:"approved"} as never)
+  const response=await PATCH(new Request("http://localhost/api/entries/entry",{method:"PATCH",body:JSON.stringify({status:"approved"})}),{params:Promise.resolve({id:"entry"})})
+  expect(response.status).toBe(200)
 })
 it("blocks self-approval even for a reviewer with team access",async()=>{
   const response=await PATCH(new Request("http://localhost/api/entries/entry",{method:"PATCH",body:JSON.stringify({status:"approved"})}),{params:Promise.resolve({id:"entry"})})

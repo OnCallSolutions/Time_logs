@@ -8,6 +8,8 @@
 import { z } from "zod"
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
+import { getEffectiveUserRole } from "@/lib/access"
+import { canReviewRole } from "@/lib/review-policy"
 import {
   auditActionForStatus,
   changedFieldMetadata,
@@ -32,6 +34,7 @@ const patchSchema = z
     description: z.string().optional(),
     status: z.enum(["draft", "submitted", "approved", "rejected"]).optional(),
     reviewNote: z.string().trim().max(500).optional(),
+    expectedRevision: z.string().min(1).max(100).optional(),
   })
   .refine((patch) => Object.keys(patch).length > 0, {
     message: "At least one field is required.",
@@ -58,8 +61,8 @@ async function getAccess() {
   return {
     email,
     role,
-    includeAll: permissions.view_team,
-    canReview: permissions.review_entries,
+    includeAll: permissions.view_team||(role==="account_manager"&&permissions.review_manager_entries),
+    canReview: permissions.review_entries||(role==="account_manager"&&permissions.review_manager_entries),
     permissions,
   }
 }
@@ -172,7 +175,7 @@ export async function PATCH(
     const { id } = await params
     const patch = patchSchema.parse(await req.json())
     if ((hasEntryFieldPatch(patch) && !access.permissions.edit_entries) ||
-      ((patch.status === "approved" || patch.status === "rejected") && !access.permissions.review_entries) ||
+      ((patch.status === "approved" || patch.status === "rejected") && !access.canReview) ||
       ((patch.status === "draft" || patch.status === "submitted") && !access.permissions.submit_entries && !access.permissions.review_entries))
       return Response.json({error:"Forbidden."},{status:403})
     if (patch.reviewNote !== undefined && patch.status !== "rejected" && patch.status !== "approved") {
@@ -190,6 +193,8 @@ export async function PATCH(
 
     if (patch.status === "approved" || patch.status === "rejected") {
       if(current.ownerEmail?.toLowerCase()===access.email.toLowerCase())return Response.json({error:"Your own entries require another authorized reviewer."},{status:403})
+      const ownerRole=current.ownerEmail?await getEffectiveUserRole(current.ownerEmail):null
+      if(!canReviewRole(access.role,ownerRole))return Response.json({error:"Manager timesheets require an authorized account manager; account managers cannot review other operational timesheets."},{status:403})
       if(hasEntryFieldPatch(patch))return Response.json({error:"Review decisions cannot change submitted evidence."},{status:400})
     }
 
@@ -227,9 +232,11 @@ export async function PATCH(
       patch,
       access.includeAll,
       access.canReview ? access.email : undefined,
+      patch.expectedRevision,
     )
 
     if (!entry) {
+      if(patch.expectedRevision)return Response.json({error:"Evidence changed. Refresh before recording this decision."},{status:409})
       return Response.json({ error: "Entry not found." }, { status: 404 })
     }
 

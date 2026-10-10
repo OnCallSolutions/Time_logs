@@ -5,6 +5,7 @@
 import { beforeEach, expect, it, vi } from "vitest"
 vi.mock("@/auth", () => ({ auth: vi.fn() }))
 vi.mock("@/lib/effective-permissions", () => ({ getEffectivePermissions: vi.fn() }))
+vi.mock("@/lib/access",()=>({getEffectiveUserRole:vi.fn()}))
 vi.mock("@/lib/db", () => ({ listTimeEntries: vi.fn() }))
 vi.mock("ai", () => ({ generateText: vi.fn(), Output: {object:vi.fn()} }))
 import { auth } from "@/auth"

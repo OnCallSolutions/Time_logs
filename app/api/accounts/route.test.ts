@@ -28,8 +28,8 @@ beforeEach(()=>{
   vi.mocked(getTimeEntry).mockResolvedValue({id,status:"approved",ownerEmail:"supplier@example.com"} as never)
   vi.mocked(createHandoffs).mockResolvedValue([{id,entry_id:id}])
 })
-it("requires the explicit administrator-granted handoff permission",async()=>{
-  vi.mocked(getEffectivePermissions).mockResolvedValue({role:"manager",permissions:resolvePermissions("manager")})
+it("respects an administrator-denied handoff permission",async()=>{
+  vi.mocked(getEffectivePermissions).mockResolvedValue({role:"manager",permissions:resolvePermissions("manager",{send_to_accounts:false})})
   expect((await POST(request())).status).toBe(403)
   expect(createHandoffs).not.toHaveBeenCalled()
 })
