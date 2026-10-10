@@ -13,12 +13,14 @@ import type { MessageIdentity } from "./message-crypto"
 async function deviceRecord(email:string,identity?:MessageIdentity|null):Promise<MessageIdentity|null>{
   if(typeof indexedDB==="undefined")throw new Error("Trusted-device storage is unavailable in this browser.")
   return new Promise((resolve,reject)=>{
+    let blocked=false
     const opening=indexedDB.open("tanovo-message-devices",1)
     opening.onupgradeneeded=()=>opening.result.createObjectStore("identities")
     opening.onerror=()=>reject(new Error("Unable to open trusted-device storage."))
-    opening.onblocked=()=>reject(new Error("Trusted-device storage is blocked by another tab."))
+    opening.onblocked=()=>{blocked=true;reject(new Error("Trusted-device storage is blocked by another tab."))}
     opening.onsuccess=()=>{
       const db=opening.result
+      if(blocked){db.close();return}
       const transaction=db.transaction("identities",identity===undefined?"readonly":"readwrite")
       const store=transaction.objectStore("identities"),key=email.toLowerCase()
       const request=identity===undefined?store.get(key):identity===null?store.delete(key):store.put(identity,key)

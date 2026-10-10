@@ -44,6 +44,7 @@ export function useMessageEncryption(email:string,messages:AppMessage[]) {
     let cancelled=false
     if(previousPeers.current!==peers){invalidateClientData(email,apiPath("/api/messages/keys"));previousPeers.current=peers}
     readClientData<{own:(PublicMessageKey&{backup:KeyBackup})|null;keys:PublicMessageKey[]}>(apiPath("/api/messages/keys"),email,15000).then(async data=>{
+      if(data.own&&(data.own.email.toLowerCase()!==email.toLowerCase()||await identityFingerprint(data.own.publicKey,data.own.signingKey)!==data.own.fingerprint))throw new Error("Own encryption identity mismatch.")
       for(const key of data.keys as PublicMessageKey[]){
         if(await identityFingerprint(key.publicKey,key.signingKey)!==key.fingerprint)throw new Error("Public identity fingerprint mismatch.")
         const cacheKey=`message-key:${email}:${key.email}`
