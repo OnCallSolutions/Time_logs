@@ -1,5 +1,9 @@
 # Branch Responsibilities
 
+Current policy: retain only `main` and `Development`, after all feature commits
+are integrated into Development. The feature-branch descriptions below record
+historical ownership and do not override the current two-branch policy.
+
 - `employee`: personal employee workflow controls and AI-assisted draft review.
 - `manager`: team review, advisory AI recommendations, and explicit approval/rejection dialogs.
 - `admin`: technology management, access administration, and security-report navigation.

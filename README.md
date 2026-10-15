@@ -5,13 +5,13 @@ AI-assisted contractor time logging, manager review, and internal staff administ
 **AI prepares the work; people review and confirm decisions.** The application is served at `/tanovo-time`.
 
 Account cutoff schedules, suspension, and temporary operational assignments are
-under development on `access_lifecycle` with presentation on `user_Interface`.
-See [ACCESS_LIFECYCLE.md](ACCESS_LIFECYCLE.md) for scope, precedence, administrator
+integrated into `Development`.
+See [ACCESS_LIFECYCLE.md](Documents/ACCESS_LIFECYCLE.md) for scope, precedence, administrator
 protection, and the separate Microsoft offboarding checklist.
 
 For the contractor-centered operational review and business-account handoff changes
 under development, including reviewer separation and Vercel role-list names, see
-[CONTRACTOR_WORKFLOW.md](CONTRACTOR_WORKFLOW.md). These changes are currently on
+[CONTRACTOR_WORKFLOW.md](Documents/CONTRACTOR_WORKFLOW.md). These changes are currently on
 local Development through the manager/business-account integration, not released functionality.
 
 Contractors are outsourced workers who log their own time and submit it for review.
@@ -22,13 +22,14 @@ unchanged. Existing stored `user` assignments are read as contractors without
 rewriting their permissions or deleting historical records.
 
 Account Manager is a separate, administrator-assigned business-account role. It
-cannot enter timesheets or perform operational time approvals. Payment calculation
+cannot enter timesheets or approve contractor/employee operational work, but can
+review manager timesheets when granted `review_manager_entries`. Payment calculation
 and authorization to release funds are planned, not implemented; see
-[BUSINESS_ACCOUNTS.md](BUSINESS_ACCOUNTS.md).
+[BUSINESS_ACCOUNTS.md](Documents/BUSINESS_ACCOUNTS.md).
 
-For GitHub, Vercel, and Microsoft Entra name/URL migration, see [REBRANDING.md](REBRANDING.md). This rebrand applies to `Development` only; other branches retain their existing names and routes.
+For GitHub, Vercel, and Microsoft Entra name/URL migration, see [REBRANDING.md](Documents/REBRANDING.md). This rebrand applies to `Development` only; other branches retain their existing names and routes.
 
-For the exact Development URL, Azure callbacks, local ports, and branch-specific rules, see [URL_CONFIGURATION.md](URL_CONFIGURATION.md).
+For the exact Development URL, Azure callbacks, local ports, and branch-specific rules, see [URL_CONFIGURATION.md](Documents/URL_CONFIGURATION.md).
 
 ## Contents
 
@@ -45,23 +46,18 @@ For the exact Development URL, Azure callbacks, local ports, and branch-specific
 
 | Branch | Purpose | Pull request destination |
 | --- | --- | --- |
-| `employee` | Personal time logging, draft review, and employee experience | `Development` |
-| `manager` | AI-assisted review, delegated workflow rights, and messaging | `Development` |
-| `admin` | Technology management, access administration, and operational visibility | `Development` |
-| `messages` | Messaging behavior, chat controls, and contractor/account-manager groundwork | `Development` |
-| `user_Interface` | Shared visual design and responsive interaction | `Development` |
-| `testing` | Standalone testing framework and detailed test console | `Development` |
-| `database_management` | Database initialization, migration planning, and future AI storage | `Development` |
 | `Development` | Shared source of truth for integrated features and testing | `main` for releases |
 | `main` | Reviewed release code | Receives release PRs from `Development` |
 
-Keep feature branches after integration. `Per_user_entries` has been retired; use the three role branches for feature work. Branch names organize development, while authenticated roles and server-checked permissions determine the UI a person sees.
+Only `main` and `Development` are retained after integration. Retired feature
+branches remain represented in Development's commit history. Runtime roles and
+permissions are independent of Git branches.
 
-This README describes the Development-based checkout. It does not update `main`
-or imply its features have been released. `messages` was merged into remote
-`Development` at `8463b58`; database-management changes remain local and unmerged.
+This README describes the integrated Development checkout. Release through a
+reviewed Development-to-main pull request; a successful build is not proof that
+a particular production deployment has been verified.
 
-| Capability | Released baseline on `main` | Integrated in `Development` |
+| Capability | Historical main baseline | Integrated in `Development` |
 | --- | --- | --- |
 | Microsoft sign-in and app access lists | Yes | Yes |
 | AI note extraction, saved entries, and manager reports | Yes | Yes |
@@ -73,9 +69,9 @@ or imply its features have been released. `messages` was merged into remote
 | Automated unit/component/API tests and test console | Not yet | Yes |
 | Contractor role and account-manager scaffold | Not yet | Yes |
 | Quiet message settings, search, and conversation filters | Not yet | Yes |
-| Trusted-device automatic encryption unlock | No | Not implemented |
+| Automatic per-device encryption without an unlock form | Historical baseline | Yes |
 | Contractor payments and fund-release approval | No | Not implemented |
-| Retry-safe database initialization improvements | No | Local `database_management` only |
+| Retry-safe database initialization improvements | Historical baseline | Yes |
 
 ## Role Workspaces
 
@@ -86,7 +82,7 @@ The following describes the integrated `Development` experience. Existing capabi
 | Contractor | Outsourced worker: log own time, submit work, correct rejected entries, and read authorized messages |
 | Employee | Extract notes into drafts, review/edit eligible entries, submit or recall work, correct rejected entries, maintain a profile, and read authorized messages |
 | Manager | Review team entries, ask AI to prepare recommendations, confirm approvals/rejections, use reports, delegate permitted workflow rights, and send individual or broadcast employee messages |
-| Account Manager | Admin-assigned business-account category; no timesheet mutation or operational approval; financial workflow planned separately |
+| Account Manager | Review assigned financial evidence and, with a separate admin-granted right, manager timesheets; no creation of operational timesheets or fund release |
 | Admin / technology manager | Manage identities, roles, and control permissions through Edit/Save; inspect audit details and stored AI security reports; retain existing entry and reporting capabilities |
 
 Managers may delegate only workflow rights they hold. They cannot promote account roles, unblock employees, or delegate technical-admin access. Team visibility and approval are separate rights.
@@ -104,8 +100,8 @@ AI recommendations are advisory. They cannot verify that work happened and do no
 - A Neon PostgreSQL database, a Microsoft Entra application registration, and AI Gateway credentials for live AI operations.
 
 ```powershell
-git clone https://github.com/OnCallSolutions/Time_logs.git
-cd Time_logs
+git clone https://github.com/OnCallSolutions/Time_logs.git tanovo-time
+cd tanovo-time
 git switch Development
 pnpm install --frozen-lockfile
 ```
@@ -211,16 +207,16 @@ On `Development`, see `TESTING.md`, `ROLE_WORKSPACES.md`, and `BRANCH_OWNERSHIP.
 
 `main` stores time entries and profiles. `Development` additionally stores managed access with JSONB permission overrides, audit events, security reports, and in-app messages. Schema helpers create required tables/columns idempotently; the database credential must permit those operations. Use separate development/test and production databases.
 
-Local `database_management` adds retry-safe, process-cached schema initialization
+Integrated database management adds retry-safe, process-cached schema initialization
 and avoids replacing current access-role constraints on every cold start. It does
 not yet provide versioned migrations, cursor pagination, or AI job storage. See
-[DATABASE_MANAGEMENT.md](DATABASE_MANAGEMENT.md). No live database maintenance has
+[DATABASE_MANAGEMENT.md](Documents/DATABASE_MANAGEMENT.md). No live database maintenance has
 been performed during this groundwork.
 
 ## Deployment and Releases
 
-1. Develop on the relevant role, messaging, UI, testing, or database branch, keeping shared changes aligned with `Development`.
-2. Open feature PRs into `Development`; preserve the feature branches.
+1. Keep integrated work on `Development`; only `Development` and `main` are retained.
+2. Preserve all feature commits in Development before deleting their branch references.
 3. Validate the integrated application with automated checks and live role/permission tests.
 4. Update the feature-status table for the release and open a PR from `Development` into `main`.
 5. Configure production secrets, Microsoft redirect URIs, and database access before deploying the release.
@@ -243,13 +239,13 @@ The manager AI review endpoint processes up to 50 submitted records per request.
 Development messaging includes one-hour sender editing, confirmed deletion,
 delivery/read receipts, unread badges, optional popups/sound, chat bubbles,
 search, and conversation filtering. Messages opens from the top-right header;
-encryption controls live in Message settings. Recovery unlocking is still required
-after reload because private keys are memory-only. Trusted-device unlock, OS-aware
-themes, and the richer conversation controls remain future work.
+device keys connect automatically after Microsoft sign-in with no recovery or
+unlock form. Private keys stay in browser IndexedDB. See
+[MESSAGING_DEVICES.md](Documents/MESSAGING_DEVICES.md) for device and history limits.
 
-New sends require every recipient to initialize encryption. Historical plaintext
+New sends require each recipient to sign in once for automatic device enrollment. Historical plaintext
 may still exist; the quiet chat view does not label every bubble's encryption state.
-See [MESSAGING_SECURITY.md](MESSAGING_SECURITY.md) for protocol limits and recovery
+See [MESSAGING_SECURITY.md](Documents/MESSAGING_SECURITY.md) for protocol limits and recovery
 warnings. This custom development protocol is not WhatsApp's protocol and requires
 independent security review before production use. No message plaintext or recovery
 secret should be passed to AI.
