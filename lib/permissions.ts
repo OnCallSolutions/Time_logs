@@ -13,17 +13,25 @@ export const permissionLabels = {
   view_team: "View team entries",
   view_reports: "View team reports",
   ai_review: "Prepare AI review",
-  delegate_permissions: "Delegate employee workflow rights",
+  delegate_permissions: "Manage employee/contractor workflow rights",
   send_messages: "Send employee messages",
   send_to_accounts: "Hand approved contractor work to business accounts",
-  view_accounts: "View assigned business-account handoffs",
+  view_accounts: "View business-accounts dashboard and all handoffs",
   review_accounts: "Triage assigned business-account evidence",
   ai_accounts: "Prepare advisory AI account review",
-  review_manager_entries: "Review manager timesheets as an account manager",
+  view_manager_entries: "View other managers' submitted personal timesheets",
+  review_manager_entries: "Approve other managers' submitted personal timesheets",
+  view_other_manager_entries: "View submissions assigned to another manager",
+  review_other_manager_entries: "Help approve submissions assigned to another manager",
+  request_review_help: "Grant temporary review access to selected timesheets",
+  accept_review_requests: "Accept scoped review requests from authorized managers",
+  authorize_payouts: "Authorize timesheet payout eligibility (no payment transfer)",
 } as const
 export type Permission = keyof typeof permissionLabels
 export type PermissionOverrides = Partial<Record<Permission, boolean>>
 export type Permissions = Record<Permission, boolean>
+/** Operational rights managers may delegate without granting role or financial authority. */
+export const delegablePermissions: readonly Permission[] = ["create_entries","edit_entries","delete_entries","submit_entries","review_entries","view_team","view_reports"]
 
 /**
  * Resolves role defaults plus explicit rights without granting unknown controls.
@@ -36,7 +44,7 @@ export function resolvePermissions(role: UserRole | null, overrides: PermissionO
   const personal = role === "employee" || role === "contractor"
   const defaults: Permissions = {create_entries:!!role,edit_entries:!!role,delete_entries:!!role,
     submit_entries:personal||role==="manager",review_entries:elevated,view_team:elevated,view_reports:elevated,ai_review:elevated,
-    delegate_permissions:elevated,send_messages:elevated,send_to_accounts:elevated,view_accounts:role==="admin",review_accounts:role==="admin",ai_accounts:role==="admin",review_manager_entries:false}
+    delegate_permissions:elevated,send_messages:elevated,send_to_accounts:elevated,view_accounts:role==="admin",review_accounts:role==="admin",ai_accounts:role==="admin",review_manager_entries:false,view_manager_entries:role==="account_manager",view_other_manager_entries:false,review_other_manager_entries:false,request_review_help:elevated,accept_review_requests:role==="manager",authorize_payouts:false}
   for (const key of Object.keys(permissionLabels) as Permission[]) {
     if (role && typeof overrides[key] === "boolean") defaults[key] = overrides[key]!
   }
@@ -50,6 +58,12 @@ export function resolvePermissions(role: UserRole | null, overrides: PermissionO
     defaults.review_entries = false
     defaults.ai_review = false
     defaults.delegate_permissions = false
+  }
+  if (role !== "admin" && role !== "account_manager") {
+    defaults.view_accounts = false
+    defaults.review_accounts = false
+    defaults.ai_accounts = false
+    defaults.authorize_payouts = false
   }
   return defaults
 }

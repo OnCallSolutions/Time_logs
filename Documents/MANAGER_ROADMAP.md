@@ -1,13 +1,14 @@
 # Manager Logic and UI
 
-Business logic belongs on `manager`; shared presentation belongs on `user_Interface`.
-Feature integration targets Development. Branch ownership never grants application
+Business logic and shared presentation are integrated on `Development`.
+Release PRs target `main`. Git branch ownership never grants application
 rights, and neither AI nor hidden UI controls replace server authorization.
 
 ## Current Safeguards
 
 Managers submit personal time through their separate managerial-time lane. Another
-authorized reviewer must approve or reject it. Reviewer privileges cannot edit or
+account manager with `review_manager_entries` must approve or reject it. Other
+managers and admins cannot make that decision. Reviewer privileges cannot edit or
 delete their own submitted/approved evidence, reopen their own approved records,
 or remove protected own records through bulk clearing. Submitted records may be
 recalled into draft without rewriting evidence in the same request.
@@ -22,7 +23,7 @@ to an active account manager only with admin-granted financial handoff rights.
    broad team visibility, not a defined manager-to-contractor reporting structure.
 2. Submission timestamps, review-age indicators, and configurable escalation rules
    without assuming an undocumented approval SLA.
-3. Revision-aware review and persisted AI advice tied to the exact submitted evidence.
+3. Persist AI advice tied to submitted evidence; revision-aware responses and stale-decision rejection already exist.
 4. Review notes, correction history, reviewer reassignment, and out-of-office coverage.
 5. Paginated review/handoff queues and truthful batch outcomes with retry support.
 6. Approved-work reconciliation, rates and currency policy, then separate financial

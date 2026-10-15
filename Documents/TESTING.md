@@ -61,15 +61,31 @@ environments; smoke tests do not approve those systems.
 
 ## Current Coverage
 
-The first baseline covers the authorization rules and the admin role/permission edit workflow. Coverage is intentionally reported but not failed by thresholds yet because the codebase is starting from low test coverage. Add thresholds after the next few critical areas are covered.
+Tests cover authorization, roles/rights, lifecycle, entries and review, account
+handoffs, AI failure/revision checks, crypto/device enrollment, messaging, UI controls,
+and test-console behavior. See [recorded results](TEST_RESULTS.md) for the dated
+test-count snapshot. Coverage is reported without a failing percentage threshold;
+this is not evidence of complete coverage.
 
 ## Branch Scope
 
-The framework is branch-agnostic. The package scripts and GitHub Actions workflow are intended to run on every previous, current, and future branch once this testing branch is merged or cherry-picked into that branch. The dashboard also accepts any deployed branch preview URL, so it can test older branch deployments even when the local checkout is on a different branch.
+Development and main contain the integrated framework. Only these two branches
+are retained. The console runs commands against the current checkout; its branch
+selector labels a browser target and never checks out source.
+
+Run commands from the repository root, not Documents. Generate missing route
+types with `pnpm exec next typegen` before a fresh `pnpm typecheck`.
+Port 3000 is interactive development, 3002 a separately configured built app,
+3100 the isolated Playwright server, and 4317 the external test console.
+See [URL configuration](URL_CONFIGURATION.md); ports alone do not isolate cookies.
+
+CI uses Node 22/pnpm 12.4.2 and runs typecheck, coverage, build, and Chromium smoke
+tests on pushes/pull requests. It uses test configuration, not live production
+credentials. Live OAuth and production database/provider behavior are not certified.
 
 ## What To Add Next
 
-- API route tests for entries, approvals, audit events, and users.
-- Database helper tests with a disposable test database or query mocks.
+- Expand existing API regression coverage for failure/concurrency paths.
+- Add disposable PostgreSQL integration and migration/backup-restore tests.
 - Authenticated Playwright flows once a dedicated test Microsoft/DB environment exists.
 - Regression tests for every production bug before fixing it.

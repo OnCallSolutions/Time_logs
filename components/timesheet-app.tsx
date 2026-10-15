@@ -4,11 +4,13 @@
  * Provides the main role-aware timesheet workspace and navigation.
  *
  * This client component owns the visible application state after authentication:
- * loaded entries, current tab, sync errors, and optimistic edit behavior. It also
+ * loaded entries, current tab, sync errors, and confirmed edit behavior. It also
  * translates the user's role into visible navigation choices so the UI matches
  * the permissions enforced by the API routes.
  */
 import { useEffect, useState } from "react"
+import { WorkspaceSnapshot } from "@/components/workspace-snapshot"
+import { ReviewerHelpDialog } from "@/components/reviewer-help-dialog"
 import { Brand } from "@/components/brand"
 import { EmployeeWorkspace } from "@/components/employee-workspace"
 import { ApprovalSelection } from "@/components/approval-selection"
@@ -27,6 +29,8 @@ import { WindowSurface } from "@/components/window-surface"
 import { WorkspaceUtilities } from "@/components/workspace-utilities"
 import {
   Activity,
+  ChevronRight,
+  Layers3,
   BarChart3,
   CheckCircle2,
   Clock3,
@@ -190,13 +194,16 @@ export function TimesheetApp({
   useEffect(()=>{
     if(role==="account_manager"&&permissions.view_accounts)setView("accounts")
   },[role,permissions.view_accounts])
+  const [entriesRefresh,setEntriesRefresh]=useState(0)
   const [loadingEntries, setLoadingEntries] = useState(true)
   const [syncError, setSyncError] = useState<string | null>(null)
   const [personalStatus, setPersonalStatus] = useState<EntryStatus | "all">("all")
   const [suggestedReview,setSuggestedReview] = useState<{entry:TimeEntry;decision:"approved"|"rejected";reason:string}|null>(null)
+  const [reviewerHelp,setReviewerHelp]=useState<TimeEntry[]|null>(null)
   const [technologyReports,setTechnologyReports] = useState(false)
   const [lifecycleOpen,setLifecycleOpen]=useState(false)
   const [directoryRequest,setDirectoryRequest] = useState(0)
+  const [commandGroup,setCommandGroup] = useState<"time"|"review"|"insights"|"access"|null>(null)
   const [workspaceWindow,setWorkspaceWindow] = useState<"overview"|"workflow"|"notes"|null>(null)
 
   useEffect(() => {
@@ -259,12 +266,12 @@ export function TimesheetApp({
     return () => {
       active = false
     }
-  }, [role,permissions.view_team,permissions.review_manager_entries,accessDenied])
+  }, [role,permissions.view_team,permissions.view_manager_entries,permissions.review_manager_entries,permissions.view_other_manager_entries,permissions.review_other_manager_entries,permissions.accept_review_requests,entriesRefresh,messageInbox.messages,accessDenied])
 
   const canViewTeamReports = permissions.view_reports
   const canViewAdmin = role === "admin" && !accessDenied
-  const canClearVisibleEntries = permissions.delete_entries && permissions.view_team
-  const canReviewEntries = permissions.review_entries||(role==="account_manager"&&permissions.review_manager_entries)
+  const canClearVisibleEntries = role === "admin" && permissions.delete_entries && permissions.view_team
+  const canReviewEntries = permissions.review_entries||permissions.review_manager_entries
   const canAIReview = permissions.ai_review||(role==="account_manager"&&permissions.review_manager_entries&&permissions.ai_accounts)
   const canSubmitEntries = permissions.submit_entries
   useEffect(() => {
@@ -273,7 +280,7 @@ export function TimesheetApp({
   const roleLabel = {
     admin: "Administrator",
     manager: "Manager",
-    account_manager: "Account Manager",
+    account_manager: "Business accounts manager",
     employee: "Employee",
     contractor: "Contractor",
   }[role]
@@ -285,7 +292,7 @@ export function TimesheetApp({
     if (view === "admin" && !canViewAdmin) setView("log")
     if (view === "permissions" && (!permissions.delegate_permissions || (role !== "admin" && role !== "manager"))) setView("log")
     if (accessDenied && view === "messages") setView("log")
-    if(view==="accounts"&&(accessDenied||!((permissions.send_to_accounts&&(role==="admin"||role==="manager"))||(permissions.view_accounts&&(role==="admin"||role==="account_manager")))))setView("log")
+    if(view==="accounts"&&(accessDenied||!((permissions.view_accounts&&(role==="admin"||role==="account_manager")))))setView("log")
   }, [canReviewEntries, canViewAdmin, canViewTeamReports, view,permissionsLoaded,permissions.ai_review,permissions.delegate_permissions,permissions.send_to_accounts,permissions.view_accounts,role,accessDenied])
 
   /**
@@ -311,62 +318,44 @@ export function TimesheetApp({
   }
 
   /**
-   * Optimistically updates one entry and rolls back if the API rejects it.
-   *
-   * The user sees edits immediately while the PATCH request runs. If the backend
-   * rejects the change because of validation, permissions, or connectivity, the
-   * previous entry list is restored and a sync error is shown.
-   *
-   * @param id - Entry id to update.
-   * @param patch - Partial entry fields to apply.
-   * @returns Nothing; local state and API sync happen as side effects.
+   * Persists a complete edit or workflow transition without per-keystroke mutation.
+   * Only the confirmed row is replaced; failures never roll back unrelated rows.
+   * @param id - Persisted entry identifier.
+   * @param patch - Explicitly confirmed field or status changes.
+   * @param expectedRevision - Snapshot revision captured at edit/review start.
+   * @returns Promise<void> after server confirmation; rejects on failure.
    */
-  function updateEntry(id: string, patch: Partial<TimeEntry>, expectedRevision?:string) {
-    const previous = entries
-    setEntries((prev) =>
-      prev.map((e) => (e.id === id ? { ...e, ...patch } : e)),
-    )
-
-    fetch(apiPath(`/api/entries/${id}`), {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({...patch,expectedRevision:expectedRevision??entries.find(entry=>entry.id===id)?.revision}),
-    })
-      .then(async (res) => {
-        const data = await res.json()
-        if (!res.ok) throw new Error(data.error ?? "Failed to update entry.")
-        setEntries((prev) =>
-          prev.map((e) => (e.id === id ? data.entry : e)),
-        )
-        setSyncError(null)
+  async function updateEntry(id: string, patch: Partial<TimeEntry>, expectedRevision?: string): Promise<void> {
+    try {
+      const response = await fetch(apiPath(`/api/entries/${id}`), {
+        method: "PATCH",
+        signal: AbortSignal.timeout(30000),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...patch, expectedRevision: expectedRevision ?? entries.find(entry => entry.id === id)?.revision }),
       })
-      .catch((err) => {
-        setEntries(previous)
-        setSyncError(
-          err instanceof Error ? err.message : "Failed to update entry.",
-        )
-      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error ?? "Failed to update entry.")
+      setEntries(previous => role==="manager"&&data.entry.ownerEmail?.toLowerCase()!==userEmail?.toLowerCase()&&data.entry.status!=="submitted" ? previous.filter(entry=>entry.id!==id) : previous.map(entry => entry.id === id ? { ...entry, ...data.entry } : entry))
+      setSyncError(null)
+    } catch (cause) {
+      const error = cause instanceof Error && ["TimeoutError", "AbortError"].includes(cause.name)
+        ? new Error("Request timed out. Refresh entries before retrying; the server may have saved the update.")
+        : cause instanceof Error ? cause : new Error("Failed to update entry.")
+      setSyncError(error.message)
+      throw error
+    }
   }
 
   /**
-   * Moves one entry through the approval workflow.
-   *
-   * Status updates share the same optimistic update path as field edits.
-   * Employees use this to submit draft or rejected rows, while managers and
-   * administrators use it to approve or reject submitted rows.
-   *
-   * @param id - Entry id whose approval status should change.
-   * @param status - New approval status to persist.
-   * @param reviewNote - Optional manager rejection note.
-   * @returns Nothing; local state and API sync happen as side effects.
+   * Awaits an explicit workflow decision using the selected evidence revision.
+   * @param id - Entry identifier.
+   * @param status - Requested workflow state.
+   * @param reviewNote - Optional approval note or required rejection reason.
+   * @param expectedRevision - Evidence revision displayed in the dialog.
+   * @returns Promise<void> after persistence; rejects so dialogs remain open.
    */
-  function changeEntryStatus(
-    id: string,
-    status: EntryStatus,
-    reviewNote?: string,
-    expectedRevision?:string,
-  ) {
-    updateEntry(id, { status, reviewNote },expectedRevision)
+  function changeEntryStatus(id: string, status: EntryStatus, reviewNote?: string, expectedRevision?: string, manager?:string): Promise<void> {
+    return updateEntry(id, { status, reviewNote, ...(manager?{reviewManagerEmail:manager}:{}) }, expectedRevision)
   }
 
   /**
@@ -429,14 +418,14 @@ export function TimesheetApp({
   }
 
   const totalHours = entries.reduce((s, e) => s + (Number(e.hours) || 0), 0)
-  const pendingEntries = entries.filter((entry) => entry.status === "submitted"&&entry.reviewEligible!==false)
+  const pendingEntries = entries.filter((entry) => entry.status === "submitted"&&entry.reviewEligible!==false&&entry.ownerEmail?.toLowerCase()!==userEmail?.toLowerCase())
   const approvedEntries = entries.filter((entry) => entry.status === "approved")
   const rejectedEntries = entries.filter((entry) => entry.status === "rejected")
   const draftEntries = entries.filter((entry) => entry.status === "draft")
 
   const tabs: { key: View; label: string; icon: typeof ListChecks }[] = [
     ...(role==="manager"?[{key:"personal" as const,label:"My managerial time",icon:Clock3}]:[]),
-    ...(!accessDenied&&((permissions.send_to_accounts&&(role==="manager"||role==="admin"))||(permissions.view_accounts&&(role==="account_manager"||role==="admin")))?[{key:"accounts" as const,label:"Business accounts",icon:BarChart3}]:[]),
+    ...(!accessDenied&&((permissions.view_accounts&&(role==="account_manager"||role==="admin")))?[{key:"accounts" as const,label:"Business accounts",icon:BarChart3}]:[]),
     {
       key: "log",
       label: permissions.view_team ? "Team entries" : "My entries",
@@ -451,7 +440,7 @@ export function TimesheetApp({
     ...(canViewAdmin
       ? [{ key: "admin" as const, label: "Admin", icon: ShieldCheck }]
       : []),
-    ...(permissions.delegate_permissions && (role === "admin" || role === "manager") ? [{key:"permissions" as const,label:"Employee rights",icon:KeyRound}] : []),
+    ...(permissions.delegate_permissions && (role === "admin" || role === "manager") ? [{key:"permissions" as const,label:"Manage employees/contractors",icon:KeyRound}] : []),
   ]
 
   return (
@@ -476,18 +465,52 @@ export function TimesheetApp({
         </h1>
       </header>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <Button variant="outline" size="sm" onClick={()=>setWorkspaceWindow("overview")}><Users className="size-4"/>Workspace overview</Button>
-        <Button variant="outline" size="sm" onClick={()=>setWorkspaceWindow("workflow")}><BarChart3 className="size-4"/>Workflow totals</Button>
-        {permissions.create_entries&&<Button variant="outline" size="sm" onClick={()=>setWorkspaceWindow("notes")}><Pencil className="size-4"/>Log time notes</Button>}
-      </div>
-      {canViewAdmin && <AdminWorkspace onDirectory={() => {setView("admin");setDirectoryRequest(value=>value+1)}} onSecurity={() => setTechnologyReports(true)} onLifecycle={()=>setLifecycleOpen(true)}/>}
-      {!accessDenied&&role==="manager"&&permissions.delegate_permissions&&<Button variant="outline" className="w-fit" onClick={()=>setLifecycleOpen(true)}><KeyRound className="size-4"/>Temporary coverage</Button>}
+      {!accessDenied && <WorkspaceSnapshot entries={entries} email={userEmail ?? ""} role={role} loading={loadingEntries} canReview={canReviewEntries || canAIReview} />}
+      {!accessDenied && <nav aria-label="Command groups" className="flex flex-wrap gap-2 border-b pb-3">
+        <Button variant="outline" help="Time capture, personal entries, drafts, and submission controls." aria-haspopup="dialog" onClick={()=>setCommandGroup("time")}><Layers3 className="size-4"/>Timesheets<ChevronRight className="size-4"/></Button>
+        {(canReviewEntries || canAIReview || ((role==="admin"||role==="account_manager")&&permissions.view_accounts)) && <Button variant="outline" help="Review submissions, prepare AI advice, and hand approved evidence to accounts." aria-haspopup="dialog" onClick={()=>setCommandGroup("review")}><CheckCircle2 className="size-4"/>Reviews<ChevronRight className="size-4"/></Button>}
+        <Button variant="outline" help="Workspace information, workflow totals, and authorized reports." aria-haspopup="dialog" onClick={()=>setCommandGroup("insights")}><BarChart3 className="size-4"/>Insights<ChevronRight className="size-4"/></Button>
+        {(canViewAdmin || (role==="manager" && permissions.delegate_permissions)) && <Button variant="outline" help="Authorized people, rights, coverage, and security controls." aria-haspopup="dialog" onClick={()=>setCommandGroup("access")}><ShieldCheck className="size-4"/>Access &amp; security<ChevronRight className="size-4"/></Button>}
+      </nav>}
+      {!accessDenied && commandGroup && <WindowSurface title={{time:"Timesheets",review:"Reviews",insights:"Insights",access:"Access & security"}[commandGroup]} onBack={()=>setCommandGroup(null)}>
+        <section className="min-h-0 w-full overflow-auto bg-white p-4 sm:p-6">
+          <p className="mb-2 text-xs text-muted-foreground">Workspace / {{time:"Timesheets",review:"Reviews",insights:"Insights",access:"Access & security"}[commandGroup]}</p>
+          {commandGroup==="time" && <div className="space-y-5">
+            <h2 className="text-lg font-semibold">Time capture and submissions</h2>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={()=>{setEntriesRefresh(value=>value+1);setCommandGroup(null)}}>Refresh entries</Button>
+              {permissions.create_entries && <Button onClick={()=>setWorkspaceWindow("notes")}><Pencil className="size-4"/>Log time notes</Button>}
+              <Button variant="outline" onClick={()=>{setView(role==="manager"?"personal":"log");setCommandGroup(null)}}><ListChecks className="size-4"/>{role==="manager"?"My managerial time":"My entries"}</Button>
+              {permissions.view_team && <Button variant="outline" onClick={()=>{setView("log");setCommandGroup(null)}}><Users className="size-4"/>Team entries</Button>}
+            </div>
+            {(role==="contractor" || role==="employee" || role==="manager") && <EmployeeWorkspace contractor={role==="contractor"} entries={entries.filter(entry=>entry.ownerEmail?.toLowerCase()===userEmail?.toLowerCase())} selected={personalStatus} onSelect={status=>{setPersonalStatus(status);setView(role==="manager"?"personal":"log");setCommandGroup(null)}}/>}
+          </div>}
+          {commandGroup==="review" && <div className="space-y-5">
+            <h2 className="text-lg font-semibold">Review and handoff</h2>
+            {(canReviewEntries || canAIReview || canViewTeamReports) && <ManagerWorkspace canReview={canReviewEntries} canReports={canViewTeamReports} canAI={canAIReview} pending={pendingEntries.length} entries={pendingEntries} onApprovals={()=>{setView("approvals");setCommandGroup(null)}} onReports={()=>{setView("report");setCommandGroup(null)}} onRecommendation={(entry,decision,reason)=>setSuggestedReview({entry,decision,reason})}/>}
+            {(permissions.view_accounts && (role==="account_manager"||role==="admin")) && <Button variant="outline" onClick={()=>{setView("accounts");setCommandGroup(null)}}><BarChart3 className="size-4"/>Business accounts</Button>}
+          </div>}
+          {commandGroup==="insights" && <div className="space-y-4">
+            <h2 className="text-lg font-semibold">Workspace information and reports</h2>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={()=>setWorkspaceWindow("overview")}><Users className="size-4"/>Workspace overview</Button>
+              <Button variant="outline" onClick={()=>setWorkspaceWindow("workflow")}><BarChart3 className="size-4"/>Workflow totals</Button>
+              {canViewTeamReports && <Button variant="outline" onClick={()=>{setView("report");setCommandGroup(null)}}><BarChart3 className="size-4"/>Reports</Button>}
+            </div>
+          </div>}
+          {commandGroup==="access" && <div className="space-y-4">
+            <h2 className="text-lg font-semibold">People, rights, and security</h2>
+            {canViewAdmin && <AdminWorkspace onDirectory={()=>{setView("admin");setDirectoryRequest(value=>value+1);setCommandGroup(null)}} onSecurity={()=>setTechnologyReports(true)} onLifecycle={()=>setLifecycleOpen(true)}/>}
+            {permissions.delegate_permissions && (role==="manager"||role==="admin") && <Button variant="outline" onClick={()=>{setView("permissions");setCommandGroup(null)}}><KeyRound className="size-4"/>Manage employees/contractors</Button>}
+            {role==="manager" && permissions.delegate_permissions && <Button variant="outline" onClick={()=>setLifecycleOpen(true)}><KeyRound className="size-4"/>Temporary coverage</Button>}
+          </div>}
+        </section>
+      </WindowSurface>}
       {lifecycleOpen&&!accessDenied&&(canViewAdmin||(role==="manager"&&permissions.delegate_permissions))&&<WindowSurface title={canViewAdmin?"Access lifecycle":"Temporary coverage"} onBack={()=>setLifecycleOpen(false)}><section className="min-h-0 w-full overflow-auto bg-white"><AccessLifecyclePanel key={role} admin={canViewAdmin} permissions={permissions}/></section></WindowSurface>}
       {canViewAdmin && technologyReports && <SecurityRiskWindow onClose={() => setTechnologyReports(false)} />}
 
       {workspaceWindow&&<WindowSurface title={workspaceWindow==="notes"?"Log time notes":workspaceWindow==="overview"?"Workspace overview":"Workflow totals"} onBack={()=>setWorkspaceWindow(null)}><section className="flex min-h-0 w-full max-w-6xl flex-col bg-white"><div className="min-h-0 flex-1 overflow-auto p-4">
-      {workspaceWindow==="overview"?<RoleOverview role={role}/>:workspaceWindow==="notes"?<NoteInput onParsed={parsed=>{addParsed(parsed);setWorkspaceWindow(null);setView("log")}}/>:<WorkflowOverview
+      {workspaceWindow==="overview"?<RoleOverview role={role}/>:workspaceWindow==="notes"?<NoteInput onParsed={async parsed=>{await addParsed(parsed);setWorkspaceWindow(null);setCommandGroup(null);setView(role==="manager"?"personal":"log")}}/>:<WorkflowOverview
         approvedCount={approvedEntries.length}
         draftCount={draftEntries.length}
         pendingCount={pendingEntries.length}
@@ -495,15 +518,13 @@ export function TimesheetApp({
         role={role}
       />}
       </div></section></WindowSurface>}
-      {(role === "employee" || role === "contractor") && <EmployeeWorkspace contractor={role==="contractor"} entries={entries} selected={personalStatus} onSelect={setPersonalStatus} />}
-      {role==="manager"&&view==="personal"&&<EmployeeWorkspace entries={entries.filter(entry=>entry.ownerEmail?.toLowerCase()===userEmail?.toLowerCase())} selected={personalStatus} onSelect={setPersonalStatus}/>}
-      {!accessDenied && (canReviewEntries || canAIReview || canViewTeamReports) && <ManagerWorkspace canReview={canReviewEntries} canReports={canViewTeamReports} canAI={canAIReview} pending={pendingEntries.length} entries={pendingEntries} onApprovals={() => setView("approvals")} onReports={() => setView("report")} onRecommendation={(entry,decision,reason) => setSuggestedReview({entry,decision,reason})} />}
-      {suggestedReview && <EntryReviewDialog entry={suggestedReview.entry} decision={suggestedReview.decision} initialNote={suggestedReview.reason} onCancel={() => setSuggestedReview(null)} onConfirm={note => {
-        changeEntryStatus(suggestedReview.entry.id,suggestedReview.decision,note || undefined,suggestedReview.entry.revision)
+      {!accessDenied&&reviewerHelp&&role==="manager"&&permissions.request_review_help&&permissions.delegate_permissions&&permissions.send_messages&&<ReviewerHelpDialog entries={reviewerHelp} email={userEmail??""} encryption={messageEncryption} onClose={()=>setReviewerHelp(null)} onComplete={()=>{setReviewerHelp(null);messageInbox.refresh();setEntriesRefresh(value=>value+1)}}/>}
+      {suggestedReview && <EntryReviewDialog entry={suggestedReview.entry} decision={suggestedReview.decision} initialNote={suggestedReview.reason} onCancel={() => setSuggestedReview(null)} onConfirm={async note => {
+        await changeEntryStatus(suggestedReview.entry.id,suggestedReview.decision,note || undefined,suggestedReview.entry.revision)
         setSuggestedReview(null)
       }} />}
       {accessDenied && <p role="alert">Access is unavailable. Contact your administrator.</p>}
-      {!accessDenied&&view==="approvals"&&(role==="manager"||role==="admin"||role==="account_manager")&&(canReviewEntries||permissions.ai_review)&&<ApprovalSelection entries={pendingEntries} email={userEmail??""} canReview={canReviewEntries} canAI={canAIReview} onUpdated={entry=>setEntries(previous=>previous.map(current=>current.id===entry.id?entry:current))}/>}
+      {!accessDenied&&view==="approvals"&&(role==="manager"||role==="admin"||role==="account_manager")&&(canReviewEntries||permissions.ai_review)&&<ApprovalSelection entries={pendingEntries} email={userEmail??""} canReview={canReviewEntries} canAI={canAIReview} onUpdated={entry=>setEntries(previous=>role==="manager"&&entry.ownerEmail?.toLowerCase()!==userEmail?.toLowerCase()&&entry.status!=="submitted"?previous.filter(current=>current.id!==entry.id):previous.map(current=>current.id===entry.id?entry:current))}/>}
 
       {(loadingEntries || syncError) && (
         <div
@@ -565,6 +586,10 @@ export function TimesheetApp({
 
       {view === "log" || view === "personal" ? (
         <EntriesLog
+          userEmail={userEmail ?? undefined}
+          submissionDestination={role==="manager"?"account_manager":"manager"}
+          canRequestReview={role==="manager"&&permissions.request_review_help&&permissions.delegate_permissions&&permissions.send_messages}
+          onRequestReview={setReviewerHelp}
           entries={view==="personal"?entries.filter(entry=>entry.ownerEmail?.toLowerCase()===userEmail?.toLowerCase()&&(personalStatus==="all"||entry.status===personalStatus)):(role === "employee" || role === "contractor") && personalStatus !== "all" ? entries.filter(entry => entry.status === personalStatus) : entries}
           onUpdate={updateEntry}
           onStatusChange={changeEntryStatus}
@@ -592,6 +617,10 @@ export function TimesheetApp({
           </div>
         ) : (
           <EntriesLog
+          userEmail={userEmail ?? undefined}
+          submissionDestination={role==="manager"?"account_manager":"manager"}
+          canRequestReview={role==="manager"&&permissions.request_review_help&&permissions.delegate_permissions&&permissions.send_messages}
+          onRequestReview={setReviewerHelp}
             entries={pendingEntries}
             onUpdate={updateEntry}
             onStatusChange={changeEntryStatus}
@@ -618,7 +647,7 @@ export function TimesheetApp({
           <ManagerReport entries={entries} />
         )
       ) : view === "accounts" ? (
-        <BusinessAccounts key={`${role}:${permissions.send_to_accounts}:${permissions.view_accounts}:${permissions.review_accounts}:${permissions.ai_accounts}`} canSend={permissions.send_to_accounts&&(role==="manager"||role==="admin")} canReview={permissions.view_accounts&&permissions.review_accounts&&(role==="account_manager"||role==="admin")} canAI={permissions.view_accounts&&permissions.ai_accounts&&(role==="account_manager"||role==="admin")}/>
+        <BusinessAccounts key={`${role}:${permissions.send_to_accounts}:${permissions.view_accounts}:${permissions.review_accounts}:${permissions.ai_accounts}`} canSend={false} canReview={permissions.view_accounts&&permissions.review_accounts&&(role==="account_manager"||role==="admin")} canAI={permissions.view_accounts&&permissions.ai_accounts&&(role==="account_manager"||role==="admin")} canAuthorize={permissions.authorize_payouts}/>
       ) : view === "messages" ? (
         <MessagesPanel inbox={messageInbox} canSend={permissions.send_messages && (role === "admin" || role === "manager")} />
       ) : view === "permissions" ? (
@@ -1031,7 +1060,7 @@ function AdminPanel({ role, rightsOnly = false,openRequest = 0 }: { role: UserRo
         {!rightsOnly&&<Button variant="outline" size="sm" onClick={openActivityWindow}><Activity className="size-4"/>View all app activity</Button>}
         <span className="text-xs text-muted-foreground">{users.length} actors · {users.filter(user=>user.role==="admin"&&user.accessStatus==="active").length} active admins</span>
       </div>
-      {directoryOpen&&<WindowSurface title={rightsOnly?"Employee rights":"User directory"} onBack={()=>setDirectoryOpen(false)}>
+      {directoryOpen&&<WindowSurface title={rightsOnly?"Manage employees/contractors":"User directory"} onBack={()=>setDirectoryOpen(false)}>
       <section className="flex min-h-0 w-full flex-col overflow-hidden bg-white">
         <div className="border-b border-slate-200 bg-white px-4 py-3">
         <div className="flex items-center gap-2">

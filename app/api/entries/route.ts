@@ -10,6 +10,7 @@ import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { getEffectiveUserRole } from "@/lib/access"
 import { canReviewRole } from "@/lib/review-policy"
+import { createReviewAccess } from "@/lib/review-access"
 import { getAuditContext } from "@/lib/audit"
 import {
   clearTimeEntries,
@@ -53,7 +54,7 @@ async function getAccess() {
   return {
     email,
     role,
-    includeAll: permissions.view_team||(role==="account_manager"&&permissions.review_manager_entries),
+    includeAll: role==="manager"||permissions.view_team||(role==="account_manager"&&permissions.view_manager_entries),
     permissions,
   }
 }
@@ -75,15 +76,11 @@ export async function GET() {
     }
 
     let entries = await listTimeEntries(access.email, access.includeAll)
-    if(access.role==="account_manager"){
-      const scoped=[]
-      for(const entry of entries){if(entry.ownerEmail&&access.permissions.review_manager_entries&&await getEffectiveUserRole(entry.ownerEmail)==="manager")scoped.push(entry)}
-      entries=scoped
-    }
+    const resolve = createReviewAccess(access.email, access)
     const eligible=[]
     for(const entry of entries){
-      const ownerRole=entry.ownerEmail?await getEffectiveUserRole(entry.ownerEmail):null
-      eligible.push({...entry,reviewEligible:entry.ownerEmail?.toLowerCase()!==access.email.toLowerCase()&&canReviewRole(access.role,ownerRole)})
+      const scope = await resolve(entry)
+      if(scope.visible)eligible.push({...entry,reviewEligible:scope.reviewable})
     }
     return Response.json({ entries:eligible },{headers:{"Cache-Control":"no-store"}})
   } catch (err) {
@@ -161,6 +158,7 @@ export async function DELETE(req: Request) {
     }
     if (!access.permissions.delete_entries) return Response.json({error:"Forbidden."},{status:403})
 
+    if(access.role==="manager"&&access.includeAll)return Response.json({error:"Managers must use individual authorized entry controls; hidden records cannot be bulk-cleared."},{status:403})
     await clearTimeEntries(access.email, access.includeAll)
     await recordAuditEvent({
       actorEmail: access.email,

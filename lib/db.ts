@@ -31,6 +31,8 @@ type TimeEntryRow = {
   id: string
   updated_at?: string | Date
   owner_email?: string
+  review_manager_email?: string | null
+  payout_eligible_at?: string | Date | null
   contractor: string
   work_date: string | Date
   hours: string | number
@@ -117,6 +119,9 @@ type ManagedAccessUserRow = {
 }
 
 export type AuditAction =
+  | "entry_review_requested"
+  | "account_timesheets_returned"
+  | "account_eligibility_authorized"
   | "account_lifecycle_updated"
   | "temporary_assignment_created"
   | "temporary_assignment_revoked"
@@ -183,6 +188,8 @@ function toTimeEntry(row: TimeEntryRow): TimeEntry {
   return {
     id: row.id,
     ownerEmail: row.owner_email,
+    reviewManagerEmail: row.review_manager_email ?? null,
+    payoutEligible: !!row.payout_eligible_at,
     contractor: row.contractor,
     date:
       row.work_date instanceof Date
@@ -289,7 +296,10 @@ export function ensureTimeEntriesTable() {
     `
     await sql`
       ALTER TABLE time_entries
-      ADD COLUMN IF NOT EXISTS owner_email text
+      ADD COLUMN IF NOT EXISTS owner_email text,
+      ADD COLUMN IF NOT EXISTS review_manager_email text,
+      ADD COLUMN IF NOT EXISTS payout_eligible_at timestamptz,
+      ADD COLUMN IF NOT EXISTS payout_eligible_by text
     `
     await sql`
       ALTER TABLE time_entries
@@ -820,6 +830,8 @@ export async function listTimeEntries(ownerEmail: string, includeAll = false) {
     SELECT
       id,
       owner_email,
+      review_manager_email,
+      payout_eligible_at,
       contractor,
       work_date,
       hours,
@@ -882,6 +894,8 @@ export async function createTimeEntries(
       RETURNING
         id,
         owner_email,
+      review_manager_email,
+      payout_eligible_at,
         contractor,
         work_date,
         hours,
@@ -890,7 +904,8 @@ export async function createTimeEntries(
         status,
         reviewed_by,
         reviewed_at,
-        review_note
+        review_note,
+        updated_at::text AS updated_at
     `
     created.push(toTimeEntry((rows as TimeEntryRow[])[0]))
   }
@@ -921,6 +936,8 @@ export async function getTimeEntry(
     SELECT
       id,
       owner_email,
+      review_manager_email,
+      payout_eligible_at,
       contractor,
       work_date,
       hours,
@@ -961,6 +978,7 @@ export async function updateTimeEntry(
   patch: Partial<ParsedEntry> & {
     status?: EntryStatus
     reviewNote?: string | null
+    reviewManagerEmail?: string | null
   },
   includeAll = false,
   reviewerEmail?: string,
@@ -977,6 +995,7 @@ export async function updateTimeEntry(
       project = COALESCE(${patch.project ?? null}, project),
       description = COALESCE(${patch.description ?? null}, description),
       status = COALESCE(${patch.status ?? null}, status),
+      review_manager_email = CASE WHEN ${patch.reviewManagerEmail !== undefined} THEN ${patch.reviewManagerEmail ?? null} ELSE review_manager_email END,
       reviewed_by = CASE
         WHEN ${patch.status ?? null} IN ('approved', 'rejected')
         THEN ${reviewerEmail ?? null}
@@ -1002,6 +1021,7 @@ export async function updateTimeEntry(
     WHERE id = ${id}
       AND (${includeAll} OR owner_email = ${ownerEmail})
       AND (${expectedRevision??null}::timestamptz IS NULL OR updated_at=${expectedRevision??null}::timestamptz)
+      AND payout_eligible_at IS NULL
       AND (${patch.status ?? null} NOT IN ('approved', 'rejected') OR ${patch.status ?? null} IS NULL
         OR (status = 'submitted' AND lower(owner_email) <> lower(${ownerEmail}) AND ${reviewerEmail ?? null} IS NOT NULL))
       AND (lower(owner_email) <> lower(${ownerEmail}) OR status IN ('draft','rejected')
@@ -1010,6 +1030,8 @@ export async function updateTimeEntry(
     RETURNING
       id,
       owner_email,
+      review_manager_email,
+      payout_eligible_at,
       contractor,
       work_date,
       hours,
@@ -1047,6 +1069,7 @@ export async function deleteTimeEntry(
   await sql`
     DELETE FROM time_entries
     WHERE id = ${id}
+      AND payout_eligible_at IS NULL
       AND (${includeAll} OR owner_email = ${ownerEmail})
       AND (lower(owner_email) <> lower(${ownerEmail}) OR status IN ('draft','rejected'))
   `
@@ -1069,6 +1092,7 @@ export async function clearTimeEntries(ownerEmail: string, includeAll = false) {
   await sql`
     DELETE FROM time_entries
     WHERE (${includeAll} OR owner_email = ${ownerEmail})
+      AND payout_eligible_at IS NULL
       AND (lower(owner_email) <> lower(${ownerEmail}) OR status IN ('draft','rejected'))
   `
 }

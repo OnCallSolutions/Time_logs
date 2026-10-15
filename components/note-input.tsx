@@ -35,13 +35,14 @@ export function NoteInput({
   const [notes, setNotes] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [sampleCount, setSampleCount] = useState("6")
   /**
    * Loads synthetic examples scoped by the authenticated server identity.
    * @returns Promise<void> after replacing notes or displaying a safe error.
    */
   async function loadSample(){
     setLoading(true);setError(null)
-    try{const response=await fetch(apiPath("/api/samples"),{cache:"no-store"});const data=await response.json();if(!response.ok)throw new Error(data.error);setNotes(data.notes)}
+    try{const response=await fetch(apiPath(`/api/samples?count=${sampleCount}`),{cache:"no-store"});const data=await response.json();if(!response.ok)throw new Error(data.error);setNotes(data.notes)}
     catch(error){setError(error instanceof Error?error.message:"Samples unavailable.")}finally{setLoading(false)}
   }
 
@@ -94,6 +95,12 @@ export function NoteInput({
             </p>
           </div>
         </div>
+        <div className="flex flex-wrap items-center gap-2">
+        <select aria-label="Sample entry count per person" value={sampleCount} disabled={loading} onChange={event=>setSampleCount(event.target.value)} className="rounded-md border border-input bg-white px-2 py-2 text-sm">
+          <option value="3">3 entries / person</option>
+          <option value="6">6 entries / person</option>
+          <option value="12">12 entries / person</option>
+        </select>
         <Button
           variant="ghost"
           size="sm"
@@ -104,6 +111,7 @@ export function NoteInput({
           <WandSparkles className="size-3.5" aria-hidden="true" />
           Try a sample
         </Button>
+        </div>
       </div>
 
       <label htmlFor="notes" className="sr-only">

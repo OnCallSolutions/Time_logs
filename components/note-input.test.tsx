@@ -13,9 +13,16 @@ it("loads sample identity from the server without supplying another person's nam
   vi.stubGlobal("fetch",request);render(<NoteInput onParsed={()=>{}}/>)
   await userEvent.click(screen.getByRole("button",{name:"Try a sample"}))
   expect(screen.getByRole("textbox",{name:"Time worked notes"})).toHaveValue("Own Person: 2 hours on Sample Project")
-  expect(request).toHaveBeenCalledWith(expect.stringContaining("/api/samples"),{cache:"no-store"})
+  expect(request).toHaveBeenCalledWith(expect.stringContaining("/api/samples?count=6"),{cache:"no-store"})
 })
 it("does not expose extraction for account-manager sample preview",()=>{
   render(<NoteInput previewOnly onParsed={()=>{}}/>)
   expect(screen.queryByRole("button",{name:"Extract entries"})).not.toBeInTheDocument()
+})
+it("requests the selected multi-entry sample size",async()=>{
+  const request=vi.fn(async()=>new Response(JSON.stringify({notes:"Twelve sample entries"})))
+  vi.stubGlobal("fetch",request);render(<NoteInput onParsed={()=>{}}/>)
+  await userEvent.selectOptions(screen.getByLabelText("Sample entry count per person"),"12")
+  await userEvent.click(screen.getByRole("button",{name:"Try a sample"}))
+  expect(request).toHaveBeenCalledWith(expect.stringContaining("count=12"),{cache:"no-store"})
 })

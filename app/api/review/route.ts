@@ -6,7 +6,7 @@
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { getEffectiveUserRole } from "@/lib/access"
-import { canReviewRole } from "@/lib/review-policy"
+import { createReviewAccess } from "@/lib/review-access"
 import { listTimeEntries } from "@/lib/db"
 import { generateText, Output } from "ai"
 import { z } from "zod"
@@ -32,12 +32,10 @@ export async function POST(req?:Request): Promise<Response> {
     const text=req?await req.text():""
     const input=z.object({ids:z.array(z.string().uuid()).min(1).max(50).optional()}).parse(text?JSON.parse(text):{})
     const pending:TimeEntry[]=[]
-    const ownerRoles=new Map<string,Awaited<ReturnType<typeof getEffectiveUserRole>>>()
-    for(const entry of await listTimeEntries(email,access.permissions.view_team||accountReview)){
+    const resolve=createReviewAccess(email,access)
+    for(const entry of await listTimeEntries(email,access.role==="manager"||access.permissions.view_team||accountReview)){
       if(!entry.ownerEmail||entry.status!=="submitted"||entry.ownerEmail.toLowerCase()===email.toLowerCase()||(input.ids&&!input.ids.includes(entry.id)))continue
-      const owner=entry.ownerEmail.toLowerCase()
-      if(!ownerRoles.has(owner))ownerRoles.set(owner,await getEffectiveUserRole(owner))
-      if(!canReviewRole(access.role,ownerRoles.get(owner)??null))continue
+      if(!(await resolve(entry)).visible)continue
       pending.push(entry)
     }
     if(input.ids?.some(id=>!pending.some(entry=>entry.id===id)))return Response.json({error:"Selection is outside your review lane."},{status:403})
@@ -53,6 +51,8 @@ export async function POST(req?:Request): Promise<Response> {
     const latestAccess=await getEffectivePermissions(email)
     const permitted=((latestAccess.role==="manager"||latestAccess.role==="admin")&&latestAccess.permissions.ai_review)||(latestAccess.role==="account_manager"&&latestAccess.permissions.review_manager_entries&&latestAccess.permissions.ai_accounts)
     if(!permitted||latestAccess.role!==access.role)return Response.json({error:"Your review access changed during analysis. Refresh your workspace."},{status:403})
+    const latestResolve=createReviewAccess(email,latestAccess)
+    for(const entry of entries){if(!(await latestResolve(entry)).visible)return Response.json({error:"Your evidence access changed during analysis."},{status:403})}
     const latest=await listTimeEntries(email,access.permissions.view_team||accountReview)
     if(entries.some(entry=>!latest.some(current=>current.id===entry.id&&JSON.stringify(current)===JSON.stringify(entry))))return Response.json({error:"Evidence changed during analysis. Refresh and review again."},{status:409})
     return Response.json({...output,recommendations:output.recommendations.map(item=>({...item,revision:entries.find(entry=>entry.id===item.entryId)?.revision})),reviewedCount:entries.length,totalPending:pending.length},{headers:{"Cache-Control":"no-store"}})

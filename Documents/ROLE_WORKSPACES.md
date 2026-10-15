@@ -1,71 +1,58 @@
 # Role Workspaces
 
-AI prepares work; people review evidence and explicitly confirm consequential actions. No existing role capability has been removed. Branches are code ownership boundaries, not authorization boundaries: server-assigned roles and database ownership still control access.
+All roles use the integrated application, not separate branches. APIs enforce
+ownership and live permissions; hiding a button is not authorization.
 
-| Role branch | Existing capabilities retained | Added in this iteration |
-| --- | --- | --- |
-| `employee` | AI note extraction, personal drafts, edit/delete eligible records, submit/recall, correct rejected entries, persistent profile | Personal status shortcuts and correction queue |
-| `manager` | Note extraction, team entries, existing edit/delete/clear permissions, approve/reject, team reports, profile | Approval-first landing view, AI review preparation, confirmed decisions with editable notes and required rejection reasons |
-| `admin` | All existing entry/report/review actions, directory and access management, explicit Edit/Save, audit metadata, IP details, profile | Technology-manager landing view and direct employee-access/security-report shortcuts |
+| Role | Responsibilities |
+| --- | --- |
+| Contractor | Outsourced work, own-name samples, drafts, submissions, corrections, project grouping |
+| Employee | Internal personal time and explicitly delegated operational controls |
+| Manager | Operational review, AI suggestions, confirmed decisions, delegation, messages, own-time lane |
+| Account Manager | Assigned evidence triage, advisory AI, separately granted manager-timesheet review |
+| Admin | Roles/rights, lifecycle, audit details, stored security reports |
 
-Manager AI review examines up to 50 submitted entries. Its recommendations are temporary, advisory, and based on recorded data; the model cannot verify that work occurred or invent company policy. Uncertain suggestions offer explicit approval/rejection review choices. Employees need explicitly granted AI review rights to call this endpoint. Entry text is treated as untrusted evidence. Existing server workflow checks still apply when a human confirms a decision.
+## Dynamic Rights
 
-## Dynamic Rights and Messages
+Admins use Edit and Save to persist role/access/control overrides. Employee rights
+lists every actor; managers edit only eligible active employee/contractor operational
+rights they hold. They cannot promote roles, unblock accounts, or delegate financial,
+technical-admin, AI, messaging, or delegation authority through this editor.
 
-Contractors are outsourced workers; employees are internal staff. Both retain
-their personal time-entry workflows. Legacy stored `user` assignments resolve to
-`contractor`. Account Manager is a separate admin-assigned business-account role,
-without timesheet mutation or operational approval. Financial review and release
-of funds remain planned; see [BUSINESS_ACCOUNTS.md](BUSINESS_ACCOUNTS.md).
+Same-browser events/BroadcastChannel refresh controls; other sessions poll every
+15 seconds and on focus. APIs enforce changes immediately. Serializable access
+updates preserve at least one active admin; environment recovery admins are protected.
 
-Admins edit individual control permissions in the existing access editor and click Save. Rights are stored as JSONB overrides in `managed_user_access`; role defaults preserve existing functionality until an explicit override is saved. Same-browser workspaces refresh immediately through local events/BroadcastChannel; other devices refresh every 15 seconds and on browser focus. Routes enforce current database rights on each request, so stale buttons do not bypass revocation. Technical-admin controls remain admin-only.
+## Review and Accounts
 
-Employee rights lists every actor ordered by seniority. Managers edit active
-employee/contractor rows through a full-screen rights window and Save; other roles
-and inactive rows stay visible but read-only. They may grant only workflow rights
-they hold and cannot promote roles, assign account managers, unblock accounts, or
-delegate delegation/message-sending authority. Admins use the complete directory
-editor for all roles. Team visibility and review remain separate rights.
-Concurrent blocking/promotion prevents delegation from overwriting account state.
+Manager timesheets require an account manager with `review_manager_entries`.
+Another manager or admin cannot approve them. Self-review remains prohibited.
+Account managers cannot create/edit/delete/submit timesheets or acquire ordinary
+operational review through generic overrides.
 
-Managers/admins with sending rights use the top-right Messages icon, then New
-message, select the broadcast audience or an eligible employee/contractor, and Send.
-New messages require participant encryption setup; see `MESSAGING_SECURITY.md`.
-Message settings holds recovery and identity controls. All active accounts retain
-their scoped inbox, with ten-second/focus refresh and delivery/read receipts.
-Broadcasts remain scoped to original encrypted participants; private messages stay
-scoped to sender/recipient. Sends, edits, deletions, and encryption setup are audited
-without recording plaintext or recovery secrets. Automatic trusted-device unlocking
-is not yet implemented.
+Operational AI belongs to the authorized manager/admin lane. An employee flag
+alone does not grant that endpoint. Manager-timesheet AI requires
+`review_manager_entries` and `ai_accounts`. Advice is revision-bound and
+requires explicit human decisions.
 
-Access updates use a serializable database transaction to preserve at least one active administrator, including concurrent edits. Environment-configured `ADMIN_EMAILS` remain protected recovery administrators; configure at least one valid recovery identity before deployment. Application guards cannot prevent an operator from removing deployment configuration or manually corrupting database records outside the app.
+Approved contractor/employee evidence is explicitly handed to active account
+managers. Triage does not release funds. See [account review](ACCOUNT_REVIEW.md).
 
-Admin security AI reports remain stored in Neon and generated by the existing scheduled monitoring endpoint. Opening a report never changes permissions. Employee extraction continues to create drafts for review before submission.
+## Messages and Acceptance
 
-## Proposed Next Additions
+The top-right chat icon shows unread counts. Encryption connects automatically
+after Microsoft sign-in; there is no normal recovery/unlock form. Each recipient
+must sign in once to enroll. Only authorized participants can read conversations.
+See [messaging security](MESSAGING_SECURITY.md).
 
-- Employee: AI clarification questions for ambiguous notes and summaries of correction reasons before resubmission.
-- Manager: documented company policies supplied to AI, saved review batches, and risk-ranked queues with evidence.
-- Technology manager: service health indicators, AI failure notifications, and human-reviewed security remediation plans. Never expose infrastructure secrets or let AI grant permissions automatically.
+Run `pnpm verify` and `pnpm test:e2e` from the repository root. Use distinct
+accounts and browser profiles for all five roles at `/tanovo-time`.
 
-## Local Testing
+- Contractor/employee: own samples, separate work units, submit/recall/correct, ownership isolation.
+- Manager: explicit approve/reject, required reasons, cancel without mutation, no self-review.
+- Account manager: assigned scope, note/version checks, separate manager-review permission.
+- Admin: unsaved edits, explicit Save, last-admin protection, full audit details.
+- Cross-role: change rights while another session is open; verify refresh and API denial.
+- Messaging: automatic connection, enrollment failure, audience isolation, receipts, edit/delete.
 
-Use distinct Microsoft test accounts with employee, manager, and admin assignments. Assign roles with the existing administrator Edit/Save flow. Environment-configured recovery admins remain admins; use a separate account to test lower privilege roles. Client parameters cannot grant roles.
-
-Run `pnpm verify` and `pnpm test:e2e` on `Development`. Focused tests are:
-
-```powershell
-pnpm test -- components/employee-workspace.test.tsx
-pnpm test -- components/manager-workspace.test.tsx app/api/review/route.test.ts
-pnpm test -- components/admin-workspace.test.tsx components/timesheet-app.test.tsx
-pnpm test -- components/role-navigation.test.tsx
-pnpm test -- app/api/delegation/route.test.ts app/api/messages/route.test.ts lib/permissions.test.ts
-```
-
-For each role branch: stop the running server, `git switch employee` (or `manager` / `admin`), run `pnpm build`, then `pnpm start`. Use that branch's `basePath` from `next.config.mjs`, not Development's rebranded path. Unmigrated role branches still use `/timelog`. Rebuild after switching branches so production output matches the checkout. Tests use fixtures and mocked AI; testing real AI review requires configured AI Gateway credentials. See [URL_CONFIGURATION.md](URL_CONFIGURATION.md) for port and callback rules.
-
-Employee checklist: extract notes, review drafts, submit, recall, filter corrections, resubmit, and verify other employees' records/admin screens are unavailable. Manager checklist: prepare AI review, inspect suggestions, cancel without mutation, approve explicitly, reject with a reason, and verify team reports remain available. Admin checklist: open the directory, edit without saving, save explicitly, inspect compact audit rows/full details, and open stored AI security reports.
-
-`employee`, `manager`, and `admin` are retained feature branches with remote tracking, integrated into `Development`. Check `git status` for unpublished local changes. Future feature pull requests target `Development`; releases go from `Development` to `main`.
-
-Additional manual checks: keep an employee session open while an admin grants/revokes a control; verify the button appears/disappears after refresh. Verify server requests fail after revocation even before UI refresh. Delegate approval plus team visibility and confirm employee review appears without technical-admin access. Send one private message and one broadcast; sign in as a different employee and confirm only the broadcast is visible. Automated tests mock database and AI responses; live Neon/Azure/AI integration still requires authorized test accounts.
+Mocks do not replace live Microsoft, database, AI, or multi-device acceptance.
+See [testing](TESTING.md) and [URLs](URL_CONFIGURATION.md).

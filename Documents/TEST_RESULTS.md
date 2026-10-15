@@ -1,256 +1,68 @@
-# Tanovo Time Test Results
+# Verification Record and Acceptance Worksheet
 
-Date:
-Tester:
-Environment:
-Build/commit:
+## Recorded Snapshot
 
-## Summary
+2026-10-15: integrated Development application before this documentation refresh.
+These results do not certify later changes or a deployed production environment.
 
-| Area | Result | Notes |
+| Check | Recorded result |
+| --- | --- |
+| Route type generation | Passed |
+| Explicit TypeScript validation | Passed |
+| Vitest | 187 tests passed across 53 files at the original snapshot |
+| Production build | Passed |
+| Authorized database reset | All 12 public application tables verified empty in the transaction; schema preserved |
+| Production deployment | Not performed/verified by these checks |
+| Live Microsoft, AI, multi-device acceptance | Not certified by mocked tests |
+
+The reset targeted the database referenced by this repo's `.env.local`, not
+Vercel logs, Entra records, or provider backups. Later use can create data again.
+Environment lists remain; database-managed rights need configuring again.
+
+## New Run Record
+
+Entry-editor regression verification on 2026-10-15: 203 tests passed across 54
+files, with explicit TypeScript validation passing. Disposable Playwright checks
+used the actual components with synthetic local state at desktop/mobile sizes:
+local typing, Cancel, Save, grouped identity, approval/rejection, and visible
+confirmation controls passed. This was not a live authenticated database test.
+The final production build and anonymous Microsoft sign-in browser smoke test
+also passed. Live signed-in review and AI-provider acceptance remain separate.
+
+Landing/submission regression verification on 2026-10-15: 224 tests passed across
+57 files, with explicit TypeScript validation passing. Disposable browser checks
+passed at desktop/mobile sizes for grouped commands, nested Back navigation,
+owned selection, cancel without mutation, AI preparation without submission,
+confirmed bulk submission, manager-to-account-manager routing, and admin controls.
+These browser requests used synthetic in-memory responses; live AI and authenticated
+database acceptance are not implied.
+The final `pnpm verify` gate passed typecheck, all tests, and the production build.
+Read-only AI preparation cancellation is tested; confirmed writes remain protected
+from dismissal while in progress.
+
+Record date, tester, branch/commit, environment, app URL, commands, and safe failure
+summaries. Use Passed / Failed / Not tested. Never include credentials, connection
+strings, private keys, or message plaintext. Do not carry results forward without rerunning.
+
+| Area | Required acceptance cases | New result |
 | --- | --- | --- |
-| Local build | Not tested |  |
-| Local authentication | Not tested |  |
-| Logout/login back in | Not tested |  |
-| Allowlist blocking | Not tested |  |
-| Role access | Not tested |  |
-| Neon persistence | Not tested |  |
-| API protection | Not tested |  |
-| Production smoke test | Not tested |  |
-
-Ready for production:
-
-## Environment Configuration
-
-| Key | Local present | Vercel present | Notes |
-| --- | --- | --- | --- |
-| DATABASE_URL        |  |  |  |
-| AI_GATEWAY_API_KEY |  |  |  |
-| AUTH_SECRET |  |  |  |
-| AUTH_URL |  |  |  |
-| AUTH_MICROSOFT_ENTRA_ID_ID |  |  |  |
-| AUTH_MICROSOFT_ENTRA_ID_SECRET |  |  |  |
-| AUTH_MICROSOFT_ENTRA_ID_ISSUER |  |  |  |
-| ALLOWED_EMAILS |  |  |  |
-| ADMIN_EMAILS |  |  |  |
-| MANAGER_EMAILS |  |  |  |
-| CONTRACTOR_EMAILS |  |  |  |
-
-## 1. Build And Startup
-
-Commands:
-
-```powershell
-pnpm exec tsc --noEmit
-pnpm build
-pnpm start
-```
-
-Expected:
-
-- TypeScript passes.
-- Production build passes.
-- App opens at `http://localhost:3000/tanovo-time`.
-- Sign-in screen is shown.
-
-Actual:
-
-Pass/Fail:
-
-Notes:
-
-## 2. Allowed User Login
-
-Account used:
-
-Expected:
-
-- Microsoft login succeeds.
-- User returns to `/tanovo-time`.
-- App loads the timesheet.
-- Header shows the signed-in user and role.
-
-Actual:
-
-Role shown:
-
-Pass/Fail:
-
-Notes:
-
-## 3. Logout And Login Back In
-
-Account used:
-
-Expected:
-
-- Clicking Sign out returns to the sign-in screen.
-- User can sign in again.
-- Session is restored only after signing in again.
-
-Actual:
-
-Pass/Fail:
-
-Notes:
-
-## 4. Unapproved User Blocking
-
-Account used:
-
-Expected:
-
-- Microsoft login may succeed.
-- App shows `Access not approved`.
-- Timesheet is not shown.
-- Entries API does not return data.
-
-Actual:
-
-Pass/Fail:
-
-Notes:
-
-## 5. Role Access
-
-| Account | Expected role | Role shown | Expected access | Actual access | Pass/Fail |
-| --- | --- | --- | --- | --- | --- |
-|  | admin |  | See/manage all entries |  |  |
-|  | manager |  | See/manage all entries |  |  |
-|  | worker |  | See/manage own entries only |  |  |
-|  | user |  | See/manage own entries only |  |  |
-|  | unapproved |  | Blocked |  |  |
-
-Notes:
-
-## 6. Timesheet Save Test
-
-Sample notes:
-
-```text
-Maria Alvarez: Mon worked 9-5 on the Acme website redesign, Tue only a half day (sick).
-Deepak logged full days Wednesday and Thursday building the payments API for Northwind.
-Sarah — Friday, roughly 6 hrs, QA testing + a client call for the Acme project.
-Tom did 3 hours of on-call support yesterday, nothing else this week.
-```
-
-Expected:
-
-- AI extraction succeeds.
-- Entries appear in the table.
-- Refreshing the page keeps the entries.
-- Entries belong to the signed-in user.
-
-Actual:
-Entry count:
-Pass/Fail:
-Notes:
-## 7. Neon Database Verification
-Command:
-```powershell
-pnpm db:entries
-```
-Expected:
-
-- `time_entries` rows are visible.
-- New rows match the saved app entries.
-- Rows include expected contractor/project/hour data.
-
-Actual:
-
-Pass/Fail:
-
-Notes:
-
-## 8. Direct API Access While Logged Out
-
-Command:
-
-```powershell
-Invoke-WebRequest http://localhost:3000/tanovo-time/api/entries -SkipHttpErrorCheck
-```
-
-Expected:
-
-- Status is `401`.
-- Response does not include saved entries.
-
-Actual:
-
-Pass/Fail:
-
-Notes:
-
-## 9. Worker Isolation
-
-Worker A account:
-
-Worker B account:
-
-Expected:
-
-- Worker A sees only Worker A entries.
-- Worker B sees only Worker B entries.
-- Admin/manager can see both users' entries.
-
-Actual:
-
-Pass/Fail:
-
-Notes:
-
-## 10. Edit/Delete Permissions
-
-Expected:
-
-- Worker can edit/delete own entries.
-- Worker cannot edit/delete another user's entries.
-- Admin/manager can edit/delete any entry.
-
-Actual:
-
-Pass/Fail:
-
-Notes:
-
-## 11. Production Smoke Test
-
-Production URL:
-
-Expected:
-
-- Production sign-in works.
-- Logout works.
-- Login back in works.
-- Allowed users can access the app.
-- Unapproved users are blocked.
-- Entries save to Neon.
-- Refresh keeps entries.
-
-Actual:
-
-Pass/Fail:
-
-Notes:
-
-## 12. Security Checklist
-
-| Check | Result | Notes |
-| --- | --- | --- |
-| `.env.local` is not committed | Not tested |  |
-| No secrets are present in committed files | Not tested |  |
-| Azure redirect URI matches local URL | Not tested |  |
-| Azure redirect URI matches production URL | Not tested |  |
-| API blocks logged-out users | Not tested |  |
-| API blocks unapproved users | Not tested |  |
-| Worker cannot see other worker data | Not tested |  |
-| Admin/manager can see all entries | Not tested |  |
-| Production env vars are set in Vercel | Not tested |  |
-
-## Known Issues
-
-- 
-
-## Follow-Ups
-
-- 
+| Authentication | Exact callback, allowed/denied accounts, logout/reauthentication | Not tested |
+| Contractor | Own-name samples, drafts, project work units, submission, ownership | Not tested |
+| Employee | Personal workflow and explicitly delegated controls | Not tested |
+| Manager | Selection, confirmation/cancel, rejection reason, no self-review | Not tested |
+| Account manager | Assigned scope, triage notes/version checks, manager-review grant | Not tested |
+| Admin | Edit/Save, revocation, last-admin protection | Not tested |
+| Lifecycle | Cutoff, suspension, reactivation, temporary grant expiry | Not tested |
+| Messaging | Automatic enrollment, audiences, receipts, one-hour edit/delete | Not tested |
+| Devices | Future-message access, unavailable history, no plaintext fallback | Not tested |
+| AI | Correct lane, safe failures, stale-source rejection, human confirmation | Not tested |
+| Accounts | Contractor/employee handoff, stale evidence, no payment execution | Not tested |
+| Audit/security | Compact rows, selected IP/JSON, admin-only reports | Not tested |
+| Responsive UI | Mobile/desktop, windows, Back, scrolling, visible actions | Not tested |
+| Deployment | Intended commit, environment scope, live smoke test | Not tested |
+
+## Release Decision
+
+Record unresolved failures and the approving reviewer. Builds do not replace
+typechecks, authorization tests, live integration checks, or independent
+cryptographic review. See [testing](TESTING.md).

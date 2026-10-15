@@ -1,39 +1,35 @@
-# Branch Responsibilities
+# Branch and Release Ownership
 
-Current policy: retain only `main` and `Development`, after all feature commits
-are integrated into Development. The feature-branch descriptions below record
-historical ownership and do not override the current two-branch policy.
+Only `Development` and `main` are retained locally and remotely. All feature
+branches were integrated and retired; their commits remain in Git history.
 
-- `employee`: personal employee workflow controls and AI-assisted draft review.
-- `manager`: team review, advisory AI recommendations, and explicit approval/rejection dialogs.
-- `admin`: technology management, access administration, and security-report navigation.
+| Branch | Responsibility |
+| --- | --- |
+| `Development` | Integrated UI, business logic, tests, and documentation |
+| `main` | Reviewed releases, receiving Development-to-main pull requests |
 
-`Development` is the shared source of truth for integrated work. Create future feature branches from its latest commit and open feature pull requests targeting `Development`. After review and testing, release changes through a pull request from `Development` to `main`. Keep feature branches after integration; do not merge feature branches directly into `main`.
+Runtime roles are authorization boundaries, not Git branches. Do not follow old
+instructions to check out role, UI, messages, security, testing, or rebrand branches.
 
-- `audit_logging`: audit capture, white admin activity views, and event details. IP addresses appear only in selected event details.
-- `security`: builds on the admin branch; advisory AI assessments and future server-side cybersecurity controls. Assessments never automatically grant, revoke, or block access.
-- `Per_user_entries` was retired after its commits were preserved in the three role branches. New feature work belongs in `employee`, `manager`, or `admin`.
-- `user_Interface`: shared appearance and responsive layout.
-- `testing`: external testing tools and automation, including the richer live table and test explanations.
-- `messages`: messaging logic and chat controls; merged into remote Development at `8463b58` and retained.
-- `database_management`: local, unmerged database reliability and AI-readiness groundwork.
-- `main`: reviewed releases.
-- `Development`: integrated UI, employee workflows, administration, security monitoring, and testing tools.
+## Release Process
 
-Use the relevant active feature branch for new work, then integrate into
-`Development`. Role changes do not require a separate branch per runtime role.
-Contractor, employee, manager, account manager, and admin are authorization roles,
-not deployment environments. Development and branches created from its rebranded
-code use `/tanovo-time`; unchanged older branches retain their own routes.
-The historical remote rebrand branch is now `rebrand`; PR #5 is closed as
-superseded. Its older implementation does not replace Development functionality.
+1. Review the integrated diff and preserve unrelated work.
+2. Generate route types if needed; run typecheck, tests, and production build.
+3. Validate affected roles and live integrations using separate test accounts.
+4. Open a reviewed PR from Development to main.
+5. Verify the deployed commit and configuration independently.
 
-# Storage and Configuration
+Automatic Vercel Git deployment is enabled only for main in `vercel.json`.
+Deploy Development Preview manually from the intended commit. A merge or build
+does not certify a production deployment.
 
-`audit_events` stores actor, action, target, timestamp, request IP, user agent, and sanitized metadata. `security_reports` stores daily monitoring status, severity and findings as JSONB, model, event count, truncation flag, and timestamps. Table creation follows the existing Neon schema initialization pattern.
+## Configuration Boundaries
 
-AI monitoring runs daily at 06:00 UTC on Vercel production deployments, using CRON_SECRET to authenticate. It examines up to 250 recorded events from the past 24 hours. It does not observe every request, detect malware, or establish that an account was compromised. Network identifiers are pseudonymized before model input; actor email addresses are still sent to the configured AI service. The admin Security risks button reads stored reports without starting analysis. Set CRON_SECRET and AI Gateway credentials before deployment; preview/local monitoring requires invoking the scheduled endpoint with the bearer secret.
+Managed roles and rights belong in `managed_user_access`, not Vercel secrets.
+Adding an active account does not require redeployment, but does not create an
+Entra account, tenant guest, or application assignment.
 
-Employee roles and access decisions belong in `managed_user_access`, not Vercel environment variables. Adding an active employee through admin management takes effect through database-backed authorization without a redeploy. Microsoft tenant membership and application access remain separate requirements.
-
-Deployment secrets such as `DATABASE_URL`, `AUTH_SECRET`, Microsoft credentials, and AI Gateway credentials are deployment configuration. Vercel supports CLI/API automation and branch-specific preview variables; never expose a Vercel management token to the client or give employee creation permission to modify deployment secrets.
+Deployment credentials remain server-only. Audit/security controls remain
+admin-only. IPs and full metadata belong in selected-event details. Scheduled
+AI assessments are advisory, not automatic permission changes or comprehensive
+infrastructure monitoring. See [URL configuration](URL_CONFIGURATION.md).

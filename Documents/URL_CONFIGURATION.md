@@ -60,11 +60,10 @@ pnpm test:e2e:url https://tanovo-time-git-development-devoncall.vercel.app/tanov
 
 ## Other Branches and Production
 
-Only Development has been migrated. Unmigrated branches use their own
-`next.config.mjs` base path (currently `/timelog` on role branches). Keep their
-existing callbacks until their code is explicitly migrated. The preserved
-`rebrand` branch contains historical source with a misspelled route; use
-Development for the corrected application, not that historical branch.
+Only `Development` and `main` are retained. Both contain the integrated
+`/tanovo-time` application; the former role and rebrand branches are retired.
+Older deployments can still contain older paths: deploy the intended current
+commit rather than adding obsolete callbacks to accommodate a stale build.
 
 Production must use its actual assigned origin and released branch's path.
 Do not copy the Development hostname into Production `AUTH_URL`.

@@ -48,6 +48,7 @@ async function initializeMessages(): Promise<void> {
   await sql`CREATE INDEX IF NOT EXISTS app_messages_recipient_date_idx ON app_messages (recipient_email,created_at DESC)`
   await sql`ALTER TABLE app_messages ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ, ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`
   await sql`ALTER TABLE app_messages ADD COLUMN IF NOT EXISTS encrypted_payload JSONB`
+  await sql`ALTER TABLE app_messages ADD COLUMN IF NOT EXISTS priority text NOT NULL DEFAULT 'normal' CHECK(priority IN ('normal','high'))`
   await sql`CREATE TABLE IF NOT EXISTS app_message_receipts (
     message_id UUID NOT NULL REFERENCES app_messages(id) ON DELETE CASCADE,
     recipient_email TEXT NOT NULL, delivered_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), read_at TIMESTAMPTZ,
@@ -58,7 +59,7 @@ async function initializeMessages(): Promise<void> {
  * Reuses schema initialization instead of running DDL on each inbox poll.
  * @returns Promise<void> with transient initialization failures remaining retryable.
  */
-function ensureMessages():Promise<void>{
+export function ensureMessages():Promise<void>{
   return messageSchema??=initializeMessages().catch(error=>{messageSchema=undefined;throw error})
 }
 /**
@@ -74,7 +75,7 @@ export async function listMessages(email:string,receivesBroadcast:boolean) {
     SELECT id,${identity} FROM app_messages WHERE sender_email <> ${identity} AND deleted_at IS NULL
       AND (recipient_email = ${identity} OR (recipient_email IS NULL AND (encrypted_payload->'keys' ? ${identity} OR (${receivesBroadcast} AND encrypted_payload IS NULL))))
     ORDER BY created_at DESC LIMIT 100 ON CONFLICT DO NOTHING`
-  return sql`SELECT m.id,m.sender_email,m.recipient_email,m.body,m.created_at,m.edited_at,m.deleted_at,m.encrypted_payload,
+  return sql`SELECT m.id,m.sender_email,m.recipient_email,m.body,m.created_at,m.edited_at,m.deleted_at,m.encrypted_payload,m.priority,
     r.delivered_at,r.read_at,
     (SELECT COUNT(*)::int FROM app_message_receipts WHERE message_id=m.id) AS delivered_count,
     (SELECT COUNT(*)::int FROM app_message_receipts WHERE message_id=m.id AND read_at IS NOT NULL) AS read_count

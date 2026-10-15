@@ -24,7 +24,7 @@ const entrySchema = z.object({
   hours: z
     .number()
     .describe(
-      "Total hours worked on this date for this project. Convert phrases like 'half day' to 4, 'full day' to 8, '9-5' to 8, '9am to 1pm' to 4.",
+      "Hours for this individual work unit, not the sum of other tasks on the same date/project. Convert 'half day' to 4, 'full day' to 8, '9-5' to 8, '9am to 1pm' to 4.",
     ),
   project: z
     .string()
@@ -43,7 +43,8 @@ const schema = z.object({
 /**
  * Parses free-form time notes into structured time entries with the AI model.
  *
- * The prompt asks for one entry per contractor, date, and project combination so
+ * The prompt asks for one entry per distinct work unit, including repeated
+ * contractor/date/project combinations, so
  * a single messy paragraph can become several reviewable timesheet rows. Relative
  * dates are resolved against the server's current date.
  *
@@ -71,6 +72,7 @@ export async function POST(req: Request) {
         "You are a meticulous timesheet assistant. Extract every distinct unit of work logged in the notes into structured time entries. " +
         "Notes may be messy, informal, list multiple contractors, span multiple dates, or mix projects. " +
         "Split a single note into multiple entries whenever the contractor, date, or project differs. " +
+        "Keep separately listed tasks or time blocks as separate entries even when the person, date, and project match. Never merge, deduplicate, sum, or truncate those entries. " +
         `The current date is ${today}. Resolve all relative dates against it. ` +
         "Never invent contractors or hours that are not implied by the text. If hours are ambiguous, make a reasonable best estimate.",
       prompt: `Extract the time entries from these notes:\n\n"""\n${notes}\n"""`,

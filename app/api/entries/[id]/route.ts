@@ -10,6 +10,8 @@ import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { getEffectiveUserRole } from "@/lib/access"
 import { canReviewRole } from "@/lib/review-policy"
+import { createReviewAccess } from "@/lib/review-access"
+import { approveAndForward } from "@/lib/account-handoffs"
 import {
   auditActionForStatus,
   changedFieldMetadata,
@@ -35,6 +37,7 @@ const patchSchema = z
     status: z.enum(["draft", "submitted", "approved", "rejected"]).optional(),
     reviewNote: z.string().trim().max(500).optional(),
     expectedRevision: z.string().min(1).max(100).optional(),
+    reviewManagerEmail: z.string().email().nullable().optional(),
   })
   .refine((patch) => Object.keys(patch).some(key=>key!=="expectedRevision"), {
     message: "At least one field is required.",
@@ -61,8 +64,8 @@ async function getAccess() {
   return {
     email,
     role,
-    includeAll: permissions.view_team||(role==="account_manager"&&permissions.review_manager_entries),
-    canReview: permissions.review_entries||(role==="account_manager"&&permissions.review_manager_entries),
+    includeAll: role==="manager"||permissions.view_team||(role==="account_manager"&&permissions.view_manager_entries),
+    canReview: permissions.review_entries||permissions.review_manager_entries,
     permissions,
   }
 }
@@ -191,10 +194,23 @@ export async function PATCH(
       return Response.json({ error: "Entry not found." }, { status: 404 })
     }
 
+    const scope = await createReviewAccess(access.email, access)(current)
+    if(!scope.visible)return Response.json({error:"Entry not found."},{status:404})
+    if(current.payoutEligible)return Response.json({error:"Business accounts has authorized eligibility; this evidence is locked."},{status:409})
+    if(access.role==="manager"&&current.ownerEmail?.toLowerCase()!==access.email.toLowerCase()&&hasEntryFieldPatch(patch)&&!scope.reviewable)return Response.json({error:"Review assistance rights are required to change this evidence."},{status:403})
+    if(patch.reviewManagerEmail!==undefined){
+      if(patch.status!=="submitted"||current.ownerEmail?.toLowerCase()!==access.email.toLowerCase())return Response.json({error:"A manager can only be selected when submitting your own work."},{status:403})
+      if(patch.reviewManagerEmail&&await getEffectiveUserRole(patch.reviewManagerEmail)!=="manager")return Response.json({error:"Choose an active manager."},{status:400})
+      if(patch.reviewManagerEmail?.toLowerCase()===access.email.toLowerCase())return Response.json({error:"Your own time needs an independent reviewer."},{status:400})
+    }
+    if(patch.status==="submitted"&&(access.role==="contractor"||access.role==="employee")){
+      const manager=patch.reviewManagerEmail??current.reviewManagerEmail
+      if(!manager||await getEffectiveUserRole(manager)!=="manager")return Response.json({error:"Choose an active reviewing manager before submitting."},{status:400})
+    }
+
     if (patch.status === "approved" || patch.status === "rejected") {
       if(current.ownerEmail?.toLowerCase()===access.email.toLowerCase())return Response.json({error:"Your own entries require another authorized reviewer."},{status:403})
-      const ownerRole=current.ownerEmail?await getEffectiveUserRole(current.ownerEmail):null
-      if(!canReviewRole(access.role,ownerRole))return Response.json({error:"Manager timesheets require an authorized account manager; account managers cannot review other operational timesheets."},{status:403})
+      if(!scope.reviewable)return Response.json({error:"An explicit independent-review right or active scoped request is required."},{status:403})
       if(hasEntryFieldPatch(patch))return Response.json({error:"Review decisions cannot change submitted evidence."},{status:400})
     }
 
@@ -226,6 +242,15 @@ export async function PATCH(
       )
     }
 
+    if(patch.status==="approved"){
+      if(access.role!=="account_manager"&&!access.permissions.send_to_accounts)return Response.json({error:"Approval requires permission to forward evidence to business accounts."},{status:403})
+      const ownerRole=current.ownerEmail?await getEffectiveUserRole(current.ownerEmail):null
+      const revision=patch.expectedRevision??current.revision
+      if(!revision)return Response.json({error:"Refresh this entry before approving."},{status:409})
+      const forwarded=await approveAndForward(id,access.email,revision,ownerRole??"contractor",getAuditContext(req))
+      if(!forwarded)return Response.json({error:"Evidence changed. Refresh before approving."},{status:409})
+      return Response.json({entry:forwarded})
+    }
     const entry = await updateTimeEntry(
       access.email,
       id,
@@ -293,6 +318,11 @@ export async function DELETE(
     if (!current) {
       return Response.json({ error: "Entry not found." }, { status: 404 })
     }
+
+    const scope = await createReviewAccess(access.email, access)(current)
+    if(!scope.visible)return Response.json({error:"Entry not found."},{status:404})
+    if(current.payoutEligible)return Response.json({error:"Authorized eligibility evidence cannot be deleted."},{status:409})
+    if(access.role==="manager"&&current.ownerEmail?.toLowerCase()!==access.email.toLowerCase()&&!scope.reviewable)return Response.json({error:"Review assistance rights are required."},{status:403})
 
     if (
       (!access.canReview || current.ownerEmail?.toLowerCase()===access.email.toLowerCase()) &&

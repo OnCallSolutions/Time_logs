@@ -37,3 +37,6 @@ Background inbox polling pauses while the page is hidden.
 Tests cover real Web Crypto, recipient/device isolation, envelope tampering,
 public-only enrollment, automatic connection, and absence of recovery controls.
 Live browser/database acceptance and external security review remain separate.
+See [messaging security](MESSAGING_SECURITY.md) for lifecycle, metadata, and trust
+limits. The authorized database reset removed enrolled server device records;
+remembered local keys are not a backup of deleted messages or server data.

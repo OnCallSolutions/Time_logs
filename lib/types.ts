@@ -27,6 +27,10 @@ export type TimeEntry = {
   reviewEligible?: boolean
   /** Server-assigned record owner; never inferred from the display contractor name. */
   ownerEmail?: string
+  /** Assigned operational manager; unassigned legacy submissions remain in the shared queue. */
+  reviewManagerEmail?: string | null
+  /** Evidence locked after explicit business-account eligibility authorization. */
+  payoutEligible?: boolean
   contractor: string
   /** ISO date string: YYYY-MM-DD */
   date: string
@@ -47,7 +51,7 @@ export type TimeEntry = {
  */
 export type ParsedEntry = Omit<
   TimeEntry,
-  "id" | "revision" | "reviewEligible" | "ownerEmail" | "status" | "reviewedBy" | "reviewedAt" | "reviewNote"
+  "id" | "revision" | "reviewEligible" | "ownerEmail" | "reviewManagerEmail" | "payoutEligible" | "status" | "reviewedBy" | "reviewedAt" | "reviewNote"
 >
 
 /**

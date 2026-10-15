@@ -1,11 +1,8 @@
 # Access Lifecycle and Temporary Assignments
 
-Logic lives on `access_lifecycle`; admin and manager presentation lives on
-`user_Interface`. No Entra revocation, live migration, or deployment is performed
-by this feature implementation.
-
-The UI branch integrates the lifecycle backend for local development, while new
-logic and presentation edits remain committed on their respective owning branches.
+Lifecycle logic and presentation are integrated on `Development` and released
+through `main`. The old feature branches are retired. Application lifecycle
+actions do not revoke Microsoft Entra sessions or perform tenant offboarding.
 Admin controls open isolated confirmation windows for cutoff, cancellation,
 suspension, reactivation, grant, extension, and revocation. Managers see only
 temporary coverage controls. Input times are browser-local and stored as UTC.

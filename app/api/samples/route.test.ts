@@ -12,10 +12,25 @@ import { GET } from "./route"
 it("uses only the contractor's authenticated name",async()=>{
   vi.mocked(auth).mockResolvedValue({user:{email:"own@example.com",name:"Own Person"}} as never)
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"contractor",permissions:resolvePermissions("contractor")})
-  const value=await (await GET()).json();expect(value.notes.match(/Own Person/g)).toHaveLength(2);expect(value.notes).not.toContain("Sample Employee")
+  const value=await (await GET()).json();expect(value.notes.match(/Own Person/g)).toHaveLength(6);expect(value.notes).not.toContain("Sample Employee")
 })
 it("allows multiple synthetic people for account-manager preview",async()=>{
   vi.mocked(auth).mockResolvedValue({user:{email:"accounts@example.com"}} as never)
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"account_manager",permissions:resolvePermissions("account_manager",{view_accounts:true})})
   const value=await (await GET()).json();expect(value.previewOnly).toBe(true);expect(value.notes).toContain("Sample Contractor A");expect(value.notes).toContain("Sample Employee B")
+})
+it("returns twelve separate tasks across days/projects without accepting another identity",async()=>{
+  vi.mocked(auth).mockResolvedValue({user:{email:"own@example.com",name:"Own Person"}} as never)
+  vi.mocked(getEffectivePermissions).mockResolvedValue({role:"contractor",permissions:resolvePermissions("contractor")})
+  const response=await GET(new Request("http://localhost/api/samples?count=12&name=SomeoneElse"))
+  const value=await response.json()
+  expect(value.notes.split("\n")).toHaveLength(12)
+  expect(value.notes.match(/Own Person/g)).toHaveLength(12)
+  expect(value.notes).toContain("Sample Integration")
+  expect(value.notes).not.toContain("SomeoneElse")
+})
+it("rejects unbounded sample counts",async()=>{
+  vi.mocked(auth).mockResolvedValue({user:{email:"own@example.com"}} as never)
+  vi.mocked(getEffectivePermissions).mockResolvedValue({role:"contractor",permissions:resolvePermissions("contractor")})
+  expect((await GET(new Request("http://localhost/api/samples?count=999"))).status).toBe(400)
 })

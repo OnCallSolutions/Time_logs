@@ -21,8 +21,9 @@ not renamed. Contractor reviewed hours are not a calculated payment amount.
 ## Approval Rules
 
 1. Contractors and employees create drafts, submit them, and correct rejected work.
-2. Managers may submit their own managerial time, but another authorized reviewer
-   must approve or reject it. Administrators cannot self-review either.
+2. Managers may submit their own managerial time, but only an account manager with
+   `review_manager_entries` may approve/reject it. Other managers and admins cannot.
+   Self-review remains prohibited.
 3. Reviewer separation is checked against the server-owned email, not the editable
    contractor display name. SQL independently blocks self-review and requires the
    entry still to be submitted before accepting a decision.
@@ -37,9 +38,10 @@ not renamed. Contractor reviewed hours are not a calculated payment amount.
 
 ## Business-Account Handoff
 
-Managers/admins with the admin-granted `send_to_accounts` right select approved
-contractor records and an active Account Manager, then explicitly confirm handoff.
-Internal employee records are not eligible for this financial queue.
+Managers/admins with `send_to_accounts` select approved contractor or employee
+records and an active Account Manager, then explicitly confirm handoff. Managers
+have this right by default; an admin can deny it. Internal employee evidence is
+internal work/cost review, not an automatic contractor payout.
 
 `account_handoffs` stores the entry reference, assigned account manager, handing-off
 identity, source update timestamp, and approved evidence snapshot. Each entry revision
@@ -47,7 +49,7 @@ can be handed off once. Duplicate or changed approvals can yield fewer new rows 
 requested; the response states both counts. Source changes flag the queue item stale.
 The entry foreign key protects handed-off records from physical deletion; an archival
 workflow must be designed before deleting financial evidence. The candidate queue
-examines the first hundred approved visible records and shows only current contractors;
+examines the first hundred approved visible records for eligible contractors/employees;
 the assigned queue is limited to one hundred handoffs. Cursor pagination remains future
 work, so neither list should be treated as a complete historical financial report.
 
@@ -89,13 +91,11 @@ Save Vercel environment changes and create a new deployment to apply them.
 
 ## Branches and Verification
 
-`manager` contains operational review groundwork. `business_accounts` builds on it
-for financial handoff. Both are now merged into local Development; publication of
-that integration is separate. `user_Interface` retains separate white/orange visual
-changes; `messages` retains recipient audiences. Consult Git branch tracking for
-publication status.
+All logic, UI, and recipient-audience controls are integrated into Development.
+Only Development and main are retained; old feature branches are retired.
+Release through a reviewed Development-to-main PR.
 
-Unit/API tests cover self-review denial, selection confirmation, handoff rights,
-contractor eligibility, and account-manager queue scoping. Live Azure/Neon/AI tests,
-SQL migration/concurrency tests, and authenticated multi-role visual checks are still
-required before release. No live database maintenance or payment action was performed.
+Tests cover reviewer separation, selection confirmation, handoff rights, eligibility,
+and queue scoping. Live Azure/Neon/AI acceptance and PostgreSQL concurrency tests
+remain separate. See [verification results](TEST_RESULTS.md) and the authorized
+fresh-start record in [database management](DATABASE_MANAGEMENT.md).

@@ -35,6 +35,6 @@ True team ownership, pagination, payment calculation/reconciliation, stored AI
 reports, and bulk financial triage remain future work. Tests mock database/model
 calls; live database and authenticated visual acceptance still require validation.
 
-Logic lives on `business_accounts`; presentation lives on `user_Interface`.
-The latter integrates the backend locally for testing. Run `pnpm typecheck`,
-`pnpm test`, and `pnpm build`. No push or Development merge is implied.
+Logic and presentation are integrated on `Development`. Release PRs target `main`;
+the former feature branches are retired. Run `pnpm typecheck`, `pnpm test`, and
+`pnpm build` from the repository root. These checks do not deploy the application.

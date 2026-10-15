@@ -9,7 +9,8 @@ vi.mock("@/lib/effective-permissions",()=>({getEffectivePermissions:vi.fn()}))
 vi.mock("@/lib/access",()=>({getEffectiveUserRole:vi.fn()}))
 vi.mock("@/lib/collaboration",()=>({actorRoster:vi.fn()}))
 vi.mock("@/lib/db",()=>({getTimeEntry:vi.fn(),listTimeEntries:vi.fn(),recordAuditEvent:vi.fn()}))
-vi.mock("@/lib/account-handoffs",()=>({createHandoffs:vi.fn(),listHandoffs:vi.fn(),reviewHandoff:vi.fn(),accountReviewStates:["pending","needs_information","ready_for_finance","archived"]}))
+vi.mock("@/lib/account-handoffs",()=>({createHandoffs:vi.fn(),listHandoffs:vi.fn(),reviewHandoff:vi.fn(),actOnHandoffs:vi.fn(),accountTriageStates:["pending","needs_information","ready_for_finance","archived"]}))
+import { actorRoster } from "@/lib/collaboration"
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { getEffectiveUserRole } from "@/lib/access"
@@ -22,6 +23,7 @@ const id="123e4567-e89b-42d3-a456-426614174000"
 function request(){return new Request("http://localhost/tanovo-time/api/accounts",{method:"POST",body:JSON.stringify({ids:[id],recipient:"accounts@example.com"})})}
 beforeEach(()=>{
   vi.resetAllMocks()
+  vi.mocked(actorRoster).mockResolvedValue([])
   vi.mocked(auth).mockResolvedValue({user:{email:"manager@example.com"}} as never)
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"manager",permissions:resolvePermissions("manager",{send_to_accounts:true})})
   vi.mocked(getEffectiveUserRole).mockImplementation(async email=>email==="accounts@example.com"?"account_manager":"contractor")
@@ -57,10 +59,10 @@ it("reports a conflict rather than accepting stale account-review evidence",asyn
   vi.mocked(reviewHandoff).mockResolvedValue(null)
   expect((await PATCH(new Request("http://localhost/api/accounts",{method:"PATCH",body:JSON.stringify({id,state:"ready_for_finance",note:"Reviewed evidence",version:0})}))).status).toBe(409)
 })
-it("scopes account-manager queue reads to the authenticated assignee",async()=>{
+it("allows authorized business accounts to inspect the shared queue",async()=>{
   vi.mocked(auth).mockResolvedValue({user:{email:"accounts@example.com"}} as never)
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"account_manager",permissions:resolvePermissions("account_manager",{view_accounts:true})})
   vi.mocked(listHandoffs).mockResolvedValue([])
   expect((await GET()).status).toBe(200)
-  expect(listHandoffs).toHaveBeenCalledWith("accounts@example.com",false)
+  expect(listHandoffs).toHaveBeenCalledWith("accounts@example.com",true)
 })

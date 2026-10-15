@@ -5,6 +5,7 @@
  */
 export const MESSAGE_EDIT_MINUTES = 60
 export type AppMessage = {
+  priority?: "normal" | "high";
   id: string; sender_email: string; recipient_email: string | null; body: string;
   created_at: string; edited_at?: string | null; deleted_at?: string | null;
   delivered_at?: string | null; read_at?: string | null;

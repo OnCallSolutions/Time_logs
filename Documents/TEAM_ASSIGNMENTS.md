@@ -11,7 +11,7 @@ milestone; team-based visibility is not implemented by the lifecycle feature.
 - Additional reviewers have explicit assignments, not inferred authority from titles.
 - Project scope must bind each work record to its intended team/project; membership
   alone must not expose unrelated work when a contractor serves multiple teams.
-- Managers' own records still need an independent reviewer with the correct scope.
+- Managers' own records require an account manager with `review_manager_entries`; neither another manager nor an admin can approve them.
 
 ## Enforcement Before UI Rollout
 

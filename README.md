@@ -4,15 +4,20 @@ AI-assisted contractor time logging, manager review, and internal staff administ
 
 **AI prepares the work; people review and confirm decisions.** The application is served at `/tanovo-time`.
 
+For current manager visibility rules, encrypted high-priority reviewer-help requests,
+automatic business-account forwarding, returns and payout eligibility, see
+[Reviewer Assistance](Documents/REVIEWER_ASSISTANCE.md). This describes the current
+workflow where it supersedes older financial scaffold notes below.
+
 Account cutoff schedules, suspension, and temporary operational assignments are
 integrated into `Development`.
 See [ACCESS_LIFECYCLE.md](Documents/ACCESS_LIFECYCLE.md) for scope, precedence, administrator
 protection, and the separate Microsoft offboarding checklist.
 
 For the contractor-centered operational review and business-account handoff changes
-under development, including reviewer separation and Vercel role-list names, see
+integrated into Development, including reviewer separation and Vercel role-list names, see
 [CONTRACTOR_WORKFLOW.md](Documents/CONTRACTOR_WORKFLOW.md). These changes are currently on
-local Development through the manager/business-account integration, not released functionality.
+Development through the manager/business-account integration. Verify live deployment separately.
 
 Contractors are outsourced workers who log their own time and submit it for review.
 Employees are internal company staff. Managers review work and delegate permitted
@@ -27,7 +32,7 @@ review manager timesheets when granted `review_manager_entries`. Payment calcula
 and authorization to release funds are planned, not implemented; see
 [BUSINESS_ACCOUNTS.md](Documents/BUSINESS_ACCOUNTS.md).
 
-For GitHub, Vercel, and Microsoft Entra name/URL migration, see [REBRANDING.md](Documents/REBRANDING.md). This rebrand applies to `Development` only; other branches retain their existing names and routes.
+For GitHub, Vercel, and Microsoft Entra names/URLs, see [REBRANDING.md](Documents/REBRANDING.md). Both retained branches contain the integrated `/tanovo-time` application; older deployed snapshots may still serve older code.
 
 For the exact Development URL, Azure callbacks, local ports, and branch-specific rules, see [URL_CONFIGURATION.md](Documents/URL_CONFIGURATION.md).
 
@@ -53,25 +58,21 @@ Only `main` and `Development` are retained after integration. Retired feature
 branches remain represented in Development's commit history. Runtime roles and
 permissions are independent of Git branches.
 
-This README describes the integrated Development checkout. Release through a
-reviewed Development-to-main pull request; a successful build is not proof that
-a particular production deployment has been verified.
+This README describes the current Development checkout. Main contains the prior
+integrated release, not necessarily the latest local changes described here.
+Release through reviewed Development-to-main pull requests. A successful build
+or merge does not verify a production deployment.
 
-| Capability | Historical main baseline | Integrated in `Development` |
-| --- | --- | --- |
-| Microsoft sign-in and app access lists | Yes | Yes |
-| AI note extraction, saved entries, and manager reports | Yes | Yes |
-| Persistent account profiles | Yes | Yes |
-| Draft/submission/approval workflow | Not yet | Yes |
-| Database-managed roles and per-control rights | Not yet | Yes |
-| Manager delegation and employee messages | Not yet | Yes |
-| Audit detail windows and periodic AI risk reports | Not yet | Yes |
-| Automated unit/component/API tests and test console | Not yet | Yes |
-| Contractor role and account-manager scaffold | Not yet | Yes |
-| Quiet message settings, search, and conversation filters | Not yet | Yes |
-| Automatic per-device encryption without an unlock form | Historical baseline | Yes |
-| Contractor payments and fund-release approval | No | Not implemented |
-| Retry-safe database initialization improvements | Historical baseline | Yes |
+## Feature Status
+
+Integrated features include Microsoft sign-in, personal profiles, role/control
+management, lifecycle schedules, operational and manager-timesheet review,
+account handoffs/triage, advisory AI, automatic encrypted messaging, audit details,
+security reports, and the external live test console.
+
+True multi-team isolation, persisted AI review jobs, complete cursor pagination,
+rates/taxes, payment authorization/execution, and financial reconciliation remain
+future work. Financial triage is not fund release. See the guides in `Documents/`.
 
 ## Role Workspaces
 
@@ -90,6 +91,21 @@ Managers may delegate only workflow rights they hold. They cannot promote accoun
 Permission changes are stored in the database. Same-browser tabs receive refresh notifications; other sessions refresh every 15 seconds and on focus. APIs check current rights on each request. Private messages are scoped to sender and recipient; employee broadcasts are scoped to eligible accounts.
 
 AI recommendations are advisory. They cannot verify that work happened and do not automatically approve time, block accounts, or grant permissions.
+
+Entries start read-only. Use the pencil beside a work unit, then Save or Cancel;
+typing does not send updates. Cancel discards the local draft, and failed saves
+retain it with an error. Repeated person/day/project labels are clustered without
+merging tasks. Sample notes support 3, 6, or 12 work units per authenticated person.
+
+The landing summary shows status counts/hours, project activity, and authorized
+review workload. Related commands are grouped under Timesheets, Review & accounts,
+Insights, and Access & security, with full-screen child windows and Back navigation.
+
+Select one, several, or all eligible loaded entries for manual submission or AI
+preparation. AI only advises; humans confirm submission. Confirmed rows remain
+submitted if a later row fails, and retries exclude those successes. Submissions
+enter existing review queues, not a newly assigned individual manager. See
+[AI workflow](Documents/AI_WORKFLOW.md) for rights, batching, and revision checks.
 
 ## Local Setup
 
@@ -145,7 +161,9 @@ Keep secrets in `.env.local` locally and server-side environment settings on Ver
 | `ADMIN_EMAILS` | Admin bootstrap/recovery identities |
 | `MANAGER_EMAILS` | Optional environment-backed manager identities |
 | `EMPLOYEE_EMAILS` | Employee identities in `Development` |
-| `WORKER_EMAILS` | Legacy employee role configuration used by the released baseline; supported for compatibility in `Development` |
+| `WORKER_EMAILS` | Legacy employee-list compatibility |
+| `ACCOUNT_MANAGER_EMAILS` | Optional account-manager role list; control rights require separate admin grants |
+| `ACCOUNT_REVIEW_MODEL` | Optional account-review model override |
 | `CRON_SECRET` | Server-only authentication token for scheduled security monitoring in `Development` |
 
 Configure explicit access lists for restricted environments. Without environment access lists, the current policy may allow authenticated Microsoft accounts by default. In `Development`, managed active/denied/blocked assignments participate in access resolution; environment recovery admins remain a recovery path.
@@ -167,7 +185,7 @@ Application permission grants do not create Microsoft accounts, tenant guests, o
 
 ## Testing
 
-The automated framework is available on `Development` and the integrated role branches. The released baseline on `main` does not yet include its scripts.
+The automated framework is integrated into Development and main. Run commands from the repository root, not `Documents/`. On a fresh checkout, run `pnpm exec next typegen` before typechecking if generated route types are missing.
 
 | Command | Purpose |
 | --- | --- |
@@ -182,15 +200,15 @@ The automated framework is available on `Development` and the integrated role br
 
 The test console runs at `http://127.0.0.1:4317`; it is not an authentication target.
 Local Playwright runs use isolated port 3100 and `.next-e2e`, refusing to reuse
-another running server. The richer live table/detail console is on `testing`;
-Development retains its existing console. Automated tests mock database/model
+another running server. The live table/detail console is integrated into Development;
+the old testing branch is retired. Automated tests mock database/model
 responses and do not establish that live Microsoft, Neon, or AI configuration works.
 Test those integrations with distinct authorized contractor, employee, manager,
 account-manager, and admin accounts.
 
 Run TypeScript explicitly: the current Next.js configuration skips type failures during production builds, so a successful build alone is insufficient validation.
 
-On `Development`, see `TESTING.md`, `ROLE_WORKSPACES.md`, and `BRANCH_OWNERSHIP.md` for detailed test cases and ownership guidance. Those documents are not part of the current released baseline.
+See [testing](Documents/TESTING.md), [role workspaces](Documents/ROLE_WORKSPACES.md), and [branch ownership](Documents/BRANCH_OWNERSHIP.md) for test cases and release guidance. The dated [verification record](Documents/TEST_RESULTS.md) separates completed automated checks from unverified live acceptance.
 
 ## Storage and Architecture
 
@@ -205,20 +223,23 @@ On `Development`, see `TESTING.md`, `ROLE_WORKSPACES.md`, and `BRANCH_OWNERSHIP.
 | `next.config.mjs` / `lib/paths.ts` | `/tanovo-time` routing configuration |
 | `e2e/`, `tests/`, `tools/` | Automated tests and external test tools in `Development` |
 
-`main` stores time entries and profiles. `Development` additionally stores managed access with JSONB permission overrides, audit events, security reports, and in-app messages. Schema helpers create required tables/columns idempotently; the database credential must permit those operations. Use separate development/test and production databases.
+The integrated application stores entries, profiles, managed access with JSONB overrides, lifecycle/temporary assignments, account handoffs, audit events, security reports, and encrypted messages/devices/receipts in twelve public tables. Schema helpers create required tables/columns idempotently; the database credential must permit those operations. Use separate development/test and production databases.
 
 Integrated database management adds retry-safe, process-cached schema initialization
 and avoids replacing current access-role constraints on every cold start. It does
 not yet provide versioned migrations, cursor pagination, or AI job storage. See
-[DATABASE_MANAGEMENT.md](Documents/DATABASE_MANAGEMENT.md). No live database maintenance has
-been performed during this groundwork.
+[DATABASE_MANAGEMENT.md](Documents/DATABASE_MANAGEMENT.md). On 2026-10-15, the database
+selected through this repo's `.env.local` was reset with authorization: all twelve
+tables were verified empty in the transaction, with schemas preserved. Later use
+can create data again. Reconfigure database-managed rights; environment lists remain.
+This did not erase Vercel logs, Entra records, or provider backups.
 
 ## Deployment and Releases
 
 1. Keep integrated work on `Development`; only `Development` and `main` are retained.
 2. Preserve all feature commits in Development before deleting their branch references.
 3. Validate the integrated application with automated checks and live role/permission tests.
-4. Update the feature-status table for the release and open a PR from `Development` into `main`.
+4. Record verification results and open a reviewed PR from `Development` into `main`.
 5. Configure production secrets, Microsoft redirect URIs, and database access before deploying the release.
 
 Vercel environment changes require a new deployment to take effect. Employee rights stored in the database do not require environment-variable changes or a redeploy.
@@ -245,8 +266,8 @@ unlock form. Private keys stay in browser IndexedDB. See
 
 New sends require each recipient to sign in once for automatic device enrollment. Historical plaintext
 may still exist; the quiet chat view does not label every bubble's encryption state.
-See [MESSAGING_SECURITY.md](Documents/MESSAGING_SECURITY.md) for protocol limits and recovery
-warnings. This custom development protocol is not WhatsApp's protocol and requires
+See [MESSAGING_SECURITY.md](Documents/MESSAGING_SECURITY.md) for protocol and device/history
+limits. This custom development protocol is not WhatsApp's protocol and requires
 independent security review before production use. No message plaintext or recovery
 secret should be passed to AI.
 
@@ -259,4 +280,4 @@ secret should be passed to AI.
 - For authentication configuration errors, verify environment scope, client-secret value, issuer, and exact redirect URI. A personal Microsoft account may need tenant invitation or a compatible app registration.
 - For unavailable AI analysis, verify AI Gateway authentication. Manual review remains available.
 
-Contributions should include suitable regression tests and maintain the project's multi-line Doxygen-style file/function documentation. Follow `AGENTS.md` and the installed Next.js guides when changing framework behavior.
+Contributions should include suitable regression tests and maintain multi-line Doxygen-style file/function documentation with parameters and return types. Follow [agent guidance](Documents/AGENTS.md) and installed Next.js guides when changing framework behavior.

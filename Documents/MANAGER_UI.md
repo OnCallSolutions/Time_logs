@@ -1,8 +1,7 @@
 # Manager Workspace UI
 
-Presentation changes live on `user_Interface`. Server and database safeguards live
-on `manager`; integrate and test both before release. Development has not received
-this latest iteration.
+Presentation, server, and database safeguards are integrated on `Development`.
+Release through a reviewed PR into `main`; the former feature branches are retired.
 
 ## Added Presentation
 
@@ -25,7 +24,7 @@ ordering is not submission age; a true age/SLA queue needs stored submission tim
 
 Project/team assignments, explicit reviewer coverage and escalation policy, persisted
 revision-bound AI evidence, correction history, account-handoff reconciliation, and
-paginated queues should be designed on their owning logic branches. Do not infer
+paginated queues remain follow-on work in the integrated application. Do not infer
 authority from display names or make AI recommendations final decisions.
 
 Automated component checks cover searching, visible selection, independent reviewer
