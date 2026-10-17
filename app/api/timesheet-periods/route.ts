@@ -3,7 +3,7 @@ import { z } from "zod"
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { getAuditContext } from "@/lib/audit"
-import { createTimesheetPeriod, listTimesheetPeriods, updateTimesheetPeriod } from "@/lib/db"
+import { createTimesheetPeriod, ensureDefaultUpcomingTimesheetPeriod, listTimesheetPeriods, updateTimesheetPeriod } from "@/lib/db"
 
 export const runtime = "nodejs"
 
@@ -16,11 +16,12 @@ const periodSchema = z.object({
   reminderDays: z.number().int().min(1).max(30),
 }).strict()
 
-export async function GET() {
+export async function GET(request:Request) {
   try {
     const email = (await auth())?.user?.email
     const access = await getEffectivePermissions(email)
     if (!email || !access.role) return Response.json({ error: "Unauthorized." }, { status: 401 })
+    if(access.permissions.manage_timesheet_periods)await ensureDefaultUpcomingTimesheetPeriod(getAuditContext(request))
     return Response.json({ periods: await listTimesheetPeriods() }, { headers: { "Cache-Control": "no-store" } })
   } catch {
     return Response.json({ error: "Timesheet periods unavailable." }, { status: 503 })

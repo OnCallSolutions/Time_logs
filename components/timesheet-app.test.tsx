@@ -158,7 +158,7 @@ function mockTimesheetFetch() {
     }
 
     if (url === "/tanovo-time/api/people" && method === "PATCH") {
-      return jsonResponse({ identity: { email: body.email, officialName: "Person Updated", shortReference: "TN-000001", contractorNumber: "TN-internal-employee" } })
+      return jsonResponse({ identity: { email: body.email, officialName: "Person Updated", shortReference: "TN-000001", contractorNumber: "TN-internal-employee", employeeId: body.employeeId } })
     }
 
     if (url === "/tanovo-time/api/audit?limit=25") {
@@ -485,10 +485,12 @@ describe("TimesheetApp admin directory", () => {
     expect(details).toHaveTextContent("employee@example.com")
     expect(details).toHaveTextContent("TN-000001")
     expect(details).toHaveTextContent("TN-internal-employee")
-    await user.click(within(details).getByRole("button",{name:"Edit name"}))
+    await user.click(within(details).getByRole("button",{name:"Edit identity"}))
     await user.type(within(details).getByLabelText("Official name"),"Person Updated")
-    await user.click(within(details).getByRole("button",{name:"Save name"}))
+    await user.type(within(details).getByLabelText("Company-issued ID"),"COMP-42")
+    await user.click(within(details).getByRole("button",{name:"Save changes"}))
     await waitFor(()=>expect(details).toHaveTextContent("Person Updated"))
-    expect(fetchCalls.find(call=>call.url==="/tanovo-time/api/people"&&call.method==="PATCH")?.body).toEqual({email:"employee@example.com",officialName:"Person Updated"})
+    expect(details).toHaveTextContent("COMP-42")
+    expect(fetchCalls.find(call=>call.url==="/tanovo-time/api/people"&&call.method==="PATCH")?.body).toEqual({email:"employee@example.com",officialName:"Person Updated",employeeId:"COMP-42"})
   })
 })

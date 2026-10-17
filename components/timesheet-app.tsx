@@ -28,6 +28,8 @@ import { permissionLabels, resolvePermissions, type Permission, type PermissionO
 import { accessChangeRequiresStepUp } from "@/lib/admin-policy"
 import { openEntraReauthentication } from "@/lib/entra-reauth-popup"
 import { AdminWorkspace } from "@/components/admin-workspace"
+import { AdminIssuesWorkspace, IssueReportWindow, type IssueContext } from "@/components/issue-workspaces"
+import { PeriodExpirationNotice } from "@/components/period-expiration-notice"
 import { AccessLifecyclePanel } from "@/components/access-lifecycle-panel"
 import { SecurityRiskWindow } from "@/components/security-risk-window"
 import { SubmissionDeadlineSettings } from "@/components/submission-deadline-settings"
@@ -308,10 +310,13 @@ export function TimesheetApp({
   const [entriesRefresh,setEntriesRefresh]=useState(0)
   const [loadingEntries, setLoadingEntries] = useState(true)
   const [syncError, setSyncError] = useState<string | null>(null)
+  const [issueContext, setIssueContext] = useState<IssueContext | null>(null)
+  const [issueReportOpen, setIssueReportOpen] = useState(false)
   useEffect(()=>{if(!syncError)return;const timeout=window.setTimeout(()=>setSyncError(null),9000);return()=>window.clearTimeout(timeout)},[syncError])
   function showTrackedFailure(cause:unknown,operation:string,route:string,status?:number):void{
     const message=cause instanceof Error?cause.message:"The action could not be completed."
     const reference=reportClientFailure({operation,route,status,message})
+    setIssueContext({reference,operation,route,status,message})
     setSyncError(message.includes(reference)?message:`${message} Reference: ${reference}`)
   }
   const [clearEntriesConfirmationOpen, setClearEntriesConfirmationOpen] = useState(false)
@@ -685,7 +690,8 @@ export function TimesheetApp({
   return (
     <WindowAssistantProvider renderAssistant={(workspace,onClose,onPreferredHeight)=><AssistantPanel organizationName={organizationName} workspaceContext={workspace} handoffContext={assistantHandoff} onHandoffUsed={()=>setAssistantHandoff("")} onClose={onClose} onNavigate={(destination,handoff)=>{if(handoff)setAssistantHandoff(handoff);if(destination==="messages")setMessagesOpen(true);else openWorkspacePage(destination as View)}} onRefresh={()=>{setEntriesRefresh(value=>value+1);messageInbox.refresh()}} messageContext="" onContextUsed={()=>{}} onCompose={draft=>{setAssistantCompose(draft);setMessagesOpen(true)}} onPreferredHeight={onPreferredHeight}/> }>
     <main className="app-workspace tech-surface flex h-dvh min-h-svh w-full min-w-0 flex-col gap-3 overflow-x-hidden overflow-y-auto overscroll-y-auto bg-background px-3 pb-8 pt-3 sm:px-5 md:pt-4">
-      {syncError&&<div role="alert" className="fixed right-4 top-4 z-[160] flex w-[min(36rem,calc(100vw-2rem))] items-start gap-3 border border-red-300 bg-white px-4 py-3 text-sm text-red-950 shadow-xl"><span className="min-w-0 flex-1 break-words">{syncError}</span><button type="button" aria-label="Dismiss error message" title="Dismiss error message" onClick={()=>setSyncError(null)} className="grid size-7 shrink-0 place-items-center rounded border border-red-200 text-red-800 hover:bg-red-50"><X className="size-4"/></button></div>}
+      {syncError&&<div role="alert" className="fixed right-4 top-4 z-[160] flex w-[min(36rem,calc(100vw-2rem))] items-start gap-3 border border-red-300 bg-white px-4 py-3 text-sm text-red-950 shadow-xl"><span className="min-w-0 flex-1 break-words">{syncError}</span>{issueContext&&<Button type="button" variant="outline" size="sm" className="h-7 shrink-0 border-orange-300 bg-orange-50 px-2 text-orange-900 hover:bg-orange-100" onClick={()=>setIssueReportOpen(true)}>Report to admins</Button>}<button type="button" aria-label="Dismiss error message" title="Dismiss error message" onClick={()=>setSyncError(null)} className="grid size-7 shrink-0 place-items-center rounded border border-red-200 text-red-800 hover:bg-red-50"><X className="size-4"/></button></div>}
+      {issueReportOpen&&issueContext&&<IssueReportWindow context={issueContext} onClose={()=>{setIssueReportOpen(false);setIssueContext(null)}}/>}
       {!accessDenied&&messagesOpen&&<WindowSurface title="Messages" onBack={()=>setMessagesOpen(false)}><section className="min-h-0 w-full overflow-auto bg-background p-3 sm:p-5"><MessagesPanel inbox={messageInbox} encryption={messageEncryption} canSend={permissions.send_messages&&(role==="admin"||role==="manager")} initialDraft={assistantCompose} onDraftConsumed={()=>setAssistantCompose(null)} onExplainMessage={text=>{setAssistantMessageContext(text);setMessagesOpen(false);focusAssistant()}}/></section></WindowSurface>}
       <header className="workspace-header flex flex-col gap-2 border-b border-border pb-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -855,7 +861,7 @@ export function TimesheetApp({
       ) : view === "activity" ? (
         <PatronAccountActivity/>
       ) : view === "accounts" ? (
-        <section className="min-h-0 w-full overflow-auto bg-white p-4">{accountsContent}</section>
+        <section className="min-h-0 w-full overflow-auto bg-white p-4">{role==="account_manager"&&permissions.manage_timesheet_periods&&<PeriodExpirationNotice onManage={()=>openWorkspacePage("periods")}/>}<div className="mt-3">{accountsContent}</div></section>
       ) : view === "periods" ? (
         <section className="min-h-0 w-full overflow-auto bg-white p-4 sm:p-6"><header className="mb-4 border-b border-orange-200 bg-orange-50 px-4 py-3"><h2 className="font-semibold text-orange-950">Timesheet periods</h2><p className="text-sm text-orange-900">Create new work-date ranges or edit and save existing periods. New periods become the current view when their dates begin; older timesheets remain archived and retrievable.</p></header><SubmissionDeadlineSettings defaultOpen/></section>
       ) : view === "messages" ? (
@@ -1034,6 +1040,8 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
   const [adminPeriodsLoading,setAdminPeriodsLoading]=useState(false)
   const [adminPeriodsError,setAdminPeriodsError]=useState("")
   const [adminReportOpen,setAdminReportOpen]=useState(false)
+  const [adminIssuesOpen,setAdminIssuesOpen]=useState(false)
+  const [issueSummary,setIssueSummary]=useState({open:0,urgent:0,uniqueErrors:0})
   const [assistantRunsOpen,setAssistantRunsOpen]=useState(false)
   const [patronSearch,setPatronSearch]=useState("")
   const [patronRoleFilter,setPatronRoleFilter]=useState("all")
@@ -1041,6 +1049,7 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
   const [selectedPatron,setSelectedPatron] = useState<AdminDirectoryUser|null>(null)
   const [editingOfficialName,setEditingOfficialName] = useState(false)
   const [officialNameDraft,setOfficialNameDraft] = useState("")
+  const [companyEmployeeIdDraft,setCompanyEmployeeIdDraft] = useState("")
   const [savingOfficialName,setSavingOfficialName] = useState(false)
   const [activityLoading, setActivityLoading] = useState(false)
   const [activityError, setActivityError] = useState<string | null>(null)
@@ -1055,6 +1064,15 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
     setAdminSection(initialSection??null)
     setAdminSectionHistory([])
   },[initialSection])
+  useEffect(()=>{
+    if(role!=="admin")return
+    const controller=new AbortController()
+    void fetch(apiPath("/api/issues?summary=1"),{cache:"no-store",signal:controller.signal}).then(async response=>{
+      const payload=await response.json()
+      if(response.ok&&payload.summary)setIssueSummary(payload.summary)
+    }).catch(()=>{})
+    return()=>controller.abort()
+  },[role])
   useEffect(()=>{
     if(adminSection!=="timesheets")return
     const controller=new AbortController()
@@ -1361,15 +1379,15 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
     }
   }
 
-  /** Saves a normalized official name while preserving the patron's identifiers. */
-  async function saveOfficialName():Promise<void> {
+  /** Saves admin-corrected identity fields while preserving generated identifiers. */
+  async function saveOfficialIdentity():Promise<void> {
     if(!selectedPatron)return
     setSavingOfficialName(true);setManagementError(null)
     try{
-      const res=await fetch(apiPath("/api/people"),{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({email:selectedPatron.email,officialName:officialNameDraft})})
+      const res=await fetch(apiPath("/api/people"),{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({email:selectedPatron.email,officialName:officialNameDraft,employeeId:companyEmployeeIdDraft.trim()||null})})
       const data=await res.json();if(!res.ok)throw new Error(data.error??"Unable to update official name.")
-      setUsers(previous=>previous.map(user=>user.email===selectedPatron.email?{...user,displayName:data.identity.officialName,companyReference:data.identity.shortReference,contractorNumber:data.identity.contractorNumber}:user))
-      setSelectedPatron(previous=>previous?{...previous,displayName:data.identity.officialName,companyReference:data.identity.shortReference,contractorNumber:data.identity.contractorNumber}:previous)
+      setUsers(previous=>previous.map(user=>user.email===selectedPatron.email?{...user,displayName:data.identity.officialName,companyReference:data.identity.shortReference,contractorNumber:data.identity.contractorNumber,employeeId:data.identity.employeeId}:user))
+      setSelectedPatron(previous=>previous?{...previous,displayName:data.identity.officialName,companyReference:data.identity.shortReference,contractorNumber:data.identity.contractorNumber,employeeId:data.identity.employeeId}:previous)
       setEditingOfficialName(false)
     }catch(err){setManagementError(err instanceof Error?err.message:"Unable to update official name.")}
     finally{setSavingOfficialName(false)}
@@ -1451,6 +1469,7 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
         </div>
         {!rightsOnly&&adminSection===null&&<aside aria-label="Organization health" className="flex h-[min(72svh,54rem)] min-h-[26rem] min-w-0 flex-col overflow-auto rounded-lg border border-sky-200 bg-gradient-to-br from-sky-50 via-white to-emerald-50 shadow-sm shadow-sky-950/5">
           <header className="border-b border-sky-200 bg-sky-100/70 px-4 py-3"><h2 className="text-sm font-semibold text-sky-950">Organization health</h2><p className="text-[11px] text-sky-900">People, access readiness, and account support</p></header>
+          {canManagePeriods&&<div className="px-3 pt-3"><PeriodExpirationNotice onManage={()=>setAdminTimesheetTool("periods")}/></div>}
           <div className="grid grid-cols-2 gap-2 p-3 sm:grid-cols-3 lg:grid-cols-2 2xl:grid-cols-3">
             <div className="rounded-md border border-sky-200 bg-white/90 p-3"><span className="block text-xs text-sky-800">Patrons</span><strong className="mt-1 block text-xl text-sky-950">{users.length}</strong></div>
             <button type="button" onClick={()=>setPatronStatusFilter("needs_attention")} className="rounded-md border border-orange-300 bg-orange-50 p-3 text-left hover:bg-orange-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500"><span className="block text-xs text-orange-900">Needs attention</span><strong className="mt-1 block text-xl text-orange-950">{patronsNeedingAttention.length}</strong></button>
@@ -1465,6 +1484,10 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
             </ul>
             <Button type="button" variant="outline" size="sm" className="mt-3 w-full justify-center border-orange-300 bg-orange-50 text-orange-950 hover:bg-orange-100" onClick={()=>setPatronStatusFilter("needs_attention")}><Users className="size-4"/>Review people needing attention</Button>
           </div>
+          <button type="button" onClick={()=>setAdminIssuesOpen(true)} className="mx-3 mb-3 rounded-md border border-red-200 bg-gradient-to-r from-red-50 to-orange-50 p-3 text-left transition hover:border-red-300 hover:from-red-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500">
+            <span className="flex items-center justify-between gap-2"><strong className="text-sm text-red-950">Issues and requests</strong><span className="rounded-full bg-red-700 px-2 py-0.5 text-xs font-semibold text-white">{issueSummary.open} open</span></span>
+            <span className="mt-1 block text-xs text-red-900">Patron reports · {issueSummary.uniqueErrors} unique error patterns · {issueSummary.urgent} urgent. Open the queue to investigate and resolve.</span>
+          </button>
           <div className="mx-3 mb-3 rounded-md border border-blue-200 bg-blue-50/80 p-3 text-xs text-blue-950"><strong>Admin focus</strong><p className="mt-1 text-blue-900">Keep identities, role assignments, and account status current. Detailed time records remain in the Timesheets workspace.</p></div>
         </aside>}
       </div>
@@ -1490,6 +1513,7 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
             <section className="flex flex-col items-start gap-2 border-l-4 border-blue-600 bg-blue-50/70 p-3"><h3 className="text-sm font-semibold text-blue-950">Timesheet analytics</h3><p className="flex-1 text-xs text-blue-900">Organized summaries and analysis across the available timesheet records.</p><Button variant="outline" className="justify-start border-blue-200 bg-white text-blue-900 hover:bg-blue-100" onClick={()=>setAdminReportOpen(true)}><BarChart3 className="size-4"/>Open analytics report</Button></section>
             <section className="flex flex-col items-start gap-2 border-l-4 border-orange-500 bg-orange-50/70 p-3"><h3 className="text-sm font-semibold text-orange-950">Activity and audit log</h3><p className="flex-1 text-xs text-orange-900">Investigate who did what, when, and which request or record was involved.</p><Button variant="outline" className="justify-start border-orange-200 bg-white text-orange-900 hover:bg-orange-100" onClick={openActivityWindow}><Activity className="size-4"/>Open activity log</Button></section>
             <section className="flex flex-col items-start gap-2 border-l-4 border-red-500 bg-red-50/70 p-3"><h3 className="text-sm font-semibold text-red-950">Security risk report</h3><p className="flex-1 text-xs text-red-900">Review AI-highlighted activity patterns and security findings before taking action.</p><Button variant="outline" className="justify-start border-red-200 bg-white text-red-900 hover:bg-red-100" onClick={()=>onSecurity?.()}><ShieldCheck className="size-4"/>Open security risks</Button></section>
+            <section className="flex flex-col items-start gap-2 border-l-4 border-orange-600 bg-orange-50/70 p-3"><div className="flex w-full items-center justify-between gap-2"><h3 className="text-sm font-semibold text-orange-950">Issues and requests</h3><span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-900">{issueSummary.open} open · {issueSummary.urgent} urgent</span></div><p className="flex-1 text-xs text-orange-900">Review {issueSummary.uniqueErrors} unique failure patterns, compare repeated reports, track repairs, and dequeue resolved issues. Report and repair history is available to the admin assistant for scrutiny.</p><Button variant="outline" className="justify-start border-orange-200 bg-white text-orange-900 hover:bg-orange-100" onClick={()=>setAdminIssuesOpen(true)}><Activity className="size-4"/>Open issue queue</Button></section>
             <section className="flex flex-col items-start gap-2 border-l-4 border-emerald-600 bg-emerald-50/70 p-3"><h3 className="text-sm font-semibold text-emerald-950">AI workflow activity</h3><p className="flex-1 text-xs text-emerald-900">Inspect sanitized response times, outcomes, proposal counts, and failure categories.</p><Button variant="outline" className="justify-start border-emerald-200 bg-white text-emerald-900 hover:bg-emerald-100" onClick={()=>setAssistantRunsOpen(true)}><Activity className="size-4"/>Open AI activity</Button></section>
           </div>
         </section>
@@ -1513,6 +1537,7 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
       {!rightsOnly&&adminTimesheetTool==="periods"&&<WindowSurface title="Timesheet period settings" onBack={()=>setAdminTimesheetTool(null)}><section className="min-h-0 w-full overflow-auto bg-white p-4 sm:p-6"><header className="mb-4 border-l-4 border-orange-500 bg-orange-50 px-3 py-2"><h2 className="font-semibold text-orange-950">Timesheet periods and submission windows</h2><p className="text-xs text-orange-900">Create a new period or edit and save an existing window. When a period's dates take effect, it becomes the current empty timesheet view for everyone; prior periods remain available in Timesheets archives.</p></header><SubmissionDeadlineSettings defaultOpen/></section></WindowSurface>}
       {!rightsOnly&&adminTimesheetTool==="entries"&&<WindowSurface title="Timesheet view" onBack={()=>setAdminTimesheetTool(null)}><section className="flex min-h-0 w-full flex-col gap-3 overflow-auto bg-white p-4 sm:p-6"><header className="flex flex-wrap items-center justify-between gap-2 border-b border-green-200 bg-green-50 px-3 py-2"><div><h2 className="font-semibold text-green-950">Raw timesheet entries</h2><p className="text-xs text-green-900">Source records with period archives, search, status, project and date filters, sorting, grouping, individual edits, and permission-based actions.</p></div><div className="flex flex-wrap gap-2">{canCreateEntries&&<Button variant="outline" size="sm" onClick={onOpenEntryCapture}><Pencil className="size-4"/>Log time</Button>}<Button variant="outline" size="sm" onClick={onRefreshEntries}><Activity className="size-4"/>Refresh entries</Button></div></header><details className="group rounded-md border border-orange-200 bg-orange-50/35"><summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 hover:bg-orange-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 [&::-webkit-details-marker]:hidden"><CheckCircle2 className="size-4 shrink-0 text-orange-700" aria-hidden="true"/><span className="min-w-0 flex-1"><span className="block text-sm font-semibold text-orange-950">Review queue</span><span className="block text-[11px] text-orange-900">{pendingEntries.length} awaiting review · AI advice and confirmed decisions</span></span><ChevronRight className="size-4 shrink-0 text-orange-800 transition-transform group-open:rotate-90" aria-hidden="true"/></summary><section aria-label="Approval preparation" className="border-t border-orange-200 px-3 py-2"><h3 className="mb-1 text-sm font-semibold text-orange-950">Prepare and send for approval</h3><p className="mb-2 text-xs text-orange-900">AI suggestions are advisory. A person confirms every approval, rejection, or return.</p><ApprovalSelection entries={pendingEntries} email={userEmail} canReview={canReviewEntries} canAI={canAIReview} onUpdated={onApprovalUpdated}/></section></details><EntriesLog stateKey={`admin-timesheets:${userEmail.toLowerCase()}`} userEmail={userEmail} entries={entries} onUpdate={onEntryUpdate} onStatusChange={onEntryStatusChange} onDelete={onEntryDelete} onClear={onEntryClear} canEdit={canEditEntries} canDelete={canDeleteEntries} canClear={canClearEntries} canReview={canReviewEntries} canSubmit={canSubmitEntries} canSubmitOthers canExport={canExportEntries} periodView initialPeriodSelection={adminPeriodSelection} title="Raw timesheet entries" description="Source records with period archives, search, status, project and date filters, sorting, grouping, individual edits, and permission-based actions."/></section></WindowSurface>}
       {!rightsOnly&&adminReportOpen&&<WindowSurface title="Analytics reports" onBack={()=>setAdminReportOpen(false)}><section className="min-h-0 w-full overflow-auto bg-white p-4 sm:p-6">{reportContent}</section></WindowSurface>}
+      {!rightsOnly&&adminIssuesOpen&&<WindowSurface title="Issues and requests" onBack={()=>setAdminIssuesOpen(false)}><AdminIssuesWorkspace onSummaryChange={setIssueSummary}/></WindowSurface>}
       {!rightsOnly&&assistantRunsOpen&&<WindowSurface title="AI workflow activity" onBack={()=>setAssistantRunsOpen(false)}><AssistantRunReport/></WindowSurface>}
       {directoryOpen&&<WindowSurface title={rightsOnly?"Manage employees/contractors":"User directory"} onBack={()=>rightsOnly&&onExit?onExit():setDirectoryOpen(false)}>
       <section className="flex min-h-0 w-full flex-col overflow-hidden bg-white">
@@ -1574,7 +1599,7 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
       </section>
       </WindowSurface>}
 
-      {selectedPatron&&<PatronDetailsDialog user={selectedPatron} editingName={editingOfficialName} nameDraft={officialNameDraft} error={managementError} saving={savingOfficialName} onClose={()=>{if(!savingOfficialName){setSelectedPatron(null);setEditingOfficialName(false);setManagementError(null)}}} onStartNameEdit={()=>{setOfficialNameDraft(selectedPatron.displayName.startsWith("Name Not Set ")?"":selectedPatron.displayName);setManagementError(null);setEditingOfficialName(true)}} onNameChange={setOfficialNameDraft} onNameCancel={()=>{setEditingOfficialName(false);setManagementError(null)}} onNameSave={saveOfficialName}/>}
+      {selectedPatron&&<PatronDetailsDialog user={selectedPatron} editingName={editingOfficialName} nameDraft={officialNameDraft} employeeIdDraft={companyEmployeeIdDraft} error={managementError} saving={savingOfficialName} onClose={()=>{if(!savingOfficialName){setSelectedPatron(null);setEditingOfficialName(false);setManagementError(null)}}} onStartNameEdit={()=>{setOfficialNameDraft(selectedPatron.displayName.startsWith("Name Not Set ")?"":selectedPatron.displayName);setCompanyEmployeeIdDraft(selectedPatron.employeeId??"");setManagementError(null);setEditingOfficialName(true)}} onNameChange={setOfficialNameDraft} onEmployeeIdChange={setCompanyEmployeeIdDraft} onNameCancel={()=>{setEditingOfficialName(false);setManagementError(null)}} onNameSave={saveOfficialIdentity}/>}
 
       {activityWindowOpen && (
         <AdminActivityWindow
@@ -1619,7 +1644,7 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
 }
 
 /** Renders secondary patron details and the admin-only official-name editor. */
-function PatronDetailsDialog({user,editingName,nameDraft,error,saving,onClose,onStartNameEdit,onNameChange,onNameCancel,onNameSave}:{user:AdminDirectoryUser;editingName:boolean;nameDraft:string;error:string|null;saving:boolean;onClose:()=>void;onStartNameEdit:()=>void;onNameChange:(value:string)=>void;onNameCancel:()=>void;onNameSave:()=>void}) {
+function PatronDetailsDialog({user,editingName,nameDraft,employeeIdDraft,error,saving,onClose,onStartNameEdit,onNameChange,onEmployeeIdChange,onNameCancel,onNameSave}:{user:AdminDirectoryUser;editingName:boolean;nameDraft:string;employeeIdDraft:string;error:string|null;saving:boolean;onClose:()=>void;onStartNameEdit:()=>void;onNameChange:(value:string)=>void;onEmployeeIdChange:(value:string)=>void;onNameCancel:()=>void;onNameSave:()=>void}) {
   const rights=Object.values(resolvePermissions(user.role==="none"||user.accessStatus!=="active"?null:user.role,user.permissions)).filter(Boolean).length
   return <WindowSurface title={displayOfficialName(user.displayName)} onBack={onClose} disabled={saving} compact>
     <section aria-labelledby="patron-details-title" className="flex min-h-0 w-full flex-col overflow-auto bg-white text-slate-950">
@@ -1635,7 +1660,7 @@ function PatronDetailsDialog({user,editingName,nameDraft,error,saving,onClose,on
         {user.updatedBy&&<DetailField label="Last access update" value={`${user.updatedBy}${user.updatedAt?` · ${formatAdminDateTime(user.updatedAt)}`:""}`}/>}
       </div>
       <div className="border-t p-4">
-        {editingName?<form onSubmit={event=>{event.preventDefault();onNameSave()}} className="space-y-3"><label className="block text-sm font-medium">Official name<input autoFocus required minLength={2} maxLength={80} value={nameDraft} onChange={event=>onNameChange(event.target.value)} className="mt-1 h-10 w-full rounded border border-slate-300 px-3 font-normal"/></label>{error&&<p role="alert" className="text-sm text-red-700">{error}</p>}<div className="flex justify-end gap-2"><Button type="button" variant="outline" disabled={saving} onClick={onNameCancel}>Cancel</Button><Button type="submit" disabled={saving}>{saving?"Saving...":"Save name"}</Button></div></form>:<div className="flex items-center justify-between gap-3"><p className="text-xs text-slate-500">Official names are visible to authorized company users.</p><Button variant="outline" size="sm" onClick={onStartNameEdit}><Pencil className="size-3.5"/>Edit name</Button></div>}
+        {editingName?<form onSubmit={event=>{event.preventDefault();onNameSave()}} className="space-y-3"><label className="block text-sm font-medium">Official name<input autoFocus required minLength={2} maxLength={80} value={nameDraft} onChange={event=>onNameChange(event.target.value)} className="mt-1 h-10 w-full rounded border border-slate-300 px-3 font-normal"/></label><label className="block text-sm font-medium">Company-issued ID<input aria-label="Company-issued ID" maxLength={64} value={employeeIdDraft} onChange={event=>onEmployeeIdChange(event.target.value)} className="mt-1 h-10 w-full rounded border border-slate-300 px-3 font-normal"/><span className="mt-1 block text-xs font-normal text-slate-500">Leave blank to clear this company ID. Generated account and company reference IDs cannot be changed.</span></label>{error&&<p role="alert" className="text-sm text-red-700">{error}</p>}<div className="flex justify-end gap-2"><Button type="button" variant="outline" disabled={saving} onClick={onNameCancel}>Cancel</Button><Button type="submit" disabled={saving}>{saving?"Saving...":"Save changes"}</Button></div></form>:<div className="flex items-center justify-between gap-3"><p className="text-xs text-slate-500">Official name and company-issued ID are visible to authorized company users.</p><Button variant="outline" size="sm" onClick={onStartNameEdit}><Pencil className="size-3.5"/>Edit identity</Button></div>}
       </div>
     </section>
   </WindowSurface>

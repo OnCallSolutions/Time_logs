@@ -7,12 +7,13 @@ import { beforeEach, expect, it, vi } from "vitest"
 vi.mock("@/auth",()=>({auth:vi.fn()}))
 vi.mock("@/lib/access",()=>({getEffectiveUserRole:vi.fn(),getConfiguredAccessUsers:vi.fn(()=>[])}))
 vi.mock("@/lib/db",()=>({listKnownUsers:vi.fn(async()=>[]),listManagedAccessUsers:vi.fn(async()=>[]),recordAuditEvent:vi.fn()}))
-vi.mock("@/lib/account-identities",()=>({listAccountIdentities:vi.fn(),onboardAccount:vi.fn(),setOfficialIdentity:vi.fn()}))
+vi.mock("@/lib/account-identities",()=>({listAccountIdentities:vi.fn(async()=>[]),onboardAccount:vi.fn(),setOfficialIdentity:vi.fn()}))
 vi.mock("@/lib/company-directory",()=>({companyEmailDomains:vi.fn(()=>["devoncall.net"])}))
 import { auth } from "@/auth"
 import { getEffectiveUserRole } from "@/lib/access"
 import { listKnownUsers } from "@/lib/db"
-import { onboardAccount,setOfficialIdentity } from "@/lib/account-identities"
+import { listAccountIdentities,onboardAccount,setOfficialIdentity } from "@/lib/account-identities"
+import { recordAuditEvent } from "@/lib/db"
 import { PATCH,POST } from "./route"
 beforeEach(()=>{vi.clearAllMocks();vi.mocked(auth).mockResolvedValue({user:{email:"manager@example.com"}} as never);vi.mocked(getEffectiveUserRole).mockResolvedValue("manager");vi.mocked(onboardAccount).mockResolvedValue({email:"person@example.com",officialName:"Person Name",contractorNumber:"TN-unique"})})
 /** @param extra - Untrusted onboarding overrides. @returns Request with otherwise valid employee details. */
@@ -48,7 +49,20 @@ it("lets only admins rename an existing patron without accepting an ID",async()=
   vi.mocked(setOfficialIdentity).mockResolvedValue({email:"person@example.com",officialName:"Person Name",contractorNumber:"TN-immutable"})
   const response=await PATCH(new Request("http://localhost/api/people",{method:"PATCH",body:JSON.stringify({email:"person@example.com",officialName:"pERSON nAME"})}))
   expect(response.status).toBe(200)
-  expect(setOfficialIdentity).toHaveBeenCalledWith("person@example.com","Person Name","manager@example.com")
+  expect(setOfficialIdentity).toHaveBeenCalledWith("person@example.com","Person Name","manager@example.com",undefined)
+})
+
+it("lets only admins update or clear a company-issued patron ID and audits changed fields",async()=>{
+  vi.mocked(getEffectiveUserRole).mockResolvedValue("admin")
+  vi.mocked(listKnownUsers).mockResolvedValue([{email:"person@example.com"}] as never)
+  vi.mocked(listAccountIdentities).mockResolvedValue([{email:"person@example.com",officialName:"Person Name",contractorNumber:"TN-immutable",employeeId:"OLD-7"}] as never)
+  vi.mocked(setOfficialIdentity).mockResolvedValue({email:"person@example.com",officialName:"Person Name",contractorNumber:"TN-immutable",employeeId:"NEW-8"})
+  const response=await PATCH(new Request("http://localhost/api/people",{method:"PATCH",body:JSON.stringify({email:"person@example.com",officialName:"Person Name",employeeId:" NEW-8 "})}))
+  expect(response.status).toBe(200)
+  expect(setOfficialIdentity).toHaveBeenCalledWith("person@example.com","Person Name","manager@example.com","NEW-8")
+  expect(recordAuditEvent).toHaveBeenCalledWith(expect.objectContaining({targetId:"person@example.com",metadata:{changedFields:["employeeId"]}}))
+  await PATCH(new Request("http://localhost/api/people",{method:"PATCH",body:JSON.stringify({email:"person@example.com",officialName:"Person Name",employeeId:null})}))
+  expect(setOfficialIdentity).toHaveBeenLastCalledWith("person@example.com","Person Name","manager@example.com",null)
 })
 
 it("does not allow managers to rename patrons",async()=>{

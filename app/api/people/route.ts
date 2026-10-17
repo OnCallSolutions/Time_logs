@@ -53,14 +53,16 @@ export async function PATCH(request: Request): Promise<Response> {
   try {
     const actor = (await auth())?.user?.email
     if (!actor || await getEffectiveUserRole(actor) !== "admin") return Response.json({ error: "Forbidden." }, { status: 403 })
-    const input = z.object({ email: emailSchema, officialName: officialNameSchema }).strict().parse(await request.json())
+    const input = z.object({ email: emailSchema, officialName: officialNameSchema, employeeId: z.union([employeeIdSchema, z.null()]).optional() }).strict().parse(await request.json())
     const [known, managed] = await Promise.all([listKnownUsers(), listManagedAccessUsers()])
     const exists = getConfiguredAccessUsers().some(user => user.email.toLowerCase() === input.email)
       || known.some(user => user.email.toLowerCase() === input.email)
       || managed.some(user => user.email.toLowerCase() === input.email)
     if (!exists) return Response.json({ error: "Choose an existing patron from the directory." }, { status: 404 })
-    const identity = await setOfficialIdentity(input.email, input.officialName, actor)
-    await recordAuditEvent({ actorEmail: actor, action: "user_access_updated", targetType: "account_identity", targetId: input.email, metadata: { officialNameChanged: true }, ...getAuditContext(request) })
+    const previous=(await listAccountIdentities([input.email]))[0]
+    const identity = await setOfficialIdentity(input.email, input.officialName, actor, input.employeeId)
+    const changedFields=[...(previous?.officialName!==input.officialName?["officialName"]:[]),...(input.employeeId!==undefined&&(previous?.employeeId??null)!==input.employeeId?["employeeId"]:[])]
+    if(changedFields.length)await recordAuditEvent({ actorEmail: actor, action: "user_access_updated", targetType: "account_identity", targetId: input.email, metadata: { changedFields }, ...getAuditContext(request) })
     return Response.json({ identity })
   } catch (error) {
     const code = error && typeof error === "object" && "code" in error ? error.code : null

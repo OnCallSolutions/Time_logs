@@ -125,7 +125,7 @@ export async function onboardAccount(input: { email: string; officialName: strin
  * @param actor - Authenticated administrator recorded as the identity creator.
  * @returns Promise<AccountIdentity> with the saved approved identity.
  */
-export async function setOfficialIdentity(email: string, officialName: string, actor: string, employeeId?: string): Promise<AccountIdentity> {
+export async function setOfficialIdentity(email: string, officialName: string, actor: string, employeeId?: string | null): Promise<AccountIdentity> {
   await ensureAccountIdentities()
   await sql`WITH identity AS (INSERT INTO account_identities(email,official_name,created_by) VALUES(${normalizeEmail(email)},${officialName},${normalizeEmail(actor)})
     ON CONFLICT(email) DO UPDATE SET official_name=EXCLUDED.official_name,updated_at=now()

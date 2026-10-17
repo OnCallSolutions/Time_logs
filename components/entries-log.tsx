@@ -8,7 +8,7 @@
  * workflow controls are available, and whether elevated bulk clearing controls
  * should be available.
  */
-import { AlertTriangle, Download, FilterX, Search, ClipboardList, Trash2 } from "lucide-react"
+import { AlertTriangle, ChevronRight, Download, FilterX, Search, ClipboardList, Trash2 } from "lucide-react"
 import { Fragment,useEffect,useState } from "react"
 import { EntryLogRow, type EntryMutation, type EntryTransition } from "@/components/entry-log-row"
 import { EntryReviewDialog } from "@/components/manager-workspace"
@@ -301,25 +301,22 @@ export function EntriesLog({
         await onStatusChange(review.entry.id, review.decision, note || undefined, review.entry.revision)
         setReview(null)
       }} />}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-orange-200 bg-gradient-to-r from-orange-50 via-white to-sky-50 px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-orange-200 bg-gradient-to-r from-orange-50 via-white to-sky-50 px-3 py-2">
         <div>
           <h2 className="text-sm font-semibold">{title}</h2>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-[11px] text-muted-foreground">
             {periodEntries.length} {periodEntries.length === 1 ? "entry" : "entries"} ·{" "}
             {description}
           </p>
         </div>
-        {canClear && (
-          <Button variant="destructive" size="sm" onClick={() => setClearConfirmationOpen(true)}>
-            <Trash2 className="size-3.5" aria-hidden="true" />
-            Clear all
-          </Button>
-        )}
-        {canExport&&<Button variant="outline" size="sm" disabled={!visibleEntries.length} onClick={()=>downloadTimesheetCsv(visibleEntries)} className="border-emerald-300 bg-emerald-50 text-emerald-900 hover:bg-emerald-100"><Download className="size-3.5" aria-hidden="true"/>Export visible ({visibleEntries.length})</Button>}
+        <div className="flex flex-wrap items-center gap-1.5">
+          {canClear&&<Button variant="destructive" size="sm" className="h-8" onClick={() => setClearConfirmationOpen(true)}><Trash2 className="size-3.5" aria-hidden="true" />Clear all</Button>}
+          {canExport&&<Button variant="outline" size="sm" className="h-8 border-emerald-300 bg-emerald-50 text-emerald-900 hover:bg-emerald-100" disabled={!visibleEntries.length} onClick={()=>downloadTimesheetCsv(visibleEntries)}><Download className="size-3.5" aria-hidden="true"/>Export ({visibleEntries.length})</Button>}
+        </div>
       </div>
-      {periodView&&<div className="flex flex-wrap items-center gap-3 border-b border-indigo-200 bg-indigo-50/70 px-3 py-2">
+      {periodView&&<div className="flex flex-wrap items-center gap-2 border-b border-indigo-200 bg-indigo-50/70 px-3 py-1.5">
         <label className="flex items-center gap-2 text-xs font-semibold text-indigo-950">Timesheet period
-          <select aria-label="Timesheet period" value={periodSelection} onChange={event=>setPeriodSelection(event.target.value)} disabled={!periodsLoaded||periods.length===0} className="h-9 max-w-full rounded-md border border-indigo-200 bg-white px-2 text-sm font-normal text-slate-900">
+          <select aria-label="Timesheet period" value={periodSelection} onChange={event=>setPeriodSelection(event.target.value)} disabled={!periodsLoaded||periods.length===0} className="h-8 max-w-full rounded-md border border-indigo-200 bg-white px-2 text-sm font-normal text-slate-900">
             <option value="current">Current period{activePeriod?` · ${activePeriod.name}`:""}</option>
             <option value="archived">Archived periods · all</option>
             <option value="all">All saved periods</option>
@@ -329,10 +326,10 @@ export function EntriesLog({
         </label>
         <span role="status" className="text-xs text-indigo-900">{!periodsLoaded?"Loading period history…":periods.length===0?"No periods are configured; showing all saved timesheets.":periodSelection==="current"&&!activePeriod?"No period is active today. Select an archived or upcoming period.":periodSelection==="archived"?"Archived entries remain stored and can be retrieved by period.":`Showing ${periodEntries.length} entries for ${periodSelection==="current"?activePeriod?.name??"the current period":periodSelection==="all"?"all periods":periodSelection==="unassigned"?"dates outside configured periods":periods.find(period=>period.id===periodSelection)?.name??"the selected period"}.`}</span>
       </div>}
-      {canSubmit&&<p role="status" className={`border-b px-4 py-2 text-xs ${submissionClosed?"border-red-200 bg-red-50 text-red-900":"border-orange-200 bg-orange-50/70 text-orange-950"}`}>{displayedDeadline?(submissionClosed?`Submission deadline passed: ${new Date(displayedDeadline).toLocaleString()}. Contact an administrator if you need an exception.`:`Timesheet submissions close ${new Date(displayedDeadline).toLocaleString()}.`):`${deadlineLoaded?"No organization submission deadline is configured; submissions remain open.":"Checking submission deadline..."}`}</p>}
+      {canSubmit&&<p role="status" className={`border-b px-3 py-1 text-[11px] ${submissionClosed?"border-red-200 bg-red-50 text-red-900":"border-orange-200 bg-orange-50/70 text-orange-950"}`}>{displayedDeadline?(submissionClosed?`Submission deadline passed: ${new Date(displayedDeadline).toLocaleString()}. Contact an administrator if you need an exception.`:`Submissions close ${new Date(displayedDeadline).toLocaleString()}.`):`${deadlineLoaded?"No organization submission deadline is configured; submissions remain open.":"Checking submission deadline..."}`}</p>}
 
-      <div>
-        <div className="grid gap-2 border-b border-sky-200 bg-sky-50/50 p-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="border-b border-sky-200 bg-sky-50/50 p-2">
+        <div className="grid gap-1.5 sm:grid-cols-2 xl:grid-cols-4">
           <label className="flex min-w-0 basis-full items-center gap-2 sm:flex-1 sm:basis-auto">
             <Search className="size-4 shrink-0" aria-hidden="true" />
             <input aria-label="Search entries" placeholder="Search person, project, work, date" value={query} onChange={event => setQuery(event.target.value)} className="h-9 w-full min-w-0 rounded-md border border-sky-200 bg-white px-3 text-sm" />
@@ -347,20 +344,25 @@ export function EntriesLog({
           <select aria-label="Sort entries" value={sortBy} onChange={event=>setSortBy(event.target.value)} className="h-9 rounded-md border border-violet-200 bg-white px-2 text-sm">
             <option value="date_newest">Newest date</option><option value="date_oldest">Oldest date</option><option value="project_az">Project A-Z</option><option value="person_az">Person A-Z</option><option value="hours_high">Hours: high to low</option><option value="hours_low">Hours: low to high</option><option value="status">Status</option>
           </select>
-          <label className="flex items-center gap-2 text-xs font-medium text-slate-700">From<input aria-label="Entries from date" type="date" value={dateFrom} max={dateThrough||undefined} onChange={event=>setDateFrom(event.target.value)} className="h-9 min-w-0 flex-1 rounded-md border border-emerald-200 bg-white px-2 text-sm"/></label>
-          <label className="flex items-center gap-2 text-xs font-medium text-slate-700">Through<input aria-label="Entries through date" type="date" value={dateThrough} min={dateFrom||undefined} onChange={event=>setDateThrough(event.target.value)} className="h-9 min-w-0 flex-1 rounded-md border border-emerald-200 bg-white px-2 text-sm"/></label>
-          <select aria-label="Group entries" value={groupBy} onChange={event=>setGroupBy(event.target.value)} className="h-9 rounded-md border border-teal-200 bg-white px-2 text-sm">
-            <option value="project">Group by project</option><option value="day">Group by day</option><option value="person">Group by person</option><option value="none">No grouping</option>
-          </select>
-          <div className="flex items-center justify-between gap-2 sm:col-span-2 xl:col-span-1"><span className="text-xs font-medium text-slate-600">Showing {visibleEntries.length} / {periodEntries.length}</span><Button variant="outline" size="sm" title="Reset search, filters, sorting, and grouping" aria-label="Reset timesheet view" disabled={!filtersActive} onClick={clearFilters}><FilterX className="size-4"/>Reset view</Button></div>
         </div>
-        {selectable && <div aria-label="Entry submission controls" className="flex flex-wrap items-center gap-2 border-b bg-orange-50/50 p-3">
+        <details className="group mt-1.5 border-t border-sky-200/80 pt-1.5">
+          <summary className="flex cursor-pointer list-none items-center gap-2 text-xs font-medium text-sky-900 hover:text-sky-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 [&::-webkit-details-marker]:hidden"><ChevronRight className="size-3.5 transition-transform group-open:rotate-90" aria-hidden="true"/>More filters and grouping<span className="text-slate-500">· Showing {visibleEntries.length} / {periodEntries.length}</span></summary>
+          <div className="mt-2 grid gap-1.5 sm:grid-cols-2 xl:grid-cols-4">
+            <label className="flex items-center gap-2 text-xs font-medium text-slate-700">From<input aria-label="Entries from date" type="date" value={dateFrom} max={dateThrough||undefined} onChange={event=>setDateFrom(event.target.value)} className="h-8 min-w-0 flex-1 rounded-md border border-emerald-200 bg-white px-2 text-sm"/></label>
+            <label className="flex items-center gap-2 text-xs font-medium text-slate-700">Through<input aria-label="Entries through date" type="date" value={dateThrough} min={dateFrom||undefined} onChange={event=>setDateThrough(event.target.value)} className="h-8 min-w-0 flex-1 rounded-md border border-emerald-200 bg-white px-2 text-sm"/></label>
+            <select aria-label="Group entries" value={groupBy} onChange={event=>setGroupBy(event.target.value)} className="h-8 rounded-md border border-teal-200 bg-white px-2 text-sm"><option value="project">Group by project</option><option value="day">Group by day</option><option value="person">Group by person</option><option value="none">No grouping</option></select>
+            <div className="flex items-center justify-between gap-2"><span className="text-xs font-medium text-slate-600">{visibleEntries.length} visible</span><Button variant="outline" size="sm" className="h-8" title="Reset search, filters, sorting, and grouping" aria-label="Reset timesheet view" disabled={!filtersActive} onClick={clearFilters}><FilterX className="size-4"/>Reset view</Button></div>
+          </div>
+        </details>
+        {selectable && <details aria-label="Entry submission controls" className="group mt-1.5 border-t border-orange-200 pt-1.5">
+          <summary className="flex cursor-pointer list-none items-center gap-2 text-xs font-medium text-orange-950 hover:text-orange-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 [&::-webkit-details-marker]:hidden"><ChevronRight className="size-3.5 transition-transform group-open:rotate-90" aria-hidden="true"/>Bulk actions<span className="text-slate-600">· {selected.length} selected / {matchingEligible.length} eligible</span></summary>
+          <div className="mt-2 flex flex-wrap items-center gap-1.5 border-l-2 border-orange-400 bg-orange-50/60 p-2">
           <Button variant="outline" size="sm" disabled={!eligible.length} onClick={() => setSelectedIds(eligible.map(entry => entry.id))}>Select all eligible ({eligible.length})</Button>
           <Button variant="ghost" size="sm" disabled={!selected.length} onClick={() => setSelectedIds([])}>Clear selection</Button>
-          <span className="text-sm">{selected.length} selected / {matchingEligible.length} matching eligible</span>
           {canSubmit&&<SubmissionActions entries={submissions.filter(entry=>selectedIdSet.has(entry.id))} openRequest={submissionRequest} destination={submissionDestination} onStatusChange={onStatusChange} onSubmitted={id => setSelectedIds(previous => previous.filter(current => current !== id))} />}
           {canRequestReview&&onRequestReview&&<Button size="sm" variant="outline" disabled={!requestable.some(entry=>selectedIdSet.has(entry.id))||requestable.filter(entry=>selectedIdSet.has(entry.id)).length>50} onClick={()=>onRequestReview(requestable.filter(entry=>selectedIdSet.has(entry.id)))}>Request reviewer help ({requestable.filter(entry=>selectedIdSet.has(entry.id)).length})</Button>}
-        </div>}
+          </div>
+        </details>}
         {visibleEntries.length === 0 && <p role="status" className="p-4 text-sm text-muted-foreground">{periodView&&periodsLoaded&&periods.length>0&&periodSelection==="current"&&!activePeriod?"No timesheet period is active today. Select an archived or upcoming period to retrieve entries.":periodView&&periodsLoaded&&periods.length===0?"No saved timesheets match the current filters.":"No matching entries."}</p>}
         <div tabIndex={0} aria-label="Scrollable time entries" onWheel={chainTimesheetWheel} className="max-h-[calc(100dvh-14rem)] min-h-48 overflow-auto overscroll-y-auto">
         <table className="w-full min-w-[1080px] border-collapse text-left">

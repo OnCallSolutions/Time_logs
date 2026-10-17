@@ -156,6 +156,8 @@ export type AuditAction =
   | "authentication_failed"
   | "authentication_signed_out"
   | "client_error_reported"
+  | "user_issue_submitted"
+  | "issue_updated"
 
 export type AuditEvent = {
   id: string
@@ -520,6 +522,27 @@ export async function createTimesheetPeriod(input:{name:string;startDate:string;
       manager_grace_days,reminder_days,created_by,created_at::text AS created_at FROM saved WHERE EXISTS(SELECT 1 FROM audited)`
   const row=rows[0]
   return row?{id:String(row.id),name:String(row.name),startDate:String(row.start_date),endDate:String(row.end_date),submissionDeadline:new Date(String(row.submission_deadline)).toISOString(),managerGraceDays:Number(row.manager_grace_days),reminderDays:Number(row.reminder_days),createdBy:String(row.created_by),createdAt:new Date(String(row.created_at)).toISOString()}:null
+}
+
+/** Creates a default four-week successor after the latest period expires, unless one was explicitly configured. */
+export async function ensureDefaultUpcomingTimesheetPeriod(context:AuditContext):Promise<TimesheetPeriod|null>{
+  const periods=await listTimesheetPeriods()
+  if(!periods.length)return null
+  const latest=[...periods].sort((a,b)=>b.endDate.localeCompare(a.endDate))[0]
+  const today=new Date().toISOString().slice(0,10)
+  if(latest.endDate>=today||periods.some(period=>period.startDate>latest.endDate))return null
+  const date=new Date(`${latest.endDate}T00:00:00.000Z`)
+  date.setUTCDate(date.getUTCDate()+1)
+  const tomorrow=new Date(`${today}T00:00:00.000Z`)
+  const daysSinceExpiration=Math.floor((tomorrow.getTime()-new Date(`${latest.endDate}T00:00:00.000Z`).getTime())/86400000)
+  const candidate=daysSinceExpiration<=7?date:tomorrow
+  candidate.setUTCDate(candidate.getUTCDate()+((6-candidate.getUTCDay()+7)%7))
+  const startDate=candidate.toISOString().slice(0,10)
+  const end=new Date(candidate);end.setUTCDate(end.getUTCDate()+27)
+  const endDate=end.toISOString().slice(0,10)
+  const format=(value:Date)=>new Intl.DateTimeFormat("en",{month:"short",day:"numeric",timeZone:"UTC"}).format(value)
+  const name=`${format(candidate)} – ${format(end)} ${end.getUTCFullYear()}`
+  return createTimesheetPeriod({name,startDate,endDate,submissionDeadline:`${endDate}T23:59:00.000Z`,managerGraceDays:3,reminderDays:3},"system@tanovo-time.local",context)
 }
 
 /** Updates a submission window and audits the before/after values atomically. */

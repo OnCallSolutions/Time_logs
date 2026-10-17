@@ -9,7 +9,9 @@ vi.mock("@/app/api/messages/route",()=>({GET:vi.fn()}))
 vi.mock("@/lib/account-identities",()=>({listAccountIdentities:vi.fn(async()=>[])}))
 vi.mock("@/lib/collaboration",()=>({actorRoster:vi.fn(async()=>[])}))
 vi.mock("@/app/api/submission-managers/route",()=>({GET:vi.fn()}))
+vi.mock("@/lib/issues-store",()=>({listIssues:vi.fn(async()=>[])}))
 import { generateText } from "ai"
+import { listIssues } from "@/lib/issues-store"
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { allowAssistantRequest,getAssistantConversation,readAssistantRequest,saveAssistantMessage,startAssistantRun,finishAssistantRun } from "@/lib/assistant-security"
@@ -20,6 +22,7 @@ import { POST } from "./route"
 const entry=(id:string,status:string)=>({id:`123e4567-e89b-42d3-a456-${id.padStart(12,"0")}`,revision:"r1",contractor:"Official Name",ownerEmail:"manager@example.com",date:"2026-10-17",hours:2,project:"Project",description:"Work",status})
 beforeEach(()=>{
   vi.clearAllMocks()
+  vi.mocked(listIssues).mockResolvedValue([])
   vi.mocked(auth).mockResolvedValue({user:{email:"manager@example.com",name:"Manager"},appSessionId:"session"} as never)
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"manager",permissions:{submit_entries:false,delegate_permissions:false}} as never)
   vi.mocked(allowAssistantRequest).mockResolvedValue(true)
@@ -29,6 +32,18 @@ beforeEach(()=>{
   vi.mocked(readMessages).mockResolvedValue(Response.json({messages:[]}) as never)
   vi.mocked(startAssistantRun).mockResolvedValue("123e4567-e89b-42d3-a456-426614174001")
   vi.mocked(generateText).mockResolvedValue({output:{answer:"One pending record.",actions:[]}} as never)
+})
+
+it("supplies stored issue patterns and repair history to the admin reports assistant only",async()=>{
+  const issue={reference:"e4b21455-ca7d-468c-aee9-3b6a9d3767ea",reporterEmail:"patron@example.com",operation:"entry.submit",route:"/api/entries/[id]",httpStatus:503,errorMessage:"Save failed",details:"Confirmation stayed open",status:"investigating",priority:"high",internalNote:"Patched optimistic concurrency handling",similarReports:3,createdAt:"2026-10-17T10:00:00.000Z",updatedAt:"2026-10-17T10:15:00.000Z"}
+  vi.mocked(auth).mockResolvedValue({user:{email:"admin@example.com",name:"Admin"},appSessionId:"session"} as never)
+  vi.mocked(getEffectivePermissions).mockResolvedValue({role:"admin",permissions:{submit_entries:true,delegate_permissions:true}} as never)
+  vi.mocked(readAssistantRequest).mockResolvedValue({workspaceContext:"Reports",messages:[{role:"user",content:"Look for repeat submission failures."}]})
+  vi.mocked(listIssues).mockResolvedValue([issue] as never)
+  const response=await POST(new Request("https://app.example/api/assistant",{method:"POST",headers:{origin:"https://app.example","content-type":"application/json"},body:"{}"}))
+  expect(response.status).toBe(200)
+  const supplied=JSON.parse(vi.mocked(generateText).mock.calls[0][0].prompt as string)
+  expect(supplied.adminIssueRecords).toEqual([expect.objectContaining({reporterEmail:"patron@example.com",reporterDetails:"Confirmation stayed open",internalRepairNotes:"Patched optimistic concurrency handling",similarReports:3})])
 })
 
 it("loads persisted history and only submitted entries for the active approvals workspace",async()=>{

@@ -33,7 +33,7 @@ it("exposes filtered CSV export only when the caller has the explicit export rig
   const {rerender}=render(<EntriesLog {...props}/> )
   expect(screen.queryByRole("button",{name:/export visible/i})).not.toBeInTheDocument()
   rerender(<EntriesLog {...props} canExport/> )
-  expect(screen.getByRole("button",{name:"Export visible (1)"})).toBeEnabled()
+  expect(screen.getByRole("button",{name:"Export (1)"})).toBeEnabled()
 })
 
 it("filters timesheets by text, status, project and date, with selectable sort and grouping",async()=>{
@@ -48,6 +48,7 @@ it("filters timesheets by text, status, project and date, with selectable sort a
   await user.type(screen.getByRole("textbox",{name:"Search entries"}),"Build release")
   expect(screen.getByText("Build release")).toBeVisible()
   expect(screen.queryByText("Design notes")).not.toBeInTheDocument()
+  await user.click(screen.getByText("More filters and grouping"))
   await user.click(screen.getByRole("button",{name:"Reset timesheet view"}))
 
   await user.selectOptions(screen.getByRole("combobox",{name:"Filter entry project"}),"Beta")
@@ -62,7 +63,7 @@ it("filters timesheets by text, status, project and date, with selectable sort a
   expect(screen.queryByText("Test suite")).not.toBeInTheDocument()
   expect(screen.getByText("Build release")).toBeVisible()
   await user.selectOptions(screen.getByRole("combobox",{name:"Filter entry status"}),"submitted")
-  expect(screen.getByText("Showing 1 / 3")).toBeVisible()
+  expect(screen.getByText("1 visible")).toBeVisible()
 })
 
 it("shows only the active period by default and retrieves archived entries on request",async()=>{
@@ -226,6 +227,7 @@ it("does not merge identical display names belonging to different owners",()=>{
 
 it("selects individual, matching, or all owned eligible entries without selecting others",async()=>{
   setup({canSubmit:true,entries:[entry,{...entry,id:"two",description:"Testing"},{...entry,id:"locked",status:"submitted"},{...entry,id:"other",ownerEmail:"other@example.com"}]})
+  await userEvent.click(screen.getByText("Bulk actions"))
   await userEvent.click(screen.getByRole("checkbox",{name:"Select entry one"}))
   expect(screen.getByRole("button",{name:"Submit selected (1)"})).toBeEnabled()
   expect(screen.getByRole("checkbox",{name:"Select entry locked"})).toBeDisabled()
