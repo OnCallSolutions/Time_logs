@@ -17,6 +17,7 @@
     "test:install": "playwright install chromium",
     "test:ui": "node tools/test-ui.mjs",
     "seed:demo-timesheets": "node tools/seed-demo-timesheets.mjs",
+    "db:inspect": "node tools/inspect-neon.mjs",
     "verify": "pnpm typecheck && pnpm test && pnpm build"
   },
   "dependencies": {
