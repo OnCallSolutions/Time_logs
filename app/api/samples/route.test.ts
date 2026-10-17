@@ -5,13 +5,13 @@
 import { beforeEach,expect,it,vi } from "vitest"
 vi.mock("@/lib/account-identities",()=>({listAccountIdentities:vi.fn(async()=>[])}))
 vi.mock("@/lib/access",()=>({getEffectiveUserRole:vi.fn(async()=>null)}))
-vi.mock("@/lib/db",()=>({listTimeEntries:vi.fn(async()=>[])}))
+vi.mock("@/lib/db",()=>({listTimeEntries:vi.fn(async()=>[]),listTimeProjects:vi.fn(async()=>["Sample Project Alpha","Sample Project Beta","Sample Integration","Sample Field Operations"].map((name,index)=>({id:String(index),name,description:"",active:true})))}))
 vi.mock("@/lib/review-access",()=>({createReviewAccess:vi.fn(()=>async()=>({visible:true,reviewable:true}))}))
 vi.mock("@/auth",()=>({auth:vi.fn()}))
 vi.mock("@/lib/effective-permissions",()=>({getEffectivePermissions:vi.fn()}))
 import { auth } from "@/auth"
 import { getEffectiveUserRole } from "@/lib/access"
-import { listTimeEntries } from "@/lib/db"
+import { listTimeEntries,listTimeProjects } from "@/lib/db"
 import { listAccountIdentities } from "@/lib/account-identities"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { createReviewAccess } from "@/lib/review-access"
@@ -21,6 +21,7 @@ beforeEach(()=>{
   vi.mocked(listAccountIdentities).mockResolvedValue([])
   vi.mocked(getEffectiveUserRole).mockResolvedValue(null)
   vi.mocked(listTimeEntries).mockResolvedValue([])
+  vi.mocked(listTimeProjects).mockResolvedValue(["Sample Project Alpha","Sample Project Beta","Sample Integration","Sample Field Operations"].map((name,index)=>({id:String(index),name,description:"",active:true})) as never)
   vi.mocked(createReviewAccess).mockReturnValue(async()=>({visible:true,reviewable:true}))
 })
 it("uses only the contractor's authenticated name",async()=>{

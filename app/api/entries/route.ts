@@ -19,6 +19,7 @@ import {
   clearTimeEntries,
   createTimeEntries,
   listTimeEntries,
+  listTimeProjects,
   listTimesheetPeriods,
   recordAuditEvent,
 } from "@/lib/db"
@@ -132,6 +133,13 @@ export async function POST(req: Request) {
     const period=(await listTimesheetPeriods()).find(candidate=>candidate.id===body.periodId)
     if(!period)return Response.json({error:"Select a configured timesheet period before saving entries."},{status:400})
     if(body.entries.some(entry=>entry.date<period.startDate||entry.date>period.endDate))return Response.json({error:`Every work date must fall within ${period.name} (${period.startDate}–${period.endDate}). No entries were saved.`},{status:422})
+    if(access.role==="contractor"||access.role==="employee"){
+      const assigned=await listTimeProjects(false,access.email)
+      const allowed=new Map(assigned.map(project=>[project.name.toLocaleLowerCase(),project.name]))
+      const unassigned=body.entries.find(entry=>!allowed.has(entry.project.toLocaleLowerCase()))
+      if(unassigned)return Response.json({error:`“${unassigned.project}” is not assigned to your account. Ask your manager to assign the project before logging time.`},{status:422})
+      body.entries=body.entries.map(entry=>({...entry,project:allowed.get(entry.project.toLocaleLowerCase())!}))
+    }
     const identity=(await listAccountIdentities([access.email]))[0]
     const auditContext = getAuditContext(req)
     const entries = await createTimeEntries(access.email, body.entries.map(entry=>identity?{...entry,contractor:identity.officialName}:entry),identity?.contractorNumber,auditContext)

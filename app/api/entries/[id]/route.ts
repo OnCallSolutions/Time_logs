@@ -27,6 +27,7 @@ import {
   updateTimeEntryWithAudit,
   submitTimeEntryWithAudit,
   getTimesheetSubmissionDeadline,
+  listTimeProjects,
 } from "@/lib/db"
 import type { EntryStatus, TimeEntry } from "@/lib/types"
 
@@ -197,6 +198,10 @@ export async function PATCH(
 
     if (!current) {
       return Response.json({ error: "Entry not found." }, { status: 404 })
+    }
+    if(patch.project!==undefined&&(access.role==="contractor"||access.role==="employee")){
+      const assigned=await listTimeProjects(false,access.email)
+      if(!assigned.some(project=>project.name.toLocaleLowerCase()===patch.project!.toLocaleLowerCase()))return Response.json({error:"That project is not assigned to your account. Ask your manager to assign it before changing this entry."},{status:422})
     }
 
     const scope = await createReviewAccess(access.email, access)(current)

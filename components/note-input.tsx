@@ -14,6 +14,7 @@ import { apiPath } from "@/lib/paths"
 import type { ParsedEntry } from "@/lib/types"
 
 type EntryPeriod={id:string;name:string;startDate:string;endDate:string}
+type EntryProject={id:string;name:string;description:string}
 
 /**
  * Captures messy time notes and sends them to the parser API.
@@ -29,9 +30,11 @@ type EntryPeriod={id:string;name:string;startDate:string;endDate:string}
 export function NoteInput({
   onParsed,
   previewOnly=false,
+  canCreateProjects=false,
 }: {
   onParsed: (entries: ParsedEntry[],periodId:string) => void | Promise<void>
   previewOnly?:boolean
+  canCreateProjects?:boolean
 }) {
   const [notes, setNotes] = useState("")
   const [loading, setLoading] = useState(false)
@@ -41,6 +44,10 @@ export function NoteInput({
   const [mode,setMode]=useState<"manual"|"notes">("manual")
   const [workDate,setWorkDate]=useState(()=>{const today=new Date();return `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}-${String(today.getDate()).padStart(2,"0")}`})
   const [project,setProject]=useState("")
+  const [projects,setProjects]=useState<EntryProject[]>([])
+  const [newProjectName,setNewProjectName]=useState("")
+  const [projectsError,setProjectsError]=useState("")
+  const [projectsLoading,setProjectsLoading]=useState(!previewOnly)
   const [hours,setHours]=useState("")
   const [description,setDescription]=useState("")
   const [manualEntries,setManualEntries]=useState<ParsedEntry[]>([])
@@ -60,6 +67,18 @@ export function NoteInput({
       const active=available.find(period=>period.startDate<=today&&period.endDate>=today)
       setPeriodId(active?.id??"")
     }).catch(cause=>{if(!controller.signal.aborted)setPeriodsError(cause instanceof Error?cause.message:"Timesheet periods are unavailable.")}).finally(()=>{if(!controller.signal.aborted)setPeriodsLoading(false)})
+    return()=>controller.abort()
+  },[previewOnly])
+  useEffect(()=>{
+    if(previewOnly)return
+    const controller=new AbortController()
+    fetch(apiPath("/api/projects"),{cache:"no-store",signal:controller.signal}).then(async response=>{
+      const data=await response.json()
+      if(!response.ok)throw new Error(data.error??"Assigned projects are unavailable.")
+      const available:EntryProject[]=Array.isArray(data.projects)?data.projects:[]
+      setProjects(available)
+      setProject(current=>available.some(item=>item.name===current)?current:available[0]?.name??"")
+    }).catch(cause=>{if(!controller.signal.aborted)setProjectsError(cause instanceof Error?cause.message:"Assigned projects are unavailable.")}).finally(()=>{if(!controller.signal.aborted)setProjectsLoading(false)})
     return()=>controller.abort()
   },[previewOnly])
   const selectedPeriod=periods.find(period=>period.id===periodId)
@@ -114,8 +133,22 @@ export function NoteInput({
     if(!selectedPeriod||workDate<selectedPeriod.startDate||workDate>selectedPeriod.endDate){setError("Choose a work date inside the selected timesheet period.");return}
     const value=Number(hours)
     if(!Number.isFinite(value)||value<=0||value>24)return
-    setManualEntries(previous=>[...previous,{contractor:"Self",date:workDate,hours:value,project:project.trim()||"General",description:description.trim()}])
-    setProject("");setHours("");setDescription("")
+    if(!projects.some(item=>item.name===project)){setError("Select a project assigned to your account.");return}
+    setManualEntries(previous=>[...previous,{contractor:"Self",date:workDate,hours:value,project,description:description.trim()}])
+    setHours("");setDescription("")
+  }
+
+  async function createProject(){
+    if(!canCreateProjects||!newProjectName.trim())return
+    setLoading(true);setProjectsError("")
+    try{
+      const response=await fetch(apiPath("/api/projects"),{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({name:newProjectName.trim()})})
+      const data=await response.json()
+      if(!response.ok)throw new Error(data.error??"Unable to create project.")
+      setNewProjectName("")
+      setProjectsError("Project created. Ask your manager to assign it before logging time against it.")
+    }catch(cause){setProjectsError(cause instanceof Error?cause.message:"Unable to create project.")}
+    finally{setLoading(false)}
   }
 
   async function saveManualEntries(){
@@ -175,11 +208,13 @@ export function NoteInput({
       {mode==="manual"&&!previewOnly?<>
         <form onSubmit={addManualEntry} className="grid gap-3 rounded-md border border-orange-200 bg-orange-50/50 p-3 sm:grid-cols-2 xl:grid-cols-4">
           <label className="grid gap-1 text-xs font-medium text-slate-700">Work date<input required type="date" min={selectedPeriod?.startDate} max={selectedPeriod?.endDate} value={workDate} onChange={event=>setWorkDate(event.target.value)} className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm"/></label>
-          <label className="grid gap-1 text-xs font-medium text-slate-700">Project<input maxLength={120} value={project} onChange={event=>setProject(event.target.value)} placeholder="General" className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm"/></label>
+          <label className="grid gap-1 text-xs font-medium text-slate-700">Assigned project<select required value={project} onChange={event=>setProject(event.target.value)} disabled={projectsLoading||projects.length===0} className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm"><option value="">{projectsLoading?"Loading assigned projects…":"Select an assigned project"}</option>{projects.map(item=><option key={item.id} value={item.name}>{item.name}</option>)}</select></label>
           <label className="grid gap-1 text-xs font-medium text-slate-700">Hours<input required type="number" min="0.25" max="24" step="0.25" value={hours} onChange={event=>setHours(event.target.value)} placeholder="e.g. 7.5" className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm"/></label>
           <label className="grid gap-1 text-xs font-medium text-slate-700 sm:col-span-2 xl:col-span-1">Work description<input maxLength={1000} value={description} onChange={event=>setDescription(event.target.value)} placeholder="What work was completed?" className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm"/></label>
-          <div className="flex items-end sm:col-span-2 xl:col-span-4"><Button type="submit" variant="outline" disabled={!selectedPeriod||periodsLoading||!!periodsError}><Plus className="size-4"/>Add to timesheet</Button></div>
+          <div className="flex flex-wrap items-end gap-2 sm:col-span-2 xl:col-span-4"><Button type="submit" variant="outline" disabled={!selectedPeriod||periodsLoading||!!periodsError||!project}><Plus className="size-4"/>Add to timesheet</Button>{projects.length===0&&!projectsLoading&&<span className="text-xs text-orange-900">Your manager must assign a project before you can log time.</span>}</div>
         </form>
+        {canCreateProjects&&<form className="mt-2 flex flex-wrap items-end gap-2 border-l-2 border-sky-500 bg-sky-50/60 px-3 py-2" onSubmit={event=>{event.preventDefault();void createProject()}}><label className="grid gap-1 text-xs font-medium text-slate-700">Create a project<input maxLength={120} value={newProjectName} onChange={event=>setNewProjectName(event.target.value)} className="h-9 rounded-md border border-slate-300 bg-white px-2 text-sm" placeholder="New project"/></label><Button type="submit" size="sm" variant="outline" disabled={loading||!newProjectName.trim()}><Plus className="size-4"/>Create project</Button></form>}
+        {projectsError&&<p role="status" className="mt-2 text-xs text-orange-900">{projectsError}</p>}
         {manualEntries.length>0&&<div className="mt-3 overflow-hidden rounded-md border border-sky-200 bg-white">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-sky-100 bg-sky-50 px-3 py-2"><p className="text-sm font-semibold">Entries to save <span className="text-slate-600">({manualEntries.length})</span></p><Button type="button" onClick={()=>void saveManualEntries()} disabled={loading}>{loading?<Loader2 className="size-4 animate-spin"/>:<Sparkles className="size-4"/>}{loading?"Saving…":"Save entries"}</Button></div>
           <ul className="divide-y divide-slate-100">{manualEntries.map((entry,index)=><li key={`${entry.date}:${index}`} className="flex items-center justify-between gap-3 px-3 py-2 text-sm"><span className="min-w-0 break-words">{entry.date} · {entry.project} · {entry.hours}h{entry.description?` · ${entry.description}`:""}</span><Button type="button" variant="ghost" size="icon" aria-label={`Remove entry ${index+1}`} onClick={()=>setManualEntries(previous=>previous.filter((_,row)=>row!==index))}><Trash2 className="size-4"/></Button></li>)}</ul>

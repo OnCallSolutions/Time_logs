@@ -32,3 +32,8 @@ it("enables account-manager operational review by default and lets admins revoke
   expect(resolvePermissions("account_manager",{review_entries:false}).review_entries).toBe(false)
   expect(resolvePermissions("account_manager")).toMatchObject({create_entries:false,edit_entries:false,delete_entries:false,submit_entries:false})
 })
+it("keeps project management with managers while making contractor project creation explicitly delegable",()=>{
+  expect(resolvePermissions("manager")).toMatchObject({manage_projects:true,create_projects:true})
+  expect(resolvePermissions("contractor")).toMatchObject({manage_projects:false,create_projects:false})
+  expect(resolvePermissions("contractor",{create_projects:true}).create_projects).toBe(true)
+})

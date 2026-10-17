@@ -5,7 +5,7 @@
  */
 import { auth } from "@/auth"
 import { getEffectiveUserRole } from "@/lib/access"
-import { listTimeEntries } from "@/lib/db"
+import { listTimeEntries,listTimeProjects } from "@/lib/db"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { listAccountIdentities } from "@/lib/account-identities"
 import { createReviewAccess } from "@/lib/review-access"
@@ -87,11 +87,13 @@ export async function GET(request?: Request):Promise<Response>{
     : [{name:identity?.officialName||session?.user?.name?.trim()||email,id:identity?.shortReference||identity?.contractorNumber||"SAMPLE-USER-001"}]
   const today=new Date()
   const tasks=["documentation task","testing task","implementation task"]
-  const projects=["Sample Project Alpha","Sample Project Beta","Sample Integration","Sample Field Operations"]
+  const projects=(await listTimeProjects(false,access.role==="manager"||access.role==="admin"||access.role==="account_manager"?undefined:email)).map(project=>project.name)
+  if(!projects.length&& (access.role==="contractor"||access.role==="employee"))return Response.json({error:"No projects are assigned to your account yet. Ask your manager to assign a project before generating entry samples."},{status:409})
+  const sampleProjects=projects.length?projects:["Sample Project Alpha","Sample Project Beta","Sample Integration","Sample Field Operations"]
   const notes=actors.flatMap(actor=>Array.from({length:count},(_,index)=>{
     const date=new Date(today)
     date.setUTCDate(today.getUTCDate()-Math.floor(index/3))
-    const project=projects[index%projects.length]
+    const project=sampleProjects[index%sampleProjects.length]
     return `${actor.name} (ID: ${actor.id}): ${date.toISOString().slice(0,10)}, ${[1.5,2,0.75][index%3]} hours on ${project}, ${tasks[index%3]}.`
   })).join("\n")
   return Response.json({notes,count,people:actors.length,synthetic:true,previewOnly:access.role==="manager"||access.role==="admin"||access.role==="account_manager"},{headers:{"Cache-Control":"no-store"}})

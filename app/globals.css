@@ -300,10 +300,6 @@
   width: 100%;
 }
 
-.app-workspace tbody tr:hover {
-  background-color: #fff7ed;
-}
-
 .role-choice-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr));

@@ -140,6 +140,8 @@ export type AuditAction =
   | "message_read_receipts_updated"
   | "message_encryption_initialized"
   | "entry_created"
+  | "project_created"
+  | "project_updated"
   | "entries_cleared"
   | "entry_updated"
   | "entry_submitted"
@@ -175,6 +177,7 @@ export type AuditEvent = {
 }
 
 export type TimesheetPeriod = { id:string; name:string; startDate:string; endDate:string; submissionDeadline:string; managerGraceDays:number; reminderDays:number; createdBy:string; createdAt:string }
+export type TimeProject = { id:string; name:string; description:string; active:boolean; createdBy:string; createdAt:string; updatedAt:string }
 export type EntryRejectionRecord={id:string;actorEmail:string;entryId:string|null;contractor:string;ownerEmail:string|null;project:string;workDate:string|null;hours:number|null;reason:string;rejectedAt:string}
 
 type AuditEventRow = {
@@ -198,6 +201,7 @@ const auditSchemaReady = createDatabaseInitializer()
 const accessSchemaReady = createDatabaseInitializer()
 const workflowSettingsSchemaReady = createDatabaseInitializer()
 const timesheetPeriodsSchemaReady = createDatabaseInitializer()
+const projectsSchemaReady = createDatabaseInitializer()
 const entryRejectionArchiveSchemaReady = createDatabaseInitializer()
 
 /**
@@ -494,6 +498,124 @@ export function ensureTimesheetPeriodsTable() {
     )`
     await sql`CREATE INDEX IF NOT EXISTS timesheet_periods_dates_idx ON timesheet_periods(start_date,end_date)`
   })
+}
+
+/** Creates a shared project catalog and imports existing project names once. */
+export function ensureProjectsTable(){
+  return projectsSchemaReady(async()=>{
+    await ensureTimeEntriesTable()
+    await sql`CREATE TABLE IF NOT EXISTS time_projects (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      name text NOT NULL CHECK(length(name) BETWEEN 1 AND 120),
+      description text NOT NULL DEFAULT '',
+      active boolean NOT NULL DEFAULT true,
+      created_by text NOT NULL,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    )`
+    await sql`CREATE UNIQUE INDEX IF NOT EXISTS time_projects_name_ci_idx ON time_projects(lower(name))`
+    await sql`CREATE TABLE IF NOT EXISTS time_project_assignments (
+      project_id uuid NOT NULL REFERENCES time_projects(id) ON DELETE CASCADE,
+      patron_email text NOT NULL,
+      assigned_by text NOT NULL,
+      assigned_at timestamptz NOT NULL DEFAULT now(),
+      PRIMARY KEY(project_id,patron_email)
+    )`
+    await sql`CREATE INDEX IF NOT EXISTS time_project_assignments_patron_idx ON time_project_assignments(lower(patron_email))`
+    await sql`INSERT INTO time_projects(name,created_by)
+      SELECT DISTINCT left(trim(project),120),'system@tanovo-time.local'
+      FROM time_entries WHERE length(trim(project)) BETWEEN 1 AND 120
+      ON CONFLICT DO NOTHING`
+    await sql`CREATE INDEX IF NOT EXISTS time_projects_active_name_idx ON time_projects(active,lower(name))`
+  })
+}
+
+/** @returns Catalog projects in stable name order. */
+export async function listTimeProjects(includeArchived=false,patronEmail?:string):Promise<TimeProject[]>{
+  await ensureProjectsTable()
+  const rows=patronEmail
+    ? includeArchived
+      ? await sql`SELECT p.id,p.name,p.description,p.active,p.created_by,p.created_at::text AS created_at,p.updated_at::text AS updated_at FROM time_projects p JOIN time_project_assignments a ON a.project_id=p.id WHERE lower(a.patron_email)=lower(${patronEmail}) ORDER BY p.active DESC,lower(p.name)`
+      : await sql`SELECT p.id,p.name,p.description,p.active,p.created_by,p.created_at::text AS created_at,p.updated_at::text AS updated_at FROM time_projects p JOIN time_project_assignments a ON a.project_id=p.id WHERE p.active AND lower(a.patron_email)=lower(${patronEmail}) ORDER BY lower(p.name)`
+    : includeArchived
+      ? await sql`SELECT id,name,description,active,created_by,created_at::text AS created_at,updated_at::text AS updated_at FROM time_projects ORDER BY active DESC,lower(name)`
+      : await sql`SELECT id,name,description,active,created_by,created_at::text AS created_at,updated_at::text AS updated_at FROM time_projects WHERE active ORDER BY lower(name)`
+  return rows.map(row=>({id:String(row.id),name:String(row.name),description:String(row.description??""),active:Boolean(row.active),createdBy:String(row.created_by),createdAt:new Date(String(row.created_at)).toISOString(),updatedAt:new Date(String(row.updated_at)).toISOString()}))
+}
+
+/** Assigns or unassigns a project for one active patron. */
+export async function setTimeProjectAssignment(projectId:string,patronEmail:string,assigned:boolean,actor:string,context:AuditContext):Promise<boolean>{
+  await ensureProjectsTable();await ensureAuditEventsTable()
+  const rows=assigned?await sql`WITH changed AS (
+    INSERT INTO time_project_assignments(project_id,patron_email,assigned_by)
+    SELECT p.id,lower(${patronEmail}),lower(${actor}) FROM time_projects p WHERE p.id=${projectId}::uuid AND p.active
+    ON CONFLICT(project_id,patron_email) DO UPDATE SET assigned_by=EXCLUDED.assigned_by,assigned_at=now()
+    RETURNING project_id,patron_email
+  ), audited AS (
+    INSERT INTO audit_events(actor_email,action,target_type,target_id,metadata,ip_address,user_agent,request_method,request_path,request_id)
+    SELECT lower(${actor}),'project_updated','time_project',changed.project_id::text,jsonb_build_object('patronEmail',changed.patron_email,'assigned',true),
+      ${context.ipAddress},${context.userAgent},${context.requestMethod},${context.requestPath},${context.requestId} FROM changed RETURNING target_id
+  ) SELECT changed.project_id FROM changed WHERE EXISTS(SELECT 1 FROM audited)`
+  :await sql`WITH removed AS (
+    DELETE FROM time_project_assignments WHERE project_id=${projectId}::uuid AND lower(patron_email)=lower(${patronEmail}) RETURNING project_id,patron_email
+  ), audited AS (
+    INSERT INTO audit_events(actor_email,action,target_type,target_id,metadata,ip_address,user_agent,request_method,request_path,request_id)
+    SELECT lower(${actor}),'project_updated','time_project',removed.project_id::text,jsonb_build_object('patronEmail',removed.patron_email,'assigned',false),
+      ${context.ipAddress},${context.userAgent},${context.requestMethod},${context.requestPath},${context.requestId} FROM removed RETURNING target_id
+  ) SELECT removed.project_id FROM removed WHERE EXISTS(SELECT 1 FROM audited)`
+  return rows.length>0
+}
+
+/** @returns Active project IDs assigned to a patron for API validation. */
+export async function listAssignedTimeProjectIds(patronEmail:string):Promise<string[]>{
+  await ensureProjectsTable()
+  const rows=await sql`SELECT p.id FROM time_projects p JOIN time_project_assignments a ON a.project_id=p.id WHERE p.active AND lower(a.patron_email)=lower(${patronEmail})`
+  return rows.map(row=>String(row.id))
+}
+
+/** @returns Project IDs keyed to assigned patron emails for manager views. */
+export async function listTimeProjectAssignments():Promise<{projectId:string;email:string}[]>{
+  await ensureProjectsTable()
+  const rows=await sql`SELECT project_id,lower(patron_email) AS patron_email FROM time_project_assignments ORDER BY lower(patron_email)`
+  return rows.map(row=>({projectId:String(row.project_id),email:String(row.patron_email)}))
+}
+
+/** @returns True when a project name currently exists and is active. */
+export async function isActiveTimeProject(name:string):Promise<boolean>{
+  await ensureProjectsTable()
+  const rows=await sql`SELECT 1 FROM time_projects WHERE active AND lower(name)=lower(${name.trim()}) LIMIT 1`
+  return rows.length>0
+}
+
+/** Adds a unique catalog project and its audit event atomically. */
+export async function createTimeProject(input:{name:string;description:string},actor:string,context:AuditContext):Promise<TimeProject|null>{
+  await ensureProjectsTable();await ensureAuditEventsTable()
+  const rows=await sql`WITH saved AS (
+    INSERT INTO time_projects(name,description,created_by) VALUES(${input.name},${input.description},${actor.toLowerCase()})
+    ON CONFLICT DO NOTHING RETURNING *
+  ), audited AS (
+    INSERT INTO audit_events(actor_email,action,target_type,target_id,metadata,ip_address,user_agent,request_method,request_path,request_id)
+    SELECT created_by,'project_created','time_project',id::text,jsonb_build_object('name',name,'description',description),
+      ${context.ipAddress},${context.userAgent},${context.requestMethod},${context.requestPath},${context.requestId} FROM saved RETURNING target_id
+  ) SELECT id,name,description,active,created_by,created_at::text AS created_at,updated_at::text AS updated_at FROM saved WHERE EXISTS(SELECT 1 FROM audited)`
+  const row=rows[0]
+  return row?{id:String(row.id),name:String(row.name),description:String(row.description??""),active:Boolean(row.active),createdBy:String(row.created_by),createdAt:new Date(String(row.created_at)).toISOString(),updatedAt:new Date(String(row.updated_at)).toISOString()}:null
+}
+
+/** Activates or archives a catalog project and records the change atomically. */
+export async function setTimeProjectActive(id:string,active:boolean,actor:string,context:AuditContext):Promise<TimeProject|null>{
+  await ensureProjectsTable();await ensureAuditEventsTable()
+  const rows=await sql`WITH before AS (SELECT * FROM time_projects WHERE id=${id}::uuid FOR UPDATE), saved AS (
+    UPDATE time_projects p SET active=${active},updated_at=now() FROM before b WHERE p.id=b.id RETURNING p.*
+  ), audited AS (
+    INSERT INTO audit_events(actor_email,action,target_type,target_id,metadata,ip_address,user_agent,request_method,request_path,request_id)
+    SELECT ${actor.toLowerCase()},'project_updated','time_project',saved.id::text,
+      jsonb_build_object('name',saved.name,'active',saved.active,'previousActive',before.active),
+      ${context.ipAddress},${context.userAgent},${context.requestMethod},${context.requestPath},${context.requestId}
+    FROM saved JOIN before ON true RETURNING target_id
+  ) SELECT id,name,description,active,created_by,created_at::text AS created_at,updated_at::text AS updated_at FROM saved WHERE EXISTS(SELECT 1 FROM audited)`
+  const row=rows[0]
+  return row?{id:String(row.id),name:String(row.name),description:String(row.description??""),active:Boolean(row.active),createdBy:String(row.created_by),createdAt:new Date(String(row.created_at)).toISOString(),updatedAt:new Date(String(row.updated_at)).toISOString()}:null
 }
 
 /** @returns Scheduled periods ordered by work start date, capped for a compact admin view. */

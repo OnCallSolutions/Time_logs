@@ -25,6 +25,7 @@ import { MessageNotifications } from "@/components/message-notifications"
 import { notifyPermissionsChanged } from "@/lib/permission-events"
 import { EntryReviewDialog, ManagerWorkspace } from "@/components/manager-workspace"
 import { permissionLabels, resolvePermissions, type Permission, type PermissionOverrides } from "@/lib/permissions"
+import { ProjectManagement } from "@/components/project-management"
 import { accessChangeRequiresStepUp } from "@/lib/admin-policy"
 import { openEntraReauthentication } from "@/lib/entra-reauth-popup"
 import { AdminWorkspace } from "@/components/admin-workspace"
@@ -47,6 +48,7 @@ import {
   BarChart3,
   CheckCircle2,
   Clock3,
+  FolderKanban,
   ListChecks,
   MessageSquare,
   KeyRound,
@@ -87,7 +89,8 @@ type WorkspaceHistoryFrame = { view: View; adminStartSection: AdminStartSection;
 const manageableRoles: UserRole[] = ["admin", "manager", "account_manager", "employee", "contractor"]
 const manageableStatuses: AccessStatus[] = ["active", "suspended", "retired", "blocked", "denied"]
 const permissionGroups:{label:string;tone:"orange"|"blue"|"green"|"red"|"sky";permissions:Permission[]}[]=[
-  {label:"Timesheet entry",tone:"orange",permissions:["create_entries","edit_entries","delete_entries","submit_entries"]},
+  {label:"Timesheet entry",tone:"orange",permissions:["create_entries","create_projects","edit_entries","delete_entries","submit_entries"]},
+  {label:"Project catalog",tone:"green",permissions:["manage_projects"]},
   {label:"Team review and reporting",tone:"blue",permissions:["review_entries","view_team","view_all_timesheets","view_reports","export_entries","ai_review","view_manager_entries","review_manager_entries","view_other_manager_entries","review_other_manager_entries"]},
   {label:"Messages and review support",tone:"sky",permissions:["send_messages","request_review_help","accept_review_requests"]},
   {label:"Finance and periods",tone:"green",permissions:["send_to_accounts","view_accounts","review_accounts","ai_accounts","authorize_payouts","manage_timesheet_periods"]},
@@ -97,6 +100,7 @@ const pendingAccessChangeKey = "tanovo-time:pending-access-change"
 const pendingClearEntriesKey = "tanovo-time:pending-clear-entries"
 
 function canAssignPermission(role:UserRole,permission:Permission):boolean{
+  if(permission==="create_projects"&&(role==="contractor"||role==="employee"))return true
   return resolvePermissions(role,{[permission]:true})[permission]
 }
 
@@ -335,7 +339,7 @@ export function TimesheetApp({
   const [adminStartSection,setAdminStartSection]=useState<AdminStartSection>("landing")
   const [pageWindow,setPageWindow] = useState(false)
   const [workspaceHistory,setWorkspaceHistory]=useState<WorkspaceHistoryFrame[]>([])
-  const [workspaceWindow,setWorkspaceWindow] = useState<"overview"|"workflow"|"notes"|null>(null)
+  const [workspaceWindow,setWorkspaceWindow] = useState<"overview"|"workflow"|"notes"|"projects"|null>(null)
   const entriesEndpoint = apiPath("/api/entries")
   /**
    * Opens a complete role page while preserving its parent command group for Back.
@@ -712,10 +716,11 @@ export function TimesheetApp({
       </header>
 
       {!accessDenied && <nav aria-label="Workspaces" className="flex flex-wrap gap-2 border-b pb-3">
-        {role==="admin" ? <>
+          {role==="admin" ? <>
           <Button variant="outline" onClick={()=>openWorkspacePage("admin","admin")}><ShieldCheck className="size-4"/>Admin</Button>
           <Button variant="outline" onClick={()=>openWorkspacePage("admin","reports")}><BarChart3 className="size-4"/>Reports</Button>
           <Button variant="outline" onClick={()=>openWorkspacePage("admin","timesheets")}><Layers3 className="size-4"/>Timesheets</Button>
+          {permissions.manage_projects&&<Button variant="outline" onClick={()=>setWorkspaceWindow("projects")}><FolderKanban className="size-4"/>Projects</Button>}
         </> : <>
           {role!=="account_manager"&&<Button variant="outline" onClick={()=>openWorkspacePage(role==="manager"&&permissions.view_team?"log":"personal")}><Layers3 className="size-4"/>Timesheets</Button>}
           {(canReviewEntries||canAIReview)&&<Button variant="outline" onClick={()=>openWorkspacePage("approvals")}><CheckCircle2 className="size-4"/>Approvals</Button>}
@@ -725,14 +730,15 @@ export function TimesheetApp({
           {canViewAdmin&&<Button variant="outline" onClick={()=>openWorkspacePage("admin","admin")}><ShieldCheck className="size-4"/>Admin</Button>}
           {permissions.view_personal_reports&&role==="contractor"&&<Button variant="outline" onClick={()=>openWorkspacePage("activity")}><Activity className="size-4"/>Account activity</Button>}
           {permissions.delegate_permissions&&role==="manager"&&<Button variant="outline" onClick={()=>openWorkspacePage("permissions")}><KeyRound className="size-4"/>Manage team access</Button>}
+          {permissions.manage_projects&&<Button variant="outline" onClick={()=>setWorkspaceWindow("projects")}><FolderKanban className="size-4"/>Projects</Button>}
         </>}
       </nav>}
       {!accessDenied&&!(view==="log"||view==="personal"||(view==="admin"&&adminStartSection==="timesheets"))&&<SubmissionDeadlineNotice/>}
       {lifecycleOpen&&!accessDenied&&(canViewAdmin||(role==="manager"&&permissions.delegate_permissions))&&<WindowSurface title={canViewAdmin?"Access lifecycle":"Temporary coverage"} onBack={()=>setLifecycleOpen(false)}><section className="min-h-0 w-full overflow-auto bg-white"><AccessLifecyclePanel key={role} admin={canViewAdmin} permissions={permissions}/></section></WindowSurface>}
       {canViewAdmin && technologyReports && <SecurityRiskWindow onClose={() => setTechnologyReports(false)} />}
 
-      {workspaceWindow&&<WindowSurface title={workspaceWindow==="notes"?"Create timesheet entries":workspaceWindow==="overview"?"Workspace overview":"Workflow totals"} onBack={()=>setWorkspaceWindow(null)}><section className="flex min-h-0 w-full max-w-6xl flex-col bg-white"><div className="min-h-0 flex-1 overflow-auto p-4">
-      {workspaceWindow==="overview"?<RoleOverview role={role}/>:workspaceWindow==="notes"?<NoteInput onParsed={async (parsed,periodId)=>{await addParsed(parsed,periodId);setWorkspaceWindow(null);if(role!=="admin"||view!=="admin")openWorkspacePage(role==="manager"?"personal":"log")}}/>:<WorkflowOverview
+      {workspaceWindow&&<WindowSurface title={workspaceWindow==="notes"?"Create timesheet entries":workspaceWindow==="projects"?"Projects and assignments":workspaceWindow==="overview"?"Workspace overview":"Workflow totals"} onBack={()=>setWorkspaceWindow(null)}><section className="flex min-h-0 w-full max-w-6xl flex-col bg-white"><div className="min-h-0 flex-1 overflow-auto p-4">
+      {workspaceWindow==="projects"?<ProjectManagement/>:workspaceWindow==="overview"?<RoleOverview role={role}/>:workspaceWindow==="notes"?<NoteInput canCreateProjects={permissions.create_projects} onParsed={async (parsed,periodId)=>{await addParsed(parsed,periodId);setWorkspaceWindow(null);if(role!=="admin"||view!=="admin")openWorkspacePage(role==="manager"?"personal":"log")}}/>:<WorkflowOverview
         approvedCount={approvedEntries.length}
         draftCount={draftEntries.length}
         pendingCount={pendingEntries.length}
@@ -879,11 +885,11 @@ export function TimesheetApp({
         </div>
       </div></WorkspacePageSurface>}
       {assistantPane}
-      {view!=="home"&&<footer className="mt-auto pt-4 text-center text-xs text-muted-foreground">
+      <footer className="sticky bottom-0 z-30 mt-auto flex min-h-9 shrink-0 items-center justify-center border-t border-sky-300 bg-white/95 px-3 py-2 text-center text-xs text-slate-700 shadow-[0_-3px_12px_rgb(2_132_199_/_0.08)] backdrop-blur-sm">
         {entries.length} entries ·{" "}
         {totalHours.toLocaleString(undefined, { maximumFractionDigits: 2 })}h logged
         total · {approvedEntries.length} approved
-      </footer>}
+      </footer>
       {clearEntriesConfirmationOpen && <WindowSurface title={clearEntriesScope==="preview_reset"?"Reset preview data":"Confirm clearing all timesheets"} compact resizable assistant={false} disabled={clearEntriesBusy} onBack={() => setClearEntriesConfirmationOpen(false)}>
         <section className="flex w-full max-w-xl flex-col bg-white text-slate-950">
           <header className="flex items-start gap-3 border-b border-red-200 bg-red-50 p-4">

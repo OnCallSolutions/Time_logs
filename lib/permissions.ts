@@ -6,6 +6,8 @@
 import type { UserRole } from "@/lib/types"
 export const permissionLabels = {
   create_entries: "Create entries and extract notes",
+  create_projects: "Create projects when authorized by a manager",
+  manage_projects: "Create and manage the organization project catalog",
   edit_entries: "Edit eligible entries",
   delete_entries: "Delete eligible entries",
   submit_entries: "Submit and recall entries",
@@ -35,7 +37,7 @@ export type Permission = keyof typeof permissionLabels
 export type PermissionOverrides = Partial<Record<Permission, boolean>>
 export type Permissions = Record<Permission, boolean>
 /** Operational rights managers may delegate without granting role or financial authority. */
-export const delegablePermissions: readonly Permission[] = ["create_entries","edit_entries","delete_entries","submit_entries","review_entries","view_team","view_reports"]
+export const delegablePermissions: readonly Permission[] = ["create_entries","create_projects","edit_entries","delete_entries","submit_entries","review_entries","view_team","view_reports"]
 
 /**
  * Resolves role defaults plus explicit rights without granting unknown controls.
@@ -46,7 +48,7 @@ export const delegablePermissions: readonly Permission[] = ["create_entries","ed
 export function resolvePermissions(role: UserRole | null, overrides: PermissionOverrides = {}): Permissions {
   const elevated = role === "admin" || role === "manager"
   const personal = role === "employee" || role === "contractor"
-  const defaults: Permissions = {create_entries:!!role,edit_entries:!!role,delete_entries:!!role,
+  const defaults: Permissions = {create_entries:!!role,create_projects:elevated,manage_projects:elevated,edit_entries:!!role,delete_entries:!!role,
     submit_entries:personal||role==="manager"||role==="admin",review_entries:elevated||role==="account_manager",view_team:elevated,view_all_timesheets:role==="admin"||role==="account_manager",view_reports:elevated,export_entries:elevated||role==="account_manager",ai_review:elevated,
     delegate_permissions:elevated,send_messages:elevated,send_to_accounts:elevated,view_accounts:role==="admin",review_accounts:role==="admin",ai_accounts:role==="admin",review_manager_entries:false,view_manager_entries:role==="account_manager",view_other_manager_entries:false,review_other_manager_entries:false,request_review_help:elevated,accept_review_requests:role==="manager",authorize_payouts:false,manage_timesheet_periods:role==="admin"||role==="account_manager",view_personal_reports:!!role}
   for (const key of Object.keys(permissionLabels) as Permission[]) {

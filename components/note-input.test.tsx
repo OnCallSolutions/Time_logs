@@ -53,9 +53,9 @@ it("sends the selected configured period with AI extraction",async()=>{
 })
 it("creates a manual entry only after the user explicitly saves the queued row",async()=>{
   const onParsed=vi.fn(async()=>{})
-  vi.stubGlobal("fetch",vi.fn(async()=>periodResponse()))
+  vi.stubGlobal("fetch",vi.fn(async(input:string|URL|Request)=>String(input).includes("timesheet-periods")?periodResponse():new Response(JSON.stringify({projects:[{id:"project-id",name:"Field operations",description:""}]}))))
   render(<NoteInput onParsed={onParsed}/>);const user=userEvent.setup()
-  await user.type(screen.getByLabelText("Project"),"Field operations")
+  await user.selectOptions(await screen.findByLabelText("Assigned project"),"Field operations")
   await user.type(screen.getByLabelText("Hours"),"7.5")
   await user.type(screen.getByLabelText("Work description"),"Completed site inspection")
   await user.click(screen.getByRole("button",{name:"Add to timesheet"}))

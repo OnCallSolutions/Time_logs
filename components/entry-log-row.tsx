@@ -21,10 +21,10 @@ const statusStyles: Record<EntryStatus, string> = {
   rejected: "border-red-200 bg-red-50 text-red-800",
 }
 const statusRowStyles:Record<EntryStatus,string>={
-  draft:"border-l-4 border-l-slate-400 bg-slate-50/70 hover:bg-orange-50",
-  submitted:"border-l-4 border-l-blue-500 bg-blue-50/45 hover:bg-blue-50",
-  approved:"border-l-4 border-l-emerald-500 bg-emerald-50/45 hover:bg-emerald-50",
-  rejected:"border-l-4 border-l-red-500 bg-red-50/45 hover:bg-red-50",
+  draft:"border-l-4 border-l-slate-400 bg-slate-50/70 hover:bg-orange-100",
+  submitted:"border-l-4 border-l-blue-500 bg-blue-50/45 hover:bg-blue-100",
+  approved:"border-l-4 border-l-emerald-500 bg-emerald-50/45 hover:bg-emerald-100",
+  rejected:"border-l-4 border-l-red-500 bg-red-50/45 hover:bg-red-100",
 }
 
 /**
@@ -119,7 +119,7 @@ export function EntryLogRow({ entry, showIdentity, canEdit, canDelete, canSubmit
         </footer>
       </section>
     </WindowSurface>}
-    <tr className={`border-b border-border/60 align-top transition-colors ${statusRowStyles[entry.status]}`} aria-label={`Entry ${entry.description || entry.id}`}>
+    <tr className={`border-b border-border/60 align-top transition-colors duration-100 ${statusRowStyles[entry.status]} ${selection?.checked?"!bg-cyan-100 shadow-[inset_0_0_0_2px_#0891b2]":""}`} aria-selected={selection?.checked||undefined} aria-label={`Entry ${entry.description || entry.id}`}>
       {selection && <td className="px-2 py-1.5"><input type="checkbox" aria-label={`Select entry ${entry.id}`} checked={selection.checked} disabled={selection.disabled || busy} onChange={event => selection.onChange(event.target.checked)} className="size-3.5 accent-orange-700" /></td>}
       <td className="px-2 py-1.5">{showIdentity && <><span className="text-xs font-medium">{entry.contractor}</span>{entry.contractorNumber&&<span title={entry.contractorNumber} className="mt-0.5 block max-w-48 break-all font-mono text-[10px] text-muted-foreground">{entry.shortReference || entry.contractorNumber}</span>}{entry.employeeId&&<span className="block text-[10px] text-muted-foreground">Employee ID: {entry.employeeId}</span>}</>}</td>
       <td className="px-2 py-1.5">{showIdentity && <span className="whitespace-nowrap font-mono text-xs">{entry.date}</span>}</td>
