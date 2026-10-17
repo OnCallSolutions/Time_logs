@@ -31,8 +31,16 @@ it("lets an account manager review only assigned submitted workforce timesheets"
   const rights=resolvePermissions("account_manager")
   expect(directReviewAccess(assigned,"accounts@example.com",{role:"account_manager",permissions:rights},"contractor")).toEqual({visible:true,reviewable:true})
   expect(directReviewAccess(assigned,"accounts@example.com",{role:"account_manager",permissions:rights},"employee").reviewable).toBe(true)
-  expect(directReviewAccess(entry,"accounts@example.com",{role:"account_manager",permissions:rights},"contractor")).toEqual({visible:false,reviewable:false})
-  expect(directReviewAccess(assigned,"accounts@example.com",{role:"account_manager",permissions:resolvePermissions("account_manager",{review_entries:false})},"contractor")).toEqual({visible:false,reviewable:false})
+  expect(directReviewAccess(entry,"accounts@example.com",{role:"account_manager",permissions:rights},"contractor")).toEqual({visible:true,reviewable:false})
+  expect(directReviewAccess(assigned,"accounts@example.com",{role:"account_manager",permissions:resolvePermissions("account_manager",{review_entries:false})},"contractor")).toEqual({visible:true,reviewable:false})
+})
+it("lets account managers view all periods without expanding their approval authority",()=>{
+  const rights=resolvePermissions("account_manager")
+  const unrelatedDraft={...entry,status:"draft" as const,reviewManagerEmail:"other@example.com"}
+  expect(directReviewAccess(unrelatedDraft,"accounts@example.com",{role:"account_manager",permissions:rights},"contractor")).toEqual({visible:true,reviewable:false})
+  expect(directReviewAccess({...entry,reviewManagerEmail:"other@example.com"},"accounts@example.com",{role:"account_manager",permissions:rights},"contractor")).toEqual({visible:true,reviewable:false})
+  expect(directReviewAccess({...entry,reviewManagerEmail:"accounts@example.com"},"accounts@example.com",{role:"account_manager",permissions:rights},"contractor").reviewable).toBe(true)
+  expect(directReviewAccess(unrelatedDraft,"accounts@example.com",{role:"account_manager",permissions:resolvePermissions("account_manager",{view_all_timesheets:false})},"contractor")).toEqual({visible:false,reviewable:false})
 })
 it("never permits self-review despite every cross-manager right",()=>{
   expect(directReviewAccess(entry,"owner@example.com",{role:"manager",permissions:resolvePermissions("manager",{view_manager_entries:true,review_manager_entries:true,view_other_manager_entries:true,review_other_manager_entries:true})},"manager")).toEqual({visible:true,reviewable:false})

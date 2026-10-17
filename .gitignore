@@ -24,5 +24,6 @@ test-results/
 
 # Local testing helpers and generated records
 /scripts/
+/Documents/Tanovo_Time_Architecture_Guide.docx
 /output/
 /TEST_RESULTS.md

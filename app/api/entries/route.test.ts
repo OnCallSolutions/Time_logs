@@ -60,6 +60,23 @@ it("retrieves saved rows through the authenticated owner's scoped query without 
   expect(result.entries[0]).toMatchObject({ownerEmail:"person@example.com",contractor:"Official Person",status:"draft"})
 })
 
+it("lets account managers inspect organization periods and resolves the assigned approver name",async()=>{
+  vi.mocked(auth).mockResolvedValue({user:{email:"accounts@example.com"}} as never)
+  vi.mocked(getEffectivePermissions).mockResolvedValue({role:"account_manager",permissions:resolvePermissions("account_manager")} as never)
+  vi.mocked(listTimeEntries).mockResolvedValue([{...savedEntry,reviewManagerEmail:"manager@example.com"}] as never)
+  vi.mocked(createReviewAccess).mockReturnValue((async()=>({visible:true,reviewable:false})) as never)
+  vi.mocked(listAccountIdentities).mockResolvedValue([
+    {email:"person@example.com",officialName:"Official Person",contractorNumber:"DEVONCALL-000001",shortReference:"TN-000001",companyCode:"DEVONCALL",employeeId:null},
+    {email:"manager@example.com",officialName:"Maurice Baraza",contractorNumber:null,shortReference:null,companyCode:"DEVONCALL",employeeId:null},
+  ] as never)
+
+  const response=await GET()
+  const body=await response.json()
+  expect(response.status).toBe(200)
+  expect(listTimeEntries).toHaveBeenCalledWith("accounts@example.com",true)
+  expect(body.entries[0]).toMatchObject({contractor:"Official Person",reviewManagerEmail:"manager@example.com",reviewManagerName:"Maurice Baraza",reviewEligible:false})
+})
+
 it("rejects unauthenticated writes and never calls persistence",async()=>{
   vi.mocked(auth).mockResolvedValue(null as never)
   const response=await POST(new Request("http://localhost/api/entries",{method:"POST",body:JSON.stringify({entries:[{contractor:"Person",date:"2026-10-15",hours:4,project:"Project A",description:"Work"}]})}))

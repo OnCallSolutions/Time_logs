@@ -45,30 +45,6 @@ function entryGroupLabel(entry:TimeEntry,groupBy:string):string {
   return ""
 }
 
-/** Passes wheel movement to scrollable ancestors when the table reaches an edge. */
-function chainTimesheetWheel(event:React.WheelEvent<HTMLDivElement>):void{
-  const target=event.currentTarget
-  const unit=event.deltaMode===WheelEvent.DOM_DELTA_LINE?40:event.deltaMode===WheelEvent.DOM_DELTA_PAGE?target.clientHeight:1
-  const delta=event.deltaY*unit
-  if(!delta)return
-  const atTop=target.scrollTop<=0,atBottom=target.scrollTop+target.clientHeight>=target.scrollHeight-1
-  if(delta<0&&!atTop||delta>0&&!atBottom)return
-  const ancestors:HTMLElement[]=[]
-  for(let parent=target.parentElement;parent;parent=parent.parentElement){
-    if(/auto|scroll/.test(getComputedStyle(parent).overflowY)&&parent.scrollHeight>parent.clientHeight)ancestors.push(parent)
-  }
-  const documentScroller=document.scrollingElement
-  if(documentScroller instanceof HTMLElement&&!ancestors.includes(documentScroller))ancestors.push(documentScroller)
-  if(!ancestors.some(parent=>delta>0?parent.scrollTop+parent.clientHeight<parent.scrollHeight:parent.scrollTop>0))return
-  event.preventDefault()
-  let remaining=delta
-  for(const parent of ancestors){
-    if(remaining>0){const amount=Math.min(remaining,parent.scrollHeight-parent.clientHeight-parent.scrollTop);if(amount>0){parent.scrollTop+=amount;remaining-=amount}}
-    else{const amount=Math.min(-remaining,parent.scrollTop);if(amount>0){parent.scrollTop-=amount;remaining+=amount}}
-    if(Math.abs(remaining)<1)break
-  }
-}
-
 /**
  * Applies the selected sort while keeping each configured group contiguous.
  * @param a - First entry to compare.
@@ -243,7 +219,7 @@ export function EntriesLog({
     (project === "all" || entry.project === project) &&
     (!dateFrom || entry.date >= dateFrom) &&
     (!dateThrough || entry.date <= dateThrough) &&
-    [entry.contractor, entry.project, entry.description, entry.date, entry.status].join(" ").toLowerCase().includes(query.trim().toLowerCase()),
+    [entry.contractor, entry.project, entry.description, entry.date, entry.status,entry.reviewManagerName,entry.reviewManagerEmail,entry.reviewedByName,entry.reviewedBy].join(" ").toLowerCase().includes(query.trim().toLowerCase()),
   ).sort((a,b)=>compareEntries(a,b,sortBy,groupBy))
   const selectable = (canSubmit || canSubmitOthers || canRequestReview) && !!userEmail
   const selectedIdSet = new Set(selectedIds)
@@ -371,30 +347,28 @@ export function EntriesLog({
           </div>
         </details>}
         {visibleEntries.length === 0 && <p role="status" className="p-4 text-sm text-muted-foreground">{periodView&&periodsLoaded&&periods.length>0&&periodSelection==="current"&&!activePeriod?"No timesheet period is active today. Select an archived or upcoming period to retrieve entries.":periodView&&periodsLoaded&&periods.length===0?"No saved timesheets match the current filters.":"No matching entries."}</p>}
-        <div tabIndex={0} aria-label="Scrollable time entries" onWheel={chainTimesheetWheel} className="max-h-[calc(100dvh-14rem)] min-h-48 overflow-auto overscroll-y-auto">
+        <div tabIndex={0} aria-label="Scrollable time entries" className="timesheet-scroll-region max-h-[calc(100dvh-14rem)] min-h-48 overflow-auto overscroll-y-auto">
         <table className="w-full min-w-[1080px] border-collapse text-left">
           <thead className="sticky top-0 z-[1] bg-sky-100">
-            <tr className="border-b border-sky-300 text-xs uppercase tracking-wide text-sky-950">
-              {selectable && <th className="px-3 py-2"><input type="checkbox" aria-label="Select all matching eligible entries" checked={allMatchingSelected} disabled={!matchingEligible.length} ref={input => { if (input) input.indeterminate = !allMatchingSelected && matchingEligible.some(entry => selectedIds.includes(entry.id)) }} onChange={event => setSelectedIds(previous => event.target.checked ? [...new Set([...previous, ...matchingEligible.map(entry => entry.id)])] : previous.filter(id => !matchingEligible.some(entry => entry.id === id)))} className="size-4 accent-orange-700" /></th>}
-              <th className="px-4 py-2 font-medium">Contractor</th>
-              <th className="px-4 py-2 font-medium">Date</th>
-              <th className="px-4 py-2 font-medium">Project</th>
-              <th className="px-4 py-2 font-medium">Description</th>
-              <th className="px-4 py-2 font-medium">Status</th>
-              <th className="px-4 py-2 text-right font-medium">Hours</th>
-              <th className="sticky right-0 z-[2] w-10 bg-card px-2 py-2" aria-label="Actions" />
+            <tr className="border-b border-sky-300 text-[10px] uppercase tracking-wide text-sky-950">
+              {selectable && <th className="px-2 py-1"><input type="checkbox" aria-label="Select all matching eligible entries" checked={allMatchingSelected} disabled={!matchingEligible.length} ref={input => { if (input) input.indeterminate = !allMatchingSelected && matchingEligible.some(entry => selectedIds.includes(entry.id)) }} onChange={event => setSelectedIds(previous => event.target.checked ? [...new Set([...previous, ...matchingEligible.map(entry => entry.id)])] : previous.filter(id => !matchingEligible.some(entry => entry.id === id)))} className="size-3.5 accent-orange-700" /></th>}
+              <th className="px-2 py-1 font-medium">Contractor</th>
+              <th className="px-2 py-1 font-medium">Date</th>
+              <th className="px-2 py-1 font-medium">Project</th>
+              <th className="px-2 py-1 font-medium">Description</th>
+              <th className="px-2 py-1 font-medium">Status</th>
+              <th className="px-2 py-1 text-right font-medium">Hours</th>
+              <th className="sticky right-0 z-[2] w-8 bg-card px-1 py-1" aria-label="Actions" />
             </tr>
           </thead>
           <tbody>
             {visibleEntries.map((entry,index) => {
               const own = !!userEmail && entry.ownerEmail?.toLowerCase() === userEmail.toLowerCase()
               const unlocked = !entry.payoutEligible && (entry.status === "draft" || entry.status === "rejected" || (canReview && !own))
-              const previous = visibleEntries[index - 1]
-              const showIdentity = !previous || previous.project !== entry.project || previous.date !== entry.date || previous.contractor !== entry.contractor || previous.ownerEmail !== entry.ownerEmail
               return (
                 <Fragment key={entry.id}>
-              {groupBy!=="none"&&(index===0||entryGroupKey(visibleEntries[index-1],groupBy)!==entryGroupKey(entry,groupBy))&&<tr className="bg-gradient-to-r from-orange-50 via-sky-50 to-emerald-50"><th colSpan={selectable ? 8 : 7} className="border-y border-orange-100 px-3 py-2 text-left text-sm text-slate-900">{entryGroupLabel(entry,groupBy)} · {groupTotals.get(entryGroupKey(entry,groupBy))?.count} entries · {groupTotals.get(entryGroupKey(entry,groupBy))?.hours.toLocaleString(undefined,{maximumFractionDigits:2})}h</th></tr>}
-                <EntryLogRow entry={entry} showIdentity={showIdentity}
+              {groupBy!=="none"&&(index===0||entryGroupKey(visibleEntries[index-1],groupBy)!==entryGroupKey(entry,groupBy))&&<tr className="bg-gradient-to-r from-orange-50 via-sky-50 to-emerald-50"><th colSpan={selectable ? 8 : 7} className="border-y border-sky-100 px-2 py-1 text-left text-xs font-semibold text-slate-900">{entryGroupLabel(entry,groupBy)} <span className="ml-1 font-normal text-slate-600">{groupTotals.get(entryGroupKey(entry,groupBy))?.count} entries · {groupTotals.get(entryGroupKey(entry,groupBy))?.hours.toLocaleString(undefined,{maximumFractionDigits:2})}h</span></th></tr>}
+                <EntryLogRow entry={entry} showIdentity
                   selection={selectable ? { checked: selectedIdSet.has(entry.id) && eligibleIdSet.has(entry.id), disabled: !eligibleIdSet.has(entry.id), onChange: checked => setSelectedIds(previous => checked ? [...new Set([...previous, entry.id])] : previous.filter(id => id !== entry.id)) } : undefined}
                   canEdit={canEdit && unlocked} canDelete={canDelete && unlocked && (!deleteOwnOnly||own)}
                   canSubmit={canSubmit && (own||canSubmitOthers) && isEntrySubmissionOpen(entry,own)} canRecall={canSubmit && own} canReview={canReview && !own}
@@ -409,12 +383,12 @@ export function EntriesLog({
           <tfoot className="sticky bottom-0 bg-white">
             <tr className="border-t-2 border-emerald-300 bg-emerald-50">
               <td
-                className="px-4 py-2.5 text-xs font-medium uppercase tracking-wide text-muted-foreground"
+                className="px-2 py-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground"
                 colSpan={selectable ? 6 : 5}
               >
                 Total
               </td>
-              <td className="px-2 py-2.5 text-right font-mono text-sm font-semibold tabular-nums">
+              <td className="px-2 py-1.5 text-right font-mono text-xs font-semibold tabular-nums">
                 {total.toLocaleString(undefined, { maximumFractionDigits: 2 })}h
               </td>
               <td />

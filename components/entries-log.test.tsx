@@ -10,21 +10,26 @@ afterEach(()=>{cleanup();vi.unstubAllGlobals()})
 it("keeps multiple same-project work units as separate entries",()=>{
   const row={id:"one",contractor:"Person",project:"Project A",date:"2026-10-10",hours:2,description:"Documentation",status:"draft" as const}
   render(<EntriesLog entries={[row,{...row,id:"two",hours:3,description:"Testing"}]} onUpdate={vi.fn()} onStatusChange={vi.fn()} onDelete={vi.fn()} onClear={vi.fn()}/>)
-  expect(screen.getByText("Project: Project A · 2 entries · 5h")).toBeVisible()
+  expect(screen.getByText((_,node)=>node?.tagName==="TH"&&node.textContent==="Project: Project A 2 entries · 5h")).toBeVisible()
   expect(screen.getAllByRole("button",{name:"Edit entry"})).toHaveLength(2)
   expect(screen.queryByRole("spinbutton",{name:"Hours"})).not.toBeInTheDocument()
-  expect(screen.getAllByText("Person")).toHaveLength(1)
+  expect(screen.getAllByText("Person")).toHaveLength(2)
   expect(screen.getByText("Documentation")).toBeVisible()
   expect(screen.getByText("Testing")).toBeVisible()
+  expect(screen.getByText("Documentation").closest("td")).toHaveClass("px-2","py-1.5")
+  expect(screen.getAllByText("Draft").find((node)=>node.tagName==="SPAN")).toHaveClass("rounded-full","text-[10px]")
 })
 
-it("chains wheel scrolling to the page when the timesheet table reaches its bottom",()=>{
+it("leaves edge scrolling to the browser so wheel momentum is not replaced with jumps",()=>{
   const {container}=render(<section style={{overflowY:"auto"}}><EntriesLog entries={[{id:"scroll",contractor:"Person",project:"Project",date:"2026-10-10",hours:2,description:"Work",status:"draft"}]} onUpdate={vi.fn()} onStatusChange={vi.fn()} onDelete={vi.fn()} onClear={vi.fn()}/></section>)
   const parent=container.querySelector("section")!,tableScroller=screen.getByLabelText("Scrollable time entries")
   Object.defineProperties(parent,{scrollHeight:{configurable:true,value:900},clientHeight:{configurable:true,value:400},scrollTop:{configurable:true,writable:true,value:0}})
   Object.defineProperties(tableScroller,{scrollHeight:{configurable:true,value:600},clientHeight:{configurable:true,value:300},scrollTop:{configurable:true,writable:true,value:300}})
-  fireEvent.wheel(tableScroller,{deltaY:120})
-  expect(parent.scrollTop).toBe(120)
+  const wheel=new WheelEvent("wheel",{bubbles:true,cancelable:true,deltaY:120})
+  tableScroller.dispatchEvent(wheel)
+  expect(wheel.defaultPrevented).toBe(false)
+  expect(parent.scrollTop).toBe(0)
+  expect(tableScroller).toHaveClass("timesheet-scroll-region","overscroll-y-auto")
 })
 
 it("exposes filtered CSV export only when the caller has the explicit export right",()=>{
@@ -52,7 +57,7 @@ it("filters timesheets by text, status, project and date, with selectable sort a
   await user.click(screen.getByRole("button",{name:"Reset timesheet view"}))
 
   await user.selectOptions(screen.getByRole("combobox",{name:"Filter entry project"}),"Beta")
-  expect(screen.getByText("Project: Beta · 2 entries · 8h")).toBeVisible()
+  expect(screen.getByText((_,node)=>node?.tagName==="TH"&&node.textContent==="Project: Beta 2 entries · 8h")).toBeVisible()
   await user.selectOptions(screen.getByRole("combobox",{name:"Sort entries"}),"hours_low")
   const rowTexts=screen.getAllByRole("row").map(row=>row.textContent??"")
   expect(rowTexts.findIndex(text=>text.includes("Test suite"))).toBeLessThan(rowTexts.findIndex(text=>text.includes("Build release")))

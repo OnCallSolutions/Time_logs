@@ -61,7 +61,7 @@ async function getAccess() {
     email,
     appSessionId:session?.appSessionId,
     role,
-    includeAll: role==="manager"||permissions.view_team||(role==="account_manager"&&(permissions.view_manager_entries||permissions.review_entries)),
+    includeAll: role==="manager"||permissions.view_team||permissions.view_all_timesheets||(role==="account_manager"&&(permissions.view_manager_entries||permissions.review_entries)),
     permissions,
   }
 }
@@ -93,11 +93,13 @@ export async function GET() {
         if(scope.visible)eligible.push({...entry,reviewEligible:scope.reviewable,approvalEligible:scope.reviewable&&(access.role==="account_manager"||access.permissions.send_to_accounts)})
       }
     }
-    const identities=await listAccountIdentities(eligible.flatMap(entry=>entry.ownerEmail?[entry.ownerEmail]:[]))
+    const identities=await listAccountIdentities(eligible.flatMap(entry=>[entry.ownerEmail,entry.reviewManagerEmail,entry.reviewedBy].filter((email):email is string=>!!email)))
     const identityByEmail=new Map(identities.map(identity=>[identity.email,identity]))
     return Response.json({ entries:eligible.map(entry=>{
       const identity=entry.ownerEmail?identityByEmail.get(entry.ownerEmail.toLowerCase()):undefined
-      return identity?{...entry,contractor:identity.officialName,contractorNumber:identity.contractorNumber,shortReference:identity.shortReference,companyCode:identity.companyCode,employeeId:identity.employeeId}:entry
+      const reviewer=entry.reviewManagerEmail?identityByEmail.get(entry.reviewManagerEmail.toLowerCase()):undefined
+      const approver=entry.reviewedBy?identityByEmail.get(entry.reviewedBy.toLowerCase()):undefined
+      return {...entry,...(identity?{contractor:identity.officialName,contractorNumber:identity.contractorNumber,shortReference:identity.shortReference,companyCode:identity.companyCode,employeeId:identity.employeeId}:{}),reviewManagerName:reviewer?.officialName,reviewedByName:approver?.officialName}
     }) },{headers:{"Cache-Control":"no-store"}})
   } catch (err) {
     console.error("[entries] list failed")

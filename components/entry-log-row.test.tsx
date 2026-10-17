@@ -40,3 +40,9 @@ it("disables approval when the server marks a submitted row ineligible", () => {
   expect(screen.getByRole("button", { name: "Approve entry" })).toBeDisabled()
   expect(screen.getByRole("button", { name: "Reject entry" })).toBeEnabled()
 })
+
+it("shows the assigned approving manager alongside the timesheet owner",()=>{
+  render(<table><tbody><EntryLogRow entry={{...entry,reviewManagerEmail:"manager@example.com",reviewManagerName:"Maurice Baraza"}} showIdentity canEdit={false} canDelete={false} canSubmit={false} canReview={false} onUpdate={vi.fn()} onStatusChange={vi.fn()} onDelete={vi.fn()} onReview={vi.fn()}/></tbody></table>)
+  expect(screen.getByText("Casey")).toBeVisible()
+  expect(screen.getByText("Approver: Maurice Baraza")).toBeVisible()
+})

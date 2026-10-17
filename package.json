@@ -16,6 +16,7 @@
     "test:e2e:ui": "playwright test --ui",
     "test:install": "playwright install chromium",
     "test:ui": "node tools/test-ui.mjs",
+    "seed:demo-timesheets": "node tools/seed-demo-timesheets.mjs",
     "verify": "pnpm typecheck && pnpm test && pnpm build"
   },
   "dependencies": {

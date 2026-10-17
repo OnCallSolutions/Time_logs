@@ -36,6 +36,10 @@ export type TimeEntry = {
   ownerEmail?: string
   /** Assigned operational manager; unassigned legacy submissions remain in the shared queue. */
   reviewManagerEmail?: string | null
+  /** Display name resolved from the reviewer's registered company identity. */
+  reviewManagerName?: string | null
+  /** Display name resolved from the identity that recorded the decision. */
+  reviewedByName?: string | null
   /** Evidence locked after explicit business-account eligibility authorization. */
   payoutEligible?: boolean
   contractor: string

@@ -348,6 +348,12 @@
   overscroll-behavior-y: auto;
 }
 
+.timesheet-scroll-region {
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: auto;
+}
+
 /* Let wheel input follow the pointer's nearest scroll area, then chain at its edge. */
 .app-workspace,
 .app-workspace *,

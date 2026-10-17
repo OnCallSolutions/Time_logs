@@ -11,6 +11,7 @@ export const permissionLabels = {
   submit_entries: "Submit and recall entries",
   review_entries: "Approve and reject assigned workforce entries",
   view_team: "View team entries",
+  view_all_timesheets: "View all organization timesheets and period archives",
   view_reports: "View team reports",
   export_entries: "Export visible timesheets",
   ai_review: "Prepare AI review",
@@ -46,7 +47,7 @@ export function resolvePermissions(role: UserRole | null, overrides: PermissionO
   const elevated = role === "admin" || role === "manager"
   const personal = role === "employee" || role === "contractor"
   const defaults: Permissions = {create_entries:!!role,edit_entries:!!role,delete_entries:!!role,
-    submit_entries:personal||role==="manager"||role==="admin",review_entries:elevated||role==="account_manager",view_team:elevated,view_reports:elevated,export_entries:elevated||role==="account_manager",ai_review:elevated,
+    submit_entries:personal||role==="manager"||role==="admin",review_entries:elevated||role==="account_manager",view_team:elevated,view_all_timesheets:role==="admin"||role==="account_manager",view_reports:elevated,export_entries:elevated||role==="account_manager",ai_review:elevated,
     delegate_permissions:elevated,send_messages:elevated,send_to_accounts:elevated,view_accounts:role==="admin",review_accounts:role==="admin",ai_accounts:role==="admin",review_manager_entries:false,view_manager_entries:role==="account_manager",view_other_manager_entries:false,review_other_manager_entries:false,request_review_help:elevated,accept_review_requests:role==="manager",authorize_payouts:false,manage_timesheet_periods:role==="admin"||role==="account_manager",view_personal_reports:!!role}
   for (const key of Object.keys(permissionLabels) as Permission[]) {
     if (role && typeof overrides[key] === "boolean") defaults[key] = overrides[key]!
