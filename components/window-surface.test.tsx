@@ -41,6 +41,7 @@ it("defaults to full screen and restores the previous window and draft with Back
   fireEvent.pointerDown(resizeEdge!, { pointerId: 1, clientX: 100, clientY: 100 })
   fireEvent.pointerMove(resizeEdge!, { pointerId: 1, clientX: 140, clientY: 130 })
   expect(parent.querySelector(".window-content")?.parentElement).toHaveStyle({ width: "280px", height: "240px" })
+  expect(parent.querySelector(".window-content")?.parentElement).toHaveStyle({ minWidth: "280px", minHeight: "240px" })
   fireEvent.pointerUp(resizeEdge!, { pointerId: 1 })
   await user.click(screen.getByRole("button", { name: "Expand window" }))
   expect(parent).toHaveAttribute("data-window-expanded", "true")
