@@ -172,6 +172,7 @@ export type AuditEvent = {
 }
 
 export type TimesheetPeriod = { id:string; name:string; startDate:string; endDate:string; submissionDeadline:string; managerGraceDays:number; reminderDays:number; createdBy:string; createdAt:string }
+export type EntryRejectionRecord={id:string;actorEmail:string;entryId:string|null;contractor:string;ownerEmail:string|null;project:string;workDate:string|null;hours:number|null;reason:string;rejectedAt:string}
 
 type AuditEventRow = {
   id: string
@@ -194,6 +195,7 @@ const auditSchemaReady = createDatabaseInitializer()
 const accessSchemaReady = createDatabaseInitializer()
 const workflowSettingsSchemaReady = createDatabaseInitializer()
 const timesheetPeriodsSchemaReady = createDatabaseInitializer()
+const entryRejectionArchiveSchemaReady = createDatabaseInitializer()
 
 /**
  * Maps a database row into the client-facing time entry shape.
@@ -441,6 +443,25 @@ export function ensureAuditEventsTable() {
   })
 }
 
+/** Creates a dedicated, durable store for human rejection decisions and reasons. */
+export function ensureEntryRejectionArchiveTable(){
+  return entryRejectionArchiveSchemaReady(async()=>{
+    await sql`CREATE TABLE IF NOT EXISTS entry_rejection_archive (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      actor_email text NOT NULL,
+      entry_id uuid NOT NULL,
+      contractor text NOT NULL,
+      owner_email text,
+      project text NOT NULL,
+      work_date date NOT NULL,
+      hours numeric(8,2) NOT NULL,
+      reason text NOT NULL,
+      rejected_at timestamptz NOT NULL DEFAULT now()
+    )`
+    await sql`CREATE INDEX IF NOT EXISTS entry_rejection_archive_actor_time_idx ON entry_rejection_archive (lower(actor_email),rejected_at DESC)`
+  })
+}
+
 /** Creates the singleton organization workflow settings table on first use. */
 export function ensureWorkflowSettingsTable() {
   return workflowSettingsSchemaReady(async () => {
@@ -496,6 +517,31 @@ export async function createTimesheetPeriod(input:{name:string;startDate:string;
       ${context.ipAddress},${context.userAgent},${context.requestMethod},${context.requestPath},${context.requestId} FROM saved RETURNING target_id
   ) SELECT id,name,start_date::text AS start_date,end_date::text AS end_date,submission_deadline::text AS submission_deadline,
       manager_grace_days,reminder_days,created_by,created_at::text AS created_at FROM saved WHERE EXISTS(SELECT 1 FROM audited)`
+  const row=rows[0]
+  return row?{id:String(row.id),name:String(row.name),startDate:String(row.start_date),endDate:String(row.end_date),submissionDeadline:new Date(String(row.submission_deadline)).toISOString(),managerGraceDays:Number(row.manager_grace_days),reminderDays:Number(row.reminder_days),createdBy:String(row.created_by),createdAt:new Date(String(row.created_at)).toISOString()}:null
+}
+
+/** Updates a submission window and audits the before/after values atomically. */
+export async function updateTimesheetPeriod(id:string,input:{name:string;startDate:string;endDate:string;submissionDeadline:string;managerGraceDays:number;reminderDays:number},actor:string,reason:string,context:AuditContext):Promise<TimesheetPeriod|null>{
+  await ensureTimesheetPeriodsTable();await ensureAuditEventsTable()
+  const rows=await sql`WITH lock AS (SELECT pg_advisory_xact_lock(hashtext('tanovo-timesheet-periods'))), before AS (
+    SELECT p.* FROM timesheet_periods p CROSS JOIN lock WHERE p.id=${id}::uuid FOR UPDATE
+  ), saved AS (
+    UPDATE timesheet_periods p SET name=${input.name},start_date=${input.startDate}::date,end_date=${input.endDate}::date,
+      submission_deadline=${input.submissionDeadline}::timestamptz,manager_grace_days=${input.managerGraceDays},reminder_days=${input.reminderDays}
+    FROM before b WHERE p.id=b.id AND NOT EXISTS(SELECT 1 FROM timesheet_periods other
+      WHERE other.id<>p.id AND other.start_date<=${input.endDate}::date AND other.end_date>=${input.startDate}::date)
+    RETURNING p.*
+  ), audited AS (
+    INSERT INTO audit_events(actor_email,action,target_type,target_id,metadata,ip_address,user_agent,request_method,request_path,request_id)
+    SELECT ${actor.toLowerCase()},'timesheet_period_updated','timesheet_period',saved.id::text,
+      jsonb_build_object('reason',${reason},'before',jsonb_build_object('name',before.name,'startDate',before.start_date,'endDate',before.end_date,'submissionDeadline',before.submission_deadline,'managerGraceDays',before.manager_grace_days,'reminderDays',before.reminder_days),
+        'after',jsonb_build_object('name',saved.name,'startDate',saved.start_date,'endDate',saved.end_date,'submissionDeadline',saved.submission_deadline,'managerGraceDays',saved.manager_grace_days,'reminderDays',saved.reminder_days)),
+      ${context.ipAddress},${context.userAgent},${context.requestMethod},${context.requestPath},${context.requestId}
+    FROM saved JOIN before ON before.id=saved.id RETURNING target_id
+  ) SELECT saved.id,saved.name,saved.start_date::text AS start_date,saved.end_date::text AS end_date,
+      saved.submission_deadline::text AS submission_deadline,saved.manager_grace_days,saved.reminder_days,saved.created_by,saved.created_at::text AS created_at
+    FROM saved WHERE EXISTS(SELECT 1 FROM audited)`
   const row=rows[0]
   return row?{id:String(row.id),name:String(row.name),startDate:String(row.start_date),endDate:String(row.end_date),submissionDeadline:new Date(String(row.submission_deadline)).toISOString(),managerGraceDays:Number(row.manager_grace_days),reminderDays:Number(row.reminder_days),createdBy:String(row.created_by),createdAt:new Date(String(row.created_at)).toISOString()}:null
 }
@@ -1352,18 +1398,33 @@ export async function updateTimeEntryWithAudit(
  * @returns Promise<TimeEntry|null> after both changes succeed, or null for stale evidence.
  */
 export async function rejectSubmittedEntry(id:string,actor:string,revision:string,note:string,context:AuditContext):Promise<TimeEntry|null>{
-  await ensureTimeEntriesTable();await ensureAuditEventsTable()
+  await ensureTimeEntriesTable();await ensureAuditEventsTable();await ensureEntryRejectionArchiveTable()
   const rows=await sql`WITH changed AS (
     UPDATE time_entries SET status='rejected',review_note=${note},reviewed_by=${actor.toLowerCase()},reviewed_at=now(),updated_at=now()
     WHERE id=${id}::uuid AND status='submitted' AND updated_at=${revision}::timestamptz
       AND lower(owner_email)<>${actor.toLowerCase()} AND payout_eligible_at IS NULL RETURNING *
+  ), archived AS (
+    INSERT INTO entry_rejection_archive(actor_email,entry_id,contractor,owner_email,project,work_date,hours,reason,rejected_at)
+    SELECT ${actor.toLowerCase()},id,contractor,owner_email,project,work_date,hours,review_note,reviewed_at FROM changed
+    RETURNING entry_id
   ), audited AS (
     INSERT INTO audit_events(actor_email,action,target_type,target_id,metadata,ip_address,user_agent,request_method,request_path,request_id)
     SELECT ${actor.toLowerCase()},'entry_rejected','time_entry',id::text,jsonb_build_object('fromStatus','submitted','toStatus','rejected'),${context.ipAddress},${context.userAgent},${context.requestMethod},${context.requestPath},${context.requestId}
-    FROM changed RETURNING target_id
+    FROM changed WHERE EXISTS(SELECT 1 FROM archived WHERE archived.entry_id=changed.id) RETURNING target_id
   ) SELECT id,owner_email,contractor_number,review_manager_email,payout_eligible_at,contractor,work_date,hours,project,description,status,reviewed_by,reviewed_at,review_note,updated_at::text AS updated_at
     FROM changed WHERE EXISTS(SELECT 1 FROM audited)`
   return rows.length?toTimeEntry(rows[0] as TimeEntryRow):null
+}
+
+/** Returns durable rejection snapshots for one manager, or all managers for admin review. */
+export async function listEntryRejections(actorEmail:string|null,limit=250):Promise<EntryRejectionRecord[]>{
+  await ensureEntryRejectionArchiveTable()
+  const safeLimit=Math.min(Math.max(limit,1),500)
+  const rows=await sql`SELECT id,actor_email,entry_id,contractor,owner_email,project,work_date::text AS work_date,hours,reason,rejected_at::text AS rejected_at
+    FROM entry_rejection_archive
+    WHERE (${actorEmail}::text IS NULL OR lower(actor_email)=lower(${actorEmail}))
+    ORDER BY rejected_at DESC,id DESC LIMIT ${safeLimit}` as Array<Record<string,unknown>>
+  return rows.map(row=>({id:String(row.id),actorEmail:String(row.actor_email),entryId:row.entry_id?String(row.entry_id):null,contractor:String(row.contractor),ownerEmail:row.owner_email?String(row.owner_email):null,project:String(row.project),workDate:row.work_date?String(row.work_date):null,hours:row.hours===null?null:Number(row.hours),reason:String(row.reason),rejectedAt:new Date(String(row.rejected_at)).toISOString()}))
 }
 
 /**

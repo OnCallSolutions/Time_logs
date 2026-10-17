@@ -7,8 +7,8 @@
  * sample. It owns transient parsing state and delegates persisted entry handling
  * to its parent through the onParsed callback.
  */
-import { useState } from "react"
-import { Loader2, Sparkles, WandSparkles } from "lucide-react"
+import { useState, type FormEvent } from "react"
+import { Loader2, Plus, Sparkles, Trash2, WandSparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { apiPath } from "@/lib/paths"
 import type { ParsedEntry } from "@/lib/types"
@@ -37,12 +37,18 @@ export function NoteInput({
   const [error, setError] = useState<string | null>(null)
   const [sampleCount, setSampleCount] = useState("random")
   const [sampleIsPreview, setSampleIsPreview] = useState(false)
+  const [mode,setMode]=useState<"manual"|"notes">("manual")
+  const [workDate,setWorkDate]=useState(()=>{const today=new Date();return `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}-${String(today.getDate()).padStart(2,"0")}`})
+  const [project,setProject]=useState("")
+  const [hours,setHours]=useState("")
+  const [description,setDescription]=useState("")
+  const [manualEntries,setManualEntries]=useState<ParsedEntry[]>([])
   /**
    * Loads synthetic examples scoped by the authenticated server identity.
    * @returns Promise<void> after replacing notes or displaying a safe error.
    */
   async function loadSample(){
-    setLoading(true);setError(null)
+    setMode("notes");setLoading(true);setError(null)
     try{const response=await fetch(apiPath(`/api/samples?count=${sampleCount}`),{cache:"no-store"});const data=await response.json();if(!response.ok)throw new Error(data.error);setNotes(data.notes);setSampleIsPreview(!!data.previewOnly)}
     catch(error){setError(error instanceof Error?error.message:"Samples unavailable.")}finally{setLoading(false)}
   }
@@ -82,6 +88,22 @@ export function NoteInput({
     }
   }
 
+  function addManualEntry(event:FormEvent<HTMLFormElement>){
+    event.preventDefault()
+    const value=Number(hours)
+    if(!Number.isFinite(value)||value<=0||value>24)return
+    setManualEntries(previous=>[...previous,{contractor:"Self",date:workDate,hours:value,project:project.trim()||"General",description:description.trim()}])
+    setProject("");setHours("");setDescription("")
+  }
+
+  async function saveManualEntries(){
+    if(!manualEntries.length||loading||previewOnly)return
+    setLoading(true);setError(null)
+    try{await onParsed(manualEntries);setManualEntries([])}
+    catch(err){setError(err instanceof Error?err.message:"Failed to save time entries.")}
+    finally{setLoading(false)}
+  }
+
   return (
     <section className="border-y border-border bg-card px-1 py-5 sm:px-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
@@ -90,13 +112,11 @@ export function NoteInput({
             <Sparkles className="size-4" aria-hidden="true" />
           </span>
           <div>
-            <h2 className="text-sm font-semibold leading-none">Log time notes</h2>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Paste anything — messy notes, multiple people, any format.
-            </p>
+            <h2 className="text-sm font-semibold leading-none">Create timesheet entries</h2>
+            <p className="mt-1 text-xs text-muted-foreground">Enter work directly or extract entries from notes with AI.</p>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        {(mode==="notes"||previewOnly)&&<div className="flex flex-wrap items-center gap-2">
         <select aria-label="Sample entry count per person" value={sampleCount} disabled={loading} onChange={event=>setSampleCount(event.target.value)} className="rounded-md border border-input bg-white px-2 py-2 text-sm">
           <option value="random">Random (3-18 entries / person)</option>
           <option value="3">3 entries / person</option>
@@ -113,8 +133,28 @@ export function NoteInput({
           <WandSparkles className="size-3.5" aria-hidden="true" />
           Try a sample
         </Button>
-        </div>
+        </div>}
       </div>
+
+      {!previewOnly&&<div role="group" aria-label="Entry creation method" className="mb-4 flex w-fit gap-1 border-b border-slate-200">
+        <button type="button" aria-pressed={mode==="manual"} onClick={()=>{setMode("manual");setError(null)}} className={`border-b-2 px-3 py-2 text-sm font-medium ${mode==="manual"?"border-orange-600 text-orange-900":"border-transparent text-slate-600 hover:text-slate-950"}`}>Manual entry</button>
+        <button type="button" aria-pressed={mode==="notes"} onClick={()=>{setMode("notes");setError(null)}} className={`border-b-2 px-3 py-2 text-sm font-medium ${mode==="notes"?"border-blue-600 text-blue-900":"border-transparent text-slate-600 hover:text-slate-950"}`}>AI notes</button>
+      </div>}
+
+      {mode==="manual"&&!previewOnly?<>
+        <form onSubmit={addManualEntry} className="grid gap-3 rounded-md border border-orange-200 bg-orange-50/50 p-3 sm:grid-cols-2 xl:grid-cols-4">
+          <label className="grid gap-1 text-xs font-medium text-slate-700">Work date<input required type="date" value={workDate} onChange={event=>setWorkDate(event.target.value)} className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm"/></label>
+          <label className="grid gap-1 text-xs font-medium text-slate-700">Project<input maxLength={120} value={project} onChange={event=>setProject(event.target.value)} placeholder="General" className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm"/></label>
+          <label className="grid gap-1 text-xs font-medium text-slate-700">Hours<input required type="number" min="0.25" max="24" step="0.25" value={hours} onChange={event=>setHours(event.target.value)} placeholder="e.g. 7.5" className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm"/></label>
+          <label className="grid gap-1 text-xs font-medium text-slate-700 sm:col-span-2 xl:col-span-1">Work description<input maxLength={1000} value={description} onChange={event=>setDescription(event.target.value)} placeholder="What work was completed?" className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm"/></label>
+          <div className="flex items-end sm:col-span-2 xl:col-span-4"><Button type="submit" variant="outline"><Plus className="size-4"/>Add to timesheet</Button></div>
+        </form>
+        {manualEntries.length>0&&<div className="mt-3 overflow-hidden rounded-md border border-sky-200 bg-white">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-sky-100 bg-sky-50 px-3 py-2"><p className="text-sm font-semibold">Entries to save <span className="text-slate-600">({manualEntries.length})</span></p><Button type="button" onClick={()=>void saveManualEntries()} disabled={loading}>{loading?<Loader2 className="size-4 animate-spin"/>:<Sparkles className="size-4"/>}{loading?"Saving…":"Save entries"}</Button></div>
+          <ul className="divide-y divide-slate-100">{manualEntries.map((entry,index)=><li key={`${entry.date}:${index}`} className="flex items-center justify-between gap-3 px-3 py-2 text-sm"><span className="min-w-0 break-words">{entry.date} · {entry.project} · {entry.hours}h{entry.description?` · ${entry.description}`:""}</span><Button type="button" variant="ghost" size="icon" aria-label={`Remove entry ${index+1}`} onClick={()=>setManualEntries(previous=>previous.filter((_,row)=>row!==index))}><Trash2 className="size-4"/></Button></li>)}</ul>
+        </div>}
+        {error&&<p role="alert" className="mt-3 text-sm text-red-700">{error}</p>}
+      </>:<>
 
       <label htmlFor="notes" className="sr-only">
         Time worked notes
@@ -171,6 +211,7 @@ export function NoteInput({
           )}
         </Button>}
       </div>
+      </>}
     </section>
   )
 }

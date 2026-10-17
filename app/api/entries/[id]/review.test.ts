@@ -120,6 +120,22 @@ it("locks a manager's own submitted evidence against deletion",async()=>{
   expect(response.status).toBe(409)
   expect(deleteTimeEntry).not.toHaveBeenCalled()
 })
+it("does not let managers delete another person's entries even with delete rights",async()=>{
+  vi.mocked(getEffectiveUserRole).mockResolvedValue("employee")
+  vi.mocked(getTimeEntry).mockResolvedValue({id:"entry",ownerEmail:"employee@example.com",reviewManagerEmail:"manager@example.com",status:"submitted"} as never)
+  const response=await DELETE(new Request("http://localhost/api/entries/entry",{method:"DELETE"}),{params:Promise.resolve({id:"entry"})})
+  expect(response.status).toBe(403)
+  expect((await response.json()).error).toMatch(/Reject it with a reason/)
+  expect(deleteTimeEntry).not.toHaveBeenCalled()
+})
+it("preserves administrator deletion access for another person's unprotected entry",async()=>{
+  vi.mocked(getEffectiveUserRole).mockResolvedValue("employee")
+  vi.mocked(getEffectivePermissions).mockResolvedValue({role:"admin",permissions:resolvePermissions("admin")})
+  vi.mocked(getTimeEntry).mockResolvedValue({id:"entry",ownerEmail:"employee@example.com",status:"submitted"} as never)
+  const response=await DELETE(new Request("http://localhost/api/entries/entry",{method:"DELETE"}),{params:Promise.resolve({id:"entry"})})
+  expect(response.status).toBe(200)
+  expect(deleteTimeEntry).toHaveBeenCalledWith("manager@example.com","entry",true)
+})
 it("does not let manager privileges reopen their own approved time",async()=>{
   vi.mocked(getTimeEntry).mockResolvedValue({id:"entry",ownerEmail:"manager@example.com",status:"approved"} as never)
   const response=await PATCH(new Request("http://localhost/api/entries/entry",{method:"PATCH",body:JSON.stringify({status:"draft"})}),{params:Promise.resolve({id:"entry"})})

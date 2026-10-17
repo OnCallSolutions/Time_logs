@@ -14,17 +14,37 @@ afterEach(()=>vi.unstubAllGlobals())
  * @returns Mock fetch recording all attempted mutations.
  */
 function fixture(){const fetch=vi.fn(async()=>new Response(JSON.stringify({candidates:[],assignees:[],handoffs:[row,{...row,id:"second",evidence:{...row.evidence,contractor:"Staff",workerCategory:"employee"}}]})));vi.stubGlobal("fetch",fetch);return fetch}
-it("groups approved evidence and filters internal employees",async()=>{
-  fixture();render(<BusinessAccounts canSend={false}/>);await screen.findByText("Supplier")
-  expect(screen.getByText("Approving reviewer: manager@example.com")).toBeVisible()
+it("shows a compact triage summary and filters employee evidence",async()=>{
+  fixture();render(<BusinessAccounts canSend={false}/>);await screen.findByText("Supplier",{selector:"span"})
+  expect(screen.getByRole("heading",{name:"Final hours and finance review"})).toBeVisible()
+  expect(screen.getByText(/human-confirmed decision.*payment execution is not enabled/i)).toBeVisible()
+  expect(screen.getByLabelText("Business queue summary")).toBeVisible()
+  expect(screen.getByRole("columnheader",{name:"Approved by"})).toBeVisible()
+  expect(screen.getAllByText("manager@example.com").length).toBeGreaterThan(1)
+  expect(screen.queryByRole("button",{name:"Sample preview"})).not.toBeInTheDocument()
+  await userEvent.click(screen.getByText("Filter and sort"))
   await userEvent.selectOptions(screen.getByRole("combobox",{name:"Category"}),"employee")
-  expect(screen.queryByText("Supplier")).not.toBeInTheDocument();expect(screen.getByText("Staff")).toBeVisible()
+  expect(screen.queryByText("Supplier",{selector:"span"})).not.toBeInTheDocument();expect(screen.getByText("Staff",{selector:"span"})).toBeVisible()
   expect(screen.queryByRole("button",{name:"Review"})).not.toBeInTheDocument()
   expect(screen.queryByRole("button",{name:"AI review"})).not.toBeInTheDocument()
 })
+it("nests period controls inside the final approval dashboard when authorized",async()=>{
+  const onManagePeriods=vi.fn();fixture();render(<BusinessAccounts canSend={false} onManagePeriods={onManagePeriods}/>);await screen.findByText("Supplier",{selector:"span"})
+  await userEvent.click(screen.getByRole("button",{name:"Timesheet periods"}))
+  expect(onManagePeriods).toHaveBeenCalledOnce()
+})
 it("requires an explicit review note before saving",async()=>{
-  const fetch=fixture();render(<BusinessAccounts canSend={false} canReview/>);await screen.findByText("Supplier")
+  const fetch=fixture();render(<BusinessAccounts canSend={false} canReview/>);await screen.findByText("Supplier",{selector:"span"})
   await userEvent.click(screen.getAllByRole("button",{name:"Review"})[0])
   expect(screen.getByRole("button",{name:"Confirm review"})).toBeDisabled()
   await waitFor(()=>expect(fetch).toHaveBeenCalledTimes(1))
+})
+it("groups the queue by manager and drills into that manager's people",async()=>{
+  fixture();render(<BusinessAccounts canSend={false}/>);await screen.findByText("Supplier",{selector:"span"})
+  expect(screen.getAllByText(/Manager · manager@example\.com/)[0]).toBeVisible()
+  await userEvent.click(screen.getByText("Filter and sort"))
+  await userEvent.selectOptions(screen.getByRole("combobox",{name:"Approving reviewer"}),"manager@example.com")
+  await userEvent.selectOptions(screen.getByRole("combobox",{name:"Manager contractor filter"}),"Supplier")
+  expect(screen.getByText("Supplier",{selector:"span"})).toBeVisible()
+  expect(screen.queryByText("Staff",{selector:"span"})).not.toBeInTheDocument()
 })

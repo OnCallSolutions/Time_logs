@@ -214,6 +214,8 @@ async function renderAdminPanel() {
   return user
 }
 
+function patronRows(directory:HTMLElement){return within(directory).getAllByRole("row").filter(row=>within(row).queryByRole("button",{name:/^edit$/i}))}
+
 describe("TimesheetApp admin directory", () => {
   beforeEach(() => {
     fetchCalls.length = 0
@@ -231,7 +233,7 @@ describe("TimesheetApp admin directory", () => {
 
     expect(directory).not.toBeNull()
 
-    const rows = within(directory as HTMLElement).getAllByRole("row").slice(1)
+    const rows = patronRows(directory as HTMLElement)
 
     expect(rows[0]).toHaveTextContent("Name not set")
     expect(rows[0]).toHaveTextContent("admin")
@@ -300,6 +302,10 @@ describe("TimesheetApp admin directory", () => {
     expect(within(timesheets).getByRole("heading", { name: "Timesheet workbench" })).toBeVisible()
     expect(within(timesheets).getByTestId("entries-log")).toBeInTheDocument()
     expect(within(timesheets).getByRole("button", { name: "Log time" })).toBeVisible()
+    const reviewDisclosure = within(timesheets).getByText("Review queue")
+    expect(reviewDisclosure).toBeVisible()
+    expect(reviewDisclosure.closest("details")).not.toHaveProperty("open", true)
+    await user.click(reviewDisclosure)
     expect(within(timesheets).getByRole("heading", { name: "Prepare and send for approval" })).toBeVisible()
     expect(within(timesheets).getByRole("button", { name: "AI suggestions" })).toBeVisible()
     expect(within(timesheets).getByRole("button", { name: "Refresh entries" })).toBeVisible()
@@ -331,7 +337,7 @@ describe("TimesheetApp admin directory", () => {
     const directory = screen
       .getByRole("heading", { name: /admin user directory/i })
       .closest("section")
-    const rows = within(directory as HTMLElement).getAllByRole("row").slice(1)
+    const rows = patronRows(directory as HTMLElement)
     const employeeRow = rows.find((row) => row.textContent?.includes("employee"))
 
     expect(employeeRow).toBeDefined()
@@ -381,7 +387,7 @@ describe("TimesheetApp admin directory", () => {
   it("requires an explicit final confirmation before saving ordinary changes", async () => {
     const user = await renderAdminPanel()
     const directory = screen.getByRole("heading", { name: /admin user directory/i }).closest("section") as HTMLElement
-    const employeeRow = within(directory).getAllByRole("row").slice(1).find(row => row.textContent?.includes("employee")) as HTMLElement
+    const employeeRow = patronRows(directory).find(row => row.textContent?.includes("employee")) as HTMLElement
     await user.click(within(employeeRow).getByRole("button", { name: /edit/i }))
     const editor = await screen.findByRole("dialog", { name: /edit patron access/i })
     await user.type(within(editor).getByLabelText(/administrator note/i), "Routine note")
@@ -404,7 +410,7 @@ describe("TimesheetApp admin directory", () => {
   it("describes account lifecycle states and saves suspension as access control", async () => {
     const user = await renderAdminPanel()
     const directory = screen.getByRole("heading", { name: /admin user directory/i }).closest("section")
-    const employeeRow = within(directory as HTMLElement).getAllByRole("row").slice(1).find(row => row.textContent?.includes("employee"))
+    const employeeRow = patronRows(directory as HTMLElement).find(row => row.textContent?.includes("employee"))
     await user.click(within(employeeRow as HTMLElement).getByRole("button", { name: /edit/i }))
     const dialog = await screen.findByRole("dialog", { name: /edit patron access/i })
     await user.click(within(dialog).getByRole("button", { name: /^suspended$/i }))
@@ -420,7 +426,7 @@ describe("TimesheetApp admin directory", () => {
   it("distinguishes offboarding, security blocks, and not-approved onboarding", async () => {
     const user = await renderAdminPanel()
     const directory = screen.getByRole("heading", { name: /admin user directory/i }).closest("section")
-    const employeeRow = within(directory as HTMLElement).getAllByRole("row").slice(1).find(row => row.textContent?.includes("employee"))
+    const employeeRow = patronRows(directory as HTMLElement).find(row => row.textContent?.includes("employee"))
     await user.click(within(employeeRow as HTMLElement).getByRole("button", { name: /edit/i }))
     const dialog = await screen.findByRole("dialog", { name: /edit patron access/i })
 
@@ -439,7 +445,7 @@ describe("TimesheetApp admin directory", () => {
     const user=await renderAdminPanel()
     const directory=screen.getByRole("heading",{name:/admin user directory/i}).closest("section") as HTMLElement
     expect(directory).not.toHaveTextContent("@example.com")
-    const employeeRow=within(directory).getAllByRole("row").slice(1).find(row=>row.textContent?.includes("employee")) as HTMLElement
+    const employeeRow=patronRows(directory).find(row=>row.textContent?.includes("employee")) as HTMLElement
     await user.click(within(employeeRow).getByRole("button",{name:"Name not set"}))
     const details=await screen.findByRole("dialog",{name:"Name not set"})
     expect(details).toHaveTextContent("employee@example.com")

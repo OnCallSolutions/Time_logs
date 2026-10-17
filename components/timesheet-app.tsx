@@ -8,11 +8,12 @@
  * translates the user's role into visible navigation choices so the UI matches
  * the permissions enforced by the API routes.
  */
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
+import { Fragment,useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
 import { signIn } from "next-auth/react"
 import { AssistantPanel } from "@/components/assistant-panel"
 import { AssistantRunReport } from "@/components/assistant-run-report"
 import { ReviewerHelpDialog } from "@/components/reviewer-help-dialog"
+import { ManagerRejectionArchive } from "@/components/manager-rejection-archive"
 import { Brand } from "@/components/brand"
 import { EmployeeWorkspace, RoleWorkspaceHome } from "@/components/employee-workspace"
 import { ApprovalSelection } from "@/components/approval-selection"
@@ -74,6 +75,8 @@ import type {
 } from "@/lib/types"
 
 type View = "home" | "log" | "personal" | "approvals" | "report" | "my-report" | "activity" | "admin" | "messages" | "permissions" | "accounts" | "periods"
+type AdminStartSection = "landing" | "admin" | "reports" | "timesheets"
+type WorkspaceHistoryFrame = { view: View; adminStartSection: AdminStartSection; pageWindow: boolean }
 
 const manageableRoles: UserRole[] = ["admin", "manager", "account_manager", "employee", "contractor"]
 const manageableStatuses: AccessStatus[] = ["active", "suspended", "retired", "blocked", "denied"]
@@ -223,7 +226,9 @@ export function TimesheetApp({
   const [messagesOpen,setMessagesOpen]=useState(false)
   const assistantDockRef=useRef<HTMLDivElement>(null)
   const assistantResizeStart=useRef<{pointerId:number;y:number;height:number}|null>(null)
+  const assistantWidthResizeStart=useRef<{pointerId:number;x:number;width:number}|null>(null)
   const [assistantHeight,setAssistantHeight]=useState(380)
+  const [assistantWidth,setAssistantWidth]=useState(0)
   const [assistantDockOpen,setAssistantDockOpen]=useState(false)
   const [assistantFocusRequest,setAssistantFocusRequest]=useState(0)
   const [assistantMessageContext,setAssistantMessageContext]=useState("")
@@ -264,6 +269,19 @@ export function TimesheetApp({
   function endAssistantResize(event:ReactPointerEvent<HTMLDivElement>):void {
     if(assistantResizeStart.current?.pointerId===event.pointerId)assistantResizeStart.current=null
   }
+  function beginAssistantWidthResize(event:ReactPointerEvent<HTMLDivElement>):void {
+    const width=assistantDockRef.current?.getBoundingClientRect().width??Math.min(window.innerWidth*.5,704)
+    assistantWidthResizeStart.current={pointerId:event.pointerId,x:event.clientX,width}
+    event.currentTarget.setPointerCapture?.(event.pointerId);event.preventDefault()
+  }
+  function moveAssistantWidthResize(event:ReactPointerEvent<HTMLDivElement>):void {
+    const start=assistantWidthResizeStart.current
+    if(!start||start.pointerId!==event.pointerId)return
+    setAssistantWidth(Math.max(320,Math.min(Math.floor(window.innerWidth*.72),start.width+start.x-event.clientX)))
+  }
+  function endAssistantWidthResize(event:ReactPointerEvent<HTMLDivElement>):void {
+    if(assistantWidthResizeStart.current?.pointerId===event.pointerId)assistantWidthResizeStart.current=null
+  }
   const permissionRequest=useRef(0)
   useEffect(()=>{
     if(role!==previousRole.current) {
@@ -292,8 +310,9 @@ export function TimesheetApp({
   const [technologyReports,setTechnologyReports] = useState(false)
   const [lifecycleOpen,setLifecycleOpen]=useState(false)
   const [directoryRequest,setDirectoryRequest] = useState(0)
-  const [adminStartSection,setAdminStartSection]=useState<"landing"|"admin"|"reports"|"timesheets">("landing")
+  const [adminStartSection,setAdminStartSection]=useState<AdminStartSection>("landing")
   const [pageWindow,setPageWindow] = useState(false)
+  const [workspaceHistory,setWorkspaceHistory]=useState<WorkspaceHistoryFrame[]>([])
   const [workspaceWindow,setWorkspaceWindow] = useState<"overview"|"workflow"|"notes"|null>(null)
   const entriesEndpoint = apiPath("/api/entries")
   /**
@@ -301,12 +320,25 @@ export function TimesheetApp({
    * @param next - Authorized workspace view selected by a user or assistant action.
    * @returns void after scheduling the requested page state.
    */
-  function openWorkspacePage(next:View):void { setView(next);setPageWindow(true) }
+  function openWorkspacePage(next:View, section?:AdminStartSection):void {
+    setWorkspaceHistory(previous=>[...previous,{view,adminStartSection,pageWindow}])
+    if(section)setAdminStartSection(section)
+    setView(next)
+    setPageWindow(true)
+  }
   /**
    * Returns from a nested role page to its command group or role home.
    * @returns void after closing the child page window.
    */
   function closeWorkspacePage():void {
+    const previous=workspaceHistory.at(-1)
+    if(previous){
+      setWorkspaceHistory(history=>history.slice(0,-1))
+      setView(previous.view)
+      setAdminStartSection(previous.adminStartSection)
+      setPageWindow(previous.pageWindow)
+      return
+    }
     setPageWindow(false)
     setView(role==="admin"?"admin":role==="account_manager"?"accounts":"home")
   }
@@ -496,7 +528,7 @@ export function TimesheetApp({
       if (!response.ok) throw new Error(`${data.error??"Failed to update entry."}${data.reference?` Reference: ${data.reference}`:""}`)
       setEntries(previous => role==="manager"&&data.entry.ownerEmail?.toLowerCase()!==userEmail?.toLowerCase()&&data.entry.status!=="submitted" ? previous.filter(entry=>entry.id!==id) : previous.map(entry => entry.id === id ? { ...entry, ...data.entry } : entry))
       setSyncError(null)
-      if(patch.status)setSavedStatus(patch.status==="approved"?"Approved and sent to business accounts.":patch.status==="rejected"?"Returned to the submitter for correction.":patch.status==="submitted"?"Submitted for independent review.":"Recalled to draft.")
+      if(patch.status)setSavedStatus(patch.status==="approved"?"Manager approval recorded; forwarded for final account review.":patch.status==="rejected"?"Returned to the submitter for correction.":patch.status==="submitted"?"Submitted for independent review.":"Recalled to draft.")
     } catch (cause) {
       const error = cause instanceof Error && ["TimeoutError", "AbortError"].includes(cause.name)
         ? new Error("Request timed out. Refresh entries before retrying; the server may have saved the update.")
@@ -604,12 +636,13 @@ export function TimesheetApp({
   const visibleOwnEntries=personalStatus==="all"?ownEntries:ownEntries.filter(entry=>entry.status===personalStatus)
   const personalStatusLabel=personalStatuses.find(([status])=>status===personalStatus)?.[1]??"All entries"
 
-  const accountsContent=<BusinessAccounts key={`${role}:${permissions.send_to_accounts}:${permissions.view_accounts}:${permissions.review_accounts}:${permissions.ai_accounts}`} canSend={false} canReview={permissions.view_accounts&&permissions.review_accounts&&(role==="account_manager"||role==="admin")} canAI={permissions.view_accounts&&permissions.ai_accounts&&(role==="account_manager"||role==="admin")} canAuthorize={permissions.authorize_payouts}/>
-  const assistantPane=accessDenied||!assistantDockOpen?null:<div ref={assistantDockRef} style={{height:assistantHeight,maxHeight:"calc(100dvh - 1.5rem)"}} className="fixed bottom-3 right-3 z-40 min-h-[18rem] min-w-0 w-[min(50vw,44rem)] max-sm:w-[calc(100vw-1.5rem)]">
+  const accountsContent=<BusinessAccounts key={`${role}:${permissions.send_to_accounts}:${permissions.view_accounts}:${permissions.review_accounts}:${permissions.ai_accounts}`} canSend={false} canReview={permissions.view_accounts&&permissions.review_accounts&&(role==="account_manager"||role==="admin")} canAI={permissions.view_accounts&&permissions.ai_accounts&&(role==="account_manager"||role==="admin")} canAuthorize={permissions.authorize_payouts} canPreviewSamples={role==="admin"} onManagePeriods={permissions.manage_timesheet_periods?()=>openWorkspacePage("periods"):undefined}/>
+  const assistantPane=accessDenied||!assistantDockOpen?null:<div ref={assistantDockRef} style={{height:assistantHeight,width:assistantWidth||undefined,maxWidth:"calc(100vw - 1.5rem)",maxHeight:"calc(100dvh - 1.5rem)"}} className="fixed bottom-3 right-3 z-40 min-h-[18rem] min-w-0 w-[min(50vw,44rem)] max-sm:w-[calc(100vw-1.5rem)]">
+    <div role="separator" aria-label="Resize assistant width" aria-orientation="vertical" aria-valuenow={assistantWidth||undefined} tabIndex={0} onPointerDown={beginAssistantWidthResize} onPointerMove={moveAssistantWidthResize} onPointerUp={endAssistantWidthResize} onPointerCancel={endAssistantWidthResize} onKeyDown={event=>{if(event.key==="ArrowLeft")setAssistantWidth(value=>Math.min(Math.floor(window.innerWidth*.72),(value||Math.min(window.innerWidth*.5,704))+32));if(event.key==="ArrowRight")setAssistantWidth(value=>Math.max(320,(value||Math.min(window.innerWidth*.5,704))-32))}} className="absolute -left-2 top-1/2 z-10 hidden h-16 w-4 -translate-y-1/2 cursor-ew-resize rounded-full bg-transparent after:absolute after:left-1/2 after:top-1/2 after:h-10 after:w-1 after:-translate-x-1/2 after:-translate-y-1/2 after:rounded-full after:bg-emerald-500/50 hover:after:bg-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 sm:block" />
     <div role="separator" aria-label="Resize assistant panel" aria-orientation="horizontal" aria-valuenow={assistantHeight} tabIndex={0} onPointerDown={beginAssistantResize} onPointerMove={moveAssistantResize} onPointerUp={endAssistantResize} onPointerCancel={endAssistantResize} onKeyDown={event=>{if(event.key==="ArrowUp")setAssistantHeight(value=>Math.min(Math.floor(window.innerHeight*.78),value+32));if(event.key==="ArrowDown")setAssistantHeight(value=>Math.max(300,value-32))}} className="absolute -top-2 left-1/2 z-10 h-4 w-16 -translate-x-1/2 cursor-ns-resize rounded-full bg-transparent after:absolute after:left-1/2 after:top-1/2 after:h-1 after:w-10 after:-translate-x-1/2 after:-translate-y-1/2 after:rounded-full after:bg-emerald-500/50 hover:after:bg-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500" />
     <AssistantPanel organizationName={organizationName} workspaceContext="main" handoffContext={assistantHandoff} onHandoffUsed={()=>setAssistantHandoff("")} onClose={()=>setAssistantDockOpen(false)} onNavigate={(destination,handoff)=>{if(handoff)setAssistantHandoff(handoff);if(destination==="messages")setMessagesOpen(true);else openWorkspacePage(destination as View)}} onRefresh={()=>{setEntriesRefresh(value=>value+1);messageInbox.refresh()}} messageContext={assistantMessageContext} onContextUsed={()=>setAssistantMessageContext("")} onCompose={draft=>{setAssistantCompose(draft);setMessagesOpen(true)}} focusRequest={assistantFocusRequest} onPreferredHeight={height=>setAssistantHeight(current=>current===height?current:height)}/>
   </div>
-  const pageTitle=view==="personal"?`${role==="manager"?"My managerial timesheets":"My timesheets"} · ${personalStatusLabel}`:view==="log"&&(role==="employee"||role==="contractor")?`My timesheets · ${personalStatusLabel}`:view==="log"?(permissions.view_team?"Team entries":role==="contractor"?"Contractor time submissions":"Employee time entries"):view==="approvals"?"Review queue":view==="report"||view==="my-report"?"Reports":view==="activity"?"Account activity":view==="permissions"?"Manage employees and contractors":view==="accounts"?"Business accounts":view==="periods"?"Timesheet periods":view==="admin"?adminStartSection==="reports"?"Reports":adminStartSection==="timesheets"?"Timesheets":"Admin dashboard":"Workspace"
+  const pageTitle=view==="personal"?`${role==="manager"?"My managerial timesheets":"My timesheets"} · ${personalStatusLabel}`:view==="log"&&(role==="employee"||role==="contractor")?`My timesheets · ${personalStatusLabel}`:view==="log"?(permissions.view_team?"Team entries":role==="contractor"?"Contractor time submissions":"Employee time entries"):view==="approvals"?"Review queue":view==="report"||view==="my-report"?"Reports":view==="activity"?"Account activity":view==="permissions"?"Manage employees and contractors":view==="accounts"?"Final approvals":view==="periods"?"Timesheet periods":view==="admin"?adminStartSection==="reports"?"Reports":adminStartSection==="timesheets"?"Timesheets":"Admin dashboard":"Workspace"
   return (
     <WindowAssistantProvider renderAssistant={(workspace,onClose)=><AssistantPanel organizationName={organizationName} workspaceContext={workspace} handoffContext={assistantHandoff} onHandoffUsed={()=>setAssistantHandoff("")} onClose={onClose} onNavigate={(destination,handoff)=>{if(handoff)setAssistantHandoff(handoff);if(destination==="messages")setMessagesOpen(true);else openWorkspacePage(destination as View)}} onRefresh={()=>{setEntriesRefresh(value=>value+1);messageInbox.refresh()}} messageContext="" onContextUsed={()=>{}} onCompose={draft=>{setAssistantCompose(draft);setMessagesOpen(true)}}/>}>
     <main className="app-workspace tech-surface flex h-dvh min-h-svh w-full min-w-0 flex-col gap-3 overflow-x-hidden overflow-y-auto overscroll-y-contain bg-background px-3 pb-8 pt-3 sm:px-5 md:pt-4">
@@ -617,7 +650,7 @@ export function TimesheetApp({
       {!accessDenied&&messagesOpen&&<WindowSurface title="Messages" onBack={()=>setMessagesOpen(false)}><section className="min-h-0 w-full overflow-auto bg-background p-3 sm:p-5"><MessagesPanel inbox={messageInbox} encryption={messageEncryption} canSend={permissions.send_messages&&(role==="admin"||role==="manager")} initialDraft={assistantCompose} onDraftConsumed={()=>setAssistantCompose(null)} onExplainMessage={text=>{setAssistantMessageContext(text);setMessagesOpen(false);focusAssistant()}}/></section></WindowSurface>}
       <header className="workspace-header flex flex-col gap-2 border-b border-border pb-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1"><Brand/><span aria-hidden="true" className="hidden h-5 border-l border-orange-200 sm:block"/><h1 className="text-base font-semibold text-slate-900">{role === "admin" ? "Technology management" : role === "account_manager" ? "Business accounts" : role === "manager" ? "Manager workspace" : role === "contractor" ? "Contractor workspace" : "Employee workspace"}</h1></div>
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1"><Brand/><span aria-hidden="true" className="hidden h-5 border-l border-orange-200 sm:block"/><h1 className="text-base font-semibold text-slate-900">{role === "admin" ? "Technology management" : role === "account_manager" ? "Final timesheet approvals" : role === "manager" ? "Manager workspace" : role === "contractor" ? "Contractor workspace" : "Employee workspace"}</h1></div>
           <div className="flex min-w-0 items-center justify-end gap-2">
             {!accessDenied&&<Button variant="outline" size="icon-lg" aria-label={`Go to ${organizationName} assistant`} title={`Go to ${organizationName} assistant`} onClick={focusAssistant}><Sparkles className="size-5"/></Button>}
             {!accessDenied&&<MessageNotifications inbox={messageInbox} onOpen={()=>setMessagesOpen(true)}/>}
@@ -634,15 +667,14 @@ export function TimesheetApp({
 
       {!accessDenied && <nav aria-label="Workspaces" className="flex flex-wrap gap-2 border-b pb-3">
         {role==="admin" ? <>
-          <Button variant="outline" onClick={()=>{setAdminStartSection("admin");openWorkspacePage("admin")}}><ShieldCheck className="size-4"/>Admin</Button>
-          <Button variant="outline" onClick={()=>{setAdminStartSection("reports");openWorkspacePage("admin")}}><BarChart3 className="size-4"/>Reports</Button>
-          <Button variant="outline" onClick={()=>{setAdminStartSection("timesheets");openWorkspacePage("admin")}}><Layers3 className="size-4"/>Timesheets</Button>
+          <Button variant="outline" onClick={()=>openWorkspacePage("admin","admin")}><ShieldCheck className="size-4"/>Admin</Button>
+          <Button variant="outline" onClick={()=>openWorkspacePage("admin","reports")}><BarChart3 className="size-4"/>Reports</Button>
+          <Button variant="outline" onClick={()=>openWorkspacePage("admin","timesheets")}><Layers3 className="size-4"/>Timesheets</Button>
         </> : <>
-          <Button variant="outline" onClick={()=>openWorkspacePage(role==="manager"&&permissions.view_team?"log":"personal")}><Layers3 className="size-4"/>Timesheets</Button>
-          {(canReviewEntries||canAIReview||role==="account_manager")&&<Button variant="outline" onClick={()=>openWorkspacePage(role==="account_manager"?"accounts":"approvals")}><CheckCircle2 className="size-4"/>{role==="account_manager"?"Business accounts":"Approvals"}</Button>}
+          {role!=="account_manager"&&<Button variant="outline" onClick={()=>openWorkspacePage(role==="manager"&&permissions.view_team?"log":"personal")}><Layers3 className="size-4"/>Timesheets</Button>}
+          {(canReviewEntries||canAIReview||role==="account_manager")&&<Button variant="outline" onClick={()=>openWorkspacePage(role==="account_manager"?"accounts":"approvals")}><CheckCircle2 className="size-4"/>{role==="account_manager"?"Final timesheets":"Approvals"}</Button>}
           <Button variant="outline" onClick={()=>openWorkspacePage(canViewTeamReports?"report":"my-report")}><BarChart3 className="size-4"/>{canViewTeamReports?"Reports":"My report"}</Button>
-          {canViewAdmin&&<Button variant="outline" onClick={()=>{setAdminStartSection("admin");openWorkspacePage("admin")}}><ShieldCheck className="size-4"/>Admin</Button>}
-          {permissions.manage_timesheet_periods&&role==="account_manager"&&<Button variant="outline" onClick={()=>openWorkspacePage("periods")}><CalendarClock className="size-4"/>Timesheet periods</Button>}
+          {canViewAdmin&&<Button variant="outline" onClick={()=>openWorkspacePage("admin","admin")}><ShieldCheck className="size-4"/>Admin</Button>}
           {permissions.view_personal_reports&&role==="contractor"&&<Button variant="outline" onClick={()=>openWorkspacePage("activity")}><Activity className="size-4"/>Account activity</Button>}
           {permissions.delegate_permissions&&role==="manager"&&<Button variant="outline" onClick={()=>openWorkspacePage("permissions")}><KeyRound className="size-4"/>Manage team access</Button>}
         </>}
@@ -650,7 +682,7 @@ export function TimesheetApp({
       {lifecycleOpen&&!accessDenied&&(canViewAdmin||(role==="manager"&&permissions.delegate_permissions))&&<WindowSurface title={canViewAdmin?"Access lifecycle":"Temporary coverage"} onBack={()=>setLifecycleOpen(false)}><section className="min-h-0 w-full overflow-auto bg-white"><AccessLifecyclePanel key={role} admin={canViewAdmin} permissions={permissions}/></section></WindowSurface>}
       {canViewAdmin && technologyReports && <SecurityRiskWindow onClose={() => setTechnologyReports(false)} />}
 
-      {workspaceWindow&&<WindowSurface title={workspaceWindow==="notes"?"Log time notes":workspaceWindow==="overview"?"Workspace overview":"Workflow totals"} onBack={()=>setWorkspaceWindow(null)}><section className="flex min-h-0 w-full max-w-6xl flex-col bg-white"><div className="min-h-0 flex-1 overflow-auto p-4">
+      {workspaceWindow&&<WindowSurface title={workspaceWindow==="notes"?"Create timesheet entries":workspaceWindow==="overview"?"Workspace overview":"Workflow totals"} onBack={()=>setWorkspaceWindow(null)}><section className="flex min-h-0 w-full max-w-6xl flex-col bg-white"><div className="min-h-0 flex-1 overflow-auto p-4">
       {workspaceWindow==="overview"?<RoleOverview role={role}/>:workspaceWindow==="notes"?<NoteInput onParsed={async parsed=>{await addParsed(parsed);setWorkspaceWindow(null);if(role!=="admin"||view!=="admin")openWorkspacePage(role==="manager"?"personal":"log")}}/>:<WorkflowOverview
         approvedCount={approvedEntries.length}
         draftCount={draftEntries.length}
@@ -666,10 +698,10 @@ export function TimesheetApp({
       }} />}
       {accessDenied && <p role="alert">Access is unavailable. Contact your administrator.</p>}
       {view === "admin" ? (
-        <WorkspacePageSurface open={pageWindow} title={pageTitle} onBack={closeWorkspacePage}><AdminPanel key={adminStartSection} initialSection={adminStartSection==="landing"?undefined:adminStartSection} role={role} entries={entries} pendingEntries={pendingEntries} userEmail={userEmail??""} onEntryUpdate={updateEntry} onEntryStatusChange={changeEntryStatus} onEntryDelete={deleteEntry} onEntryClear={clearEntries} onRefreshEntries={()=>setEntriesRefresh(value=>value+1)} onOpenEntryCapture={()=>setWorkspaceWindow("notes")} onApprovalUpdated={entry=>{entryReadEpoch.current++;setEntries(previous=>previous.map(current=>current.id===entry.id?entry:current))}} canCreateEntries={permissions.create_entries} canEditEntries={permissions.edit_entries} canDeleteEntries={permissions.delete_entries} canClearEntries={canClearVisibleEntries} canReviewEntries={canReviewEntries} canAIReview={canAIReview} canSubmitEntries={canSubmitEntries} canExportEntries={permissions.export_entries} canManagePeriods={permissions.manage_timesheet_periods} openRequest={directoryRequest} reportContent={<ManagerReport entries={entries}/>} onSecurity={()=>setTechnologyReports(true)} onLifecycle={()=>setLifecycleOpen(true)} /></WorkspacePageSurface>
+        <WorkspacePageSurface open={pageWindow} title={pageTitle} onBack={closeWorkspacePage}><AdminPanel initialSection={adminStartSection==="landing"?undefined:adminStartSection} role={role} entries={entries} pendingEntries={pendingEntries} userEmail={userEmail??""} onEntryUpdate={updateEntry} onEntryStatusChange={changeEntryStatus} onEntryDelete={deleteEntry} onEntryClear={clearEntries} onRefreshEntries={()=>setEntriesRefresh(value=>value+1)} onOpenEntryCapture={()=>setWorkspaceWindow("notes")} onApprovalUpdated={entry=>{entryReadEpoch.current++;setEntries(previous=>previous.map(current=>current.id===entry.id?entry:current))}} canCreateEntries={permissions.create_entries} canEditEntries={permissions.edit_entries} canDeleteEntries={permissions.delete_entries} canClearEntries={canClearVisibleEntries} canReviewEntries={canReviewEntries} canAIReview={canAIReview} canSubmitEntries={canSubmitEntries} canExportEntries={permissions.export_entries} canManagePeriods={permissions.manage_timesheet_periods} openRequest={directoryRequest} reportContent={<ManagerReport entries={entries} stateKey={`admin-report:${userEmail?.toLowerCase()??"user"}`}/>} onSecurity={()=>setTechnologyReports(true)} onLifecycle={()=>setLifecycleOpen(true)} /></WorkspacePageSurface>
       ) : view === "permissions" && role === "admin" ? (
         <WorkspacePageSurface open={pageWindow} title={pageTitle} onBack={closeWorkspacePage}><AdminPanel role={role} entries={entries} pendingEntries={pendingEntries} userEmail={userEmail??""} onEntryUpdate={updateEntry} onEntryStatusChange={changeEntryStatus} onEntryDelete={deleteEntry} onEntryClear={clearEntries} onRefreshEntries={()=>setEntriesRefresh(value=>value+1)} onOpenEntryCapture={()=>setWorkspaceWindow("notes")} onApprovalUpdated={entry=>{entryReadEpoch.current++;setEntries(previous=>previous.map(current=>current.id===entry.id?entry:current))}} canCreateEntries={permissions.create_entries} canEditEntries={permissions.edit_entries} canDeleteEntries={permissions.delete_entries} canClearEntries={canClearVisibleEntries} canReviewEntries={canReviewEntries} canAIReview={canAIReview} canSubmitEntries={canSubmitEntries} canExportEntries={permissions.export_entries} canManagePeriods={permissions.manage_timesheet_periods} rightsOnly openRequest={directoryRequest} reportContent={<ManagerReport entries={entries}/>} onSecurity={()=>setTechnologyReports(true)} onLifecycle={()=>setLifecycleOpen(true)} /></WorkspacePageSurface>
-      ) : <WorkspacePageSurface open={pageWindow} title={pageTitle} onBack={closeWorkspacePage}><div className="grid min-w-0 w-full flex-1 items-start gap-4 lg:grid-cols-2">
+      ) : <WorkspacePageSurface open={pageWindow} title={pageTitle} onBack={closeWorkspacePage}><div className={`grid min-w-0 w-full flex-1 items-start gap-4 ${assistantDockOpen&&role!=="admin"?"grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,var(--assistant-track))]":"grid-cols-1"}`} style={{"--assistant-track":assistantWidth?`${assistantWidth}px`:"min(50vw,44rem)"} as CSSProperties}>
         <div className="flex min-w-0 flex-col gap-4">
           {view==="home"&&(role==="contractor"||role==="employee"||role==="manager")&&<RoleWorkspaceHome
             role={role}
@@ -708,6 +740,7 @@ export function TimesheetApp({
           </nav>
         </section>}
         <EntriesLog
+          stateKey={`${userEmail?.toLowerCase()??"user"}:${view}`}
           userEmail={userEmail ?? undefined}
           submissionDestination={role==="manager"?"account_manager":"manager"}
           canRequestReview={role==="manager"&&permissions.request_review_help&&permissions.delegate_permissions&&permissions.send_messages}
@@ -725,6 +758,7 @@ export function TimesheetApp({
           canExport={permissions.export_entries}
           canEdit={permissions.edit_entries}
           canDelete={permissions.delete_entries}
+          deleteOwnOnly={role==="manager"}
           description={
             permissions.view_team
               ? "Review, edit, and manage team entries for your role."
@@ -735,6 +769,7 @@ export function TimesheetApp({
         </>
       ) : view === "approvals" ? (
         <section aria-label="Approval workspace" className="min-w-0 space-y-4">
+        {role==="manager"&&<div className="flex flex-wrap items-center justify-between gap-2 border-y border-red-200 bg-red-50/60 px-3 py-2"><div><h2 className="text-sm font-semibold text-red-950">Manager review archive</h2><p className="text-xs text-red-900">Rejection decisions and return reasons, searchable and grouped by person or date.</p></div><ManagerRejectionArchive/></div>}
         {(canReviewEntries||canAIReview||canViewTeamReports)&&<ManagerWorkspace canReview={canReviewEntries} canReports={canViewTeamReports} canAI={canAIReview} pending={pendingEntries.length} entries={pendingEntries} onApprovals={()=>{}} onReports={()=>openWorkspacePage("report")} onRecommendation={(entry,decision,reason)=>setSuggestedReview({entry,decision,reason})}/>}
         {pendingEntries.length === 0 ? (
           <div className="rounded-xl border border-dashed border-border bg-card/50 px-6 py-16 text-center">
@@ -745,6 +780,7 @@ export function TimesheetApp({
           </div>
         ) : (
           <EntriesLog
+          stateKey={`${userEmail?.toLowerCase()??"user"}:approvals`}
           userEmail={userEmail ?? undefined}
           submissionDestination={role==="manager"?"account_manager":"manager"}
           canRequestReview={role==="manager"&&permissions.request_review_help&&permissions.delegate_permissions&&permissions.send_messages}
@@ -760,6 +796,7 @@ export function TimesheetApp({
             canExport={permissions.export_entries}
             canEdit={permissions.edit_entries}
             canDelete={permissions.delete_entries}
+            deleteOwnOnly={role==="manager"}
             description="Approve or reject submitted time after review."
             title="Pending approvals"
           />
@@ -772,10 +809,10 @@ export function TimesheetApp({
             <h2 className="font-semibold text-orange-950">Reports</h2>
             <p className="text-xs text-orange-900">Organized summaries and analysis of timesheet activity. Open Timesheets for individual source entries.</p>
           </header>
-          <ManagerReport entries={entries}/>
+          <ManagerReport entries={entries} stateKey={`team-report:${userEmail?.toLowerCase()??"user"}`}/>
         </section>
       ) : view === "my-report" ? (
-        <section aria-label="My timesheet report" className="min-w-0 space-y-3"><header className="border-y border-blue-200 bg-gradient-to-r from-blue-50 via-white to-orange-50 px-4 py-3"><h2 className="font-semibold text-blue-950">My timesheet analytics</h2><p className="text-xs text-blue-900">Search, group, compare dates, and export a report limited to your own timesheet records.</p></header><ManagerReport entries={ownEntries}/></section>
+        <section aria-label="My timesheet report" className="min-w-0 space-y-3"><header className="border-y border-blue-200 bg-gradient-to-r from-blue-50 via-white to-orange-50 px-4 py-3"><h2 className="font-semibold text-blue-950">My timesheet analytics</h2><p className="text-xs text-blue-900">Search, group, compare dates, and export a report limited to your own timesheet records.</p></header><ManagerReport entries={ownEntries} stateKey={`personal-report:${userEmail?.toLowerCase()??"user"}`}/></section>
       ) : view === "activity" ? (
         <PatronAccountActivity/>
       ) : view === "accounts" ? (
@@ -791,6 +828,7 @@ export function TimesheetApp({
       )}
           </>}
         </div>
+        {assistantDockOpen&&role!=="admin"&&<div aria-hidden="true" className="hidden min-h-[18rem] min-w-0 lg:block"/>}
       </div></WorkspacePageSurface>}
       {assistantPane}
       {view!=="home"&&<footer className="mt-auto pt-4 text-center text-xs text-muted-foreground">
@@ -843,8 +881,8 @@ function WorkspacePageSurface({open,title,onBack,children}:{open:boolean;title:s
 function RoleOverview({ role }: { role: UserRole }) {
   const content = {
     account_manager: {
-      title: "Business accounts",
-      body: "Account review and manager-timesheet approval require administrator-granted rights. Financial evidence review does not release funds.",
+      title: "Final hours approval",
+      body: "Review manager-approved time, resolve evidence checks, and record finance eligibility. Every decision is human-confirmed and audited; this workspace does not move money.",
     },
     admin: {
       title: "Admin access",
@@ -951,6 +989,7 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
   const [activityWindowOpen, setActivityWindowOpen] = useState(false)
   const [directoryOpen,setDirectoryOpen] = useState(rightsOnly)
   const [adminSection,setAdminSection] = useState<"admin"|"reports"|"timesheets"|null>(initialSection??null)
+  const [adminSectionHistory,setAdminSectionHistory]=useState<Array<"admin"|"reports"|"timesheets"|null>>([])
   const [adminReportOpen,setAdminReportOpen]=useState(false)
   const [assistantRunsOpen,setAssistantRunsOpen]=useState(false)
   const [patronSearch,setPatronSearch]=useState("")
@@ -968,6 +1007,21 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
   const [accessConfirmationOpen, setAccessConfirmationOpen] = useState(false)
   const [reauthenticatedPendingChange, setReauthenticatedPendingChange] = useState(false)
   const [savingUser, setSavingUser] = useState<string | null>(null)
+  useEffect(()=>{
+    setAdminSection(initialSection??null)
+    setAdminSectionHistory([])
+  },[initialSection])
+  function navigateAdminSection(next:"admin"|"reports"|"timesheets"):void {
+    setAdminSectionHistory(history=>[...history,adminSection])
+    setAdminSection(next)
+  }
+  function backAdminSection():void {
+    const previous=adminSectionHistory.at(-1)
+    if(adminSectionHistory.length){
+      setAdminSectionHistory(history=>history.slice(0,-1))
+      setAdminSection(previous??null)
+    }else setAdminSection(null)
+  }
   const [managementError, setManagementError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -1057,6 +1111,7 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
   }
 
   const sortedUsers = sortAdminDirectoryUsers(users)
+  const directoryRoleGroups=["admin","account_manager","manager","employee","contractor","none"].map(groupRole=>({role:groupRole,users:sortedUsers.filter(user=>(user.role||"none").toLowerCase()===groupRole)})).filter(group=>group.users.length)
   const landingPatrons=sortedUsers.filter(user=>{
     const search=patronSearch.trim().toLowerCase()
     const matchesSearch=!search||user.displayName.toLowerCase().includes(search)||user.email.toLowerCase().includes(search)
@@ -1318,7 +1373,7 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
 
   return (
     <div className="tech-surface flex min-w-0 flex-col gap-2.5 bg-white text-slate-950">
-      {!rightsOnly&&<AdminWorkspace activeSection={adminSection} onAdmin={()=>setAdminSection("admin")} onReports={()=>setAdminSection("reports")} onTimesheets={()=>setAdminSection("timesheets")}/>}
+      {!rightsOnly&&<AdminWorkspace activeSection={adminSection} onAdmin={()=>navigateAdminSection("admin")} onReports={()=>navigateAdminSection("reports")} onTimesheets={()=>navigateAdminSection("timesheets")}/>}
       <div className="grid min-w-0 items-start gap-3 lg:grid-cols-2">
         <div className="min-w-0">
           {rightsOnly?<div className="flex flex-wrap items-center gap-2 border-y border-orange-200 bg-orange-50/70 px-3 py-2"><Button variant="outline" size="sm" className="border-blue-200 bg-blue-50 text-blue-800 hover:bg-blue-100" onClick={()=>setDirectoryOpen(true)}><Users className="size-4"/>Patron rights</Button><span className="ml-auto text-xs text-slate-600">{users.length} actors · {users.filter(user=>user.role==="admin"&&user.accessStatus==="active").length} active admins</span></div>:adminSection===null&&<section aria-label="People and access" className="flex h-[min(72svh,54rem)] min-h-[26rem] min-w-0 flex-col overflow-hidden rounded-lg border border-orange-200 bg-white shadow-sm shadow-orange-950/5">
@@ -1337,7 +1392,7 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
           </section>}
         </div>
       </div>
-      {!rightsOnly&&adminSection==="admin"&&<WindowSurface title="Admin" onBack={()=>setAdminSection(null)}>
+      {!rightsOnly&&adminSection==="admin"&&<WindowSurface title="Admin" onBack={backAdminSection}>
         <section className="flex min-h-0 w-full flex-col gap-3 overflow-auto bg-white p-4 sm:p-6">
           <header className="border-b border-orange-200 bg-orange-50 px-3 py-2"><h2 className="font-semibold text-orange-950">Administration</h2><p className="text-xs text-orange-900">People, account rights, access lifecycle, and security.</p></header>
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(16rem,0.65fr)]">
@@ -1352,7 +1407,7 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
           </div>
         </section>
       </WindowSurface>}
-      {!rightsOnly&&adminSection==="reports"&&<WindowSurface title="Reports" onBack={()=>setAdminSection(null)}>
+      {!rightsOnly&&adminSection==="reports"&&<WindowSurface title="Reports" onBack={backAdminSection}>
         <section className="flex min-h-0 w-full flex-col gap-3 overflow-auto bg-white p-4 sm:p-6">
           <header className="border-b border-blue-200 bg-blue-50 px-3 py-2"><h2 className="font-semibold text-blue-950">Reports</h2><p className="text-xs text-blue-900">Admin reporting hub: operational analytics, activity history, and security risk findings. Raw entries stay in Timesheets.</p></header>
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -1363,13 +1418,20 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
           </div>
         </section>
       </WindowSurface>}
-      {!rightsOnly&&adminSection==="timesheets"&&<WindowSurface title="Timesheets" onBack={()=>setAdminSection(null)}>
+      {!rightsOnly&&adminSection==="timesheets"&&<WindowSurface title="Timesheets" onBack={backAdminSection}>
         <section className="flex min-h-0 w-full flex-col gap-3 overflow-auto bg-white p-4 sm:p-6">
           <header className="flex flex-wrap items-center justify-between gap-2 border-b border-green-200 bg-green-50 px-3 py-2"><div><h2 className="font-semibold text-green-950">Timesheet workbench</h2><p className="text-xs text-green-900">Create source entries, prepare and send approvals, then inspect or manually edit saved records.</p></div><div className="flex flex-wrap gap-2">{canCreateEntries&&<Button variant="outline" size="sm" onClick={onOpenEntryCapture}><Pencil className="size-4"/>Log time</Button>}<Button variant="outline" size="sm" onClick={onRefreshEntries}><Activity className="size-4"/>Refresh entries</Button></div></header>
           {canManagePeriods&&<SubmissionDeadlineSettings/>}
           <div className="min-h-0 flex-1 overflow-auto">
-            <section aria-label="Approval preparation" className="border-b border-orange-200 bg-orange-50/30 p-3"><div className="mb-2"><h3 className="text-sm font-semibold text-orange-950">Prepare and send for approval</h3><p className="text-xs text-orange-900">AI suggestions are advisory. A person confirms every approval, rejection, or return.</p></div><ApprovalSelection entries={pendingEntries} email={userEmail} canReview={canReviewEntries} canAI={canAIReview} onUpdated={onApprovalUpdated}/></section>
-            <EntriesLog userEmail={userEmail} entries={entries} onUpdate={onEntryUpdate} onStatusChange={onEntryStatusChange} onDelete={onEntryDelete} onClear={onEntryClear} canEdit={canEditEntries} canDelete={canDeleteEntries} canClear={canClearEntries} canReview={canReviewEntries} canSubmit={canSubmitEntries} canSubmitOthers canExport={canExportEntries} periodView title="Raw timesheet entries" description="Source records with period archives, search, status, project and date filters, sorting, grouping, individual edits, and permission-based actions."/>
+            <details className="group rounded-md border border-orange-200 bg-orange-50/35">
+              <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 hover:bg-orange-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 [&::-webkit-details-marker]:hidden">
+                <CheckCircle2 className="size-4 shrink-0 text-orange-700" aria-hidden="true"/>
+                <span className="min-w-0 flex-1"><span className="block text-sm font-semibold text-orange-950">Review queue</span><span className="block text-[11px] text-orange-900">{pendingEntries.length} awaiting review · AI advice and confirmed decisions</span></span>
+                <ChevronRight className="size-4 shrink-0 text-orange-800 transition-transform group-open:rotate-90" aria-hidden="true"/>
+              </summary>
+              <section aria-label="Approval preparation" className="border-t border-orange-200 px-3 py-2"><h3 className="mb-1 text-sm font-semibold text-orange-950">Prepare and send for approval</h3><p className="mb-2 text-xs text-orange-900">AI suggestions are advisory. A person confirms every approval, rejection, or return.</p><ApprovalSelection entries={pendingEntries} email={userEmail} canReview={canReviewEntries} canAI={canAIReview} onUpdated={onApprovalUpdated}/></section>
+            </details>
+            <EntriesLog stateKey={`admin-timesheets:${userEmail.toLowerCase()}`} userEmail={userEmail} entries={entries} onUpdate={onEntryUpdate} onStatusChange={onEntryStatusChange} onDelete={onEntryDelete} onClear={onEntryClear} canEdit={canEditEntries} canDelete={canDeleteEntries} canClear={canClearEntries} canReview={canReviewEntries} canSubmit={canSubmitEntries} canSubmitOthers canExport={canExportEntries} periodView title="Raw timesheet entries" description="Source records with period archives, search, status, project and date filters, sorting, grouping, individual edits, and permission-based actions."/>
           </div>
         </section>
       </WindowSurface>}
@@ -1427,36 +1489,7 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
               </tr>
             </thead>
             <tbody>
-              {sortedUsers.map((user) => (
-                <tr
-                  key={user.email}
-                  className="border-b border-slate-200 odd:bg-white even:bg-slate-50/70 last:border-0 hover:bg-orange-50"
-                >
-                  <td className="px-4 py-2">
-                    <button type="button" className="font-medium text-left text-slate-900 underline-offset-2 hover:underline" onClick={()=>setSelectedPatron(user)}>{displayOfficialName(user.displayName)}</button>
-                  </td>
-                  <td className="px-4 py-2">
-                    <span
-                      className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium capitalize ${roleBadgeClass(user.role)}`}
-                    >
-                      {user.role}
-                    </span>
-                  </td>
-                  <td className="sticky right-0 bg-inherit px-4 py-2 text-right">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="border-orange-300 bg-orange-50 text-orange-900 hover:bg-orange-100"
-                      onClick={() => openEditUserEditor(user)}
-                      disabled={savingUser === user.email}
-                    >
-                      <Pencil className="size-3.5" aria-hidden="true" />
-                      Edit
-                    </Button>
-                  </td>
-                </tr>
-              ))}
+              {directoryRoleGroups.map(group=><Fragment key={group.role}><tr className="border-y border-blue-200 bg-blue-50"><th colSpan={3} className="px-4 py-1.5 text-left text-xs font-semibold uppercase text-blue-950">{group.role.replaceAll("_"," ")} · {group.users.length}</th></tr>{group.users.map(user=><tr key={user.email} className="border-b border-slate-200 odd:bg-white even:bg-slate-50/70 last:border-0 hover:bg-orange-50"><td className="px-4 py-2"><button type="button" className="font-medium text-left text-slate-900 underline-offset-2 hover:underline" onClick={()=>setSelectedPatron(user)}>{displayOfficialName(user.displayName)}</button></td><td className="px-4 py-2"><span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium capitalize ${roleBadgeClass(user.role)}`}>{user.role}</span></td><td className="sticky right-0 bg-inherit px-4 py-2 text-right"><Button type="button" variant="outline" size="sm" className="border-orange-300 bg-orange-50 text-orange-900 hover:bg-orange-100" onClick={()=>openEditUserEditor(user)} disabled={savingUser===user.email}><Pencil className="size-3.5" aria-hidden="true"/>Edit</Button></td></tr>)}</Fragment>)}
             </tbody>
           </table>
         </div>

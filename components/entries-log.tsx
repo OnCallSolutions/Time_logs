@@ -16,6 +16,7 @@ import { SubmissionActions } from "@/components/submission-actions"
 import { Button } from "@/components/ui/button"
 import { WindowSurface } from "@/components/window-surface"
 import { apiPath } from "@/lib/paths"
+import { useRetainedViewState } from "@/components/use-retained-view-state"
 import type { EntryStatus, TimeEntry } from "@/lib/types"
 
 /**
@@ -122,6 +123,7 @@ export function EntriesLog({
   onRequestReview,
   canEdit = true,
   canDelete = true,
+  deleteOwnOnly = false,
   canClear = false,
   canExport = false,
   canReview = false,
@@ -135,6 +137,7 @@ export function EntriesLog({
   onDelete,
   onClear,
   title = "Time entries",
+  stateKey,
 }: {
   userEmail?: string
   submissionDestination?: "manager" | "account_manager"
@@ -142,6 +145,7 @@ export function EntriesLog({
   onRequestReview?: (entries: TimeEntry[]) => void
   canEdit?: boolean
   canDelete?: boolean
+  deleteOwnOnly?: boolean
   canClear?: boolean
   canExport?: boolean
   canReview?: boolean
@@ -155,21 +159,22 @@ export function EntriesLog({
   onDelete: (id: string) => void
   onClear: () => void
   title?: string
+  stateKey?: string
 }) {
-  const [query, setQuery] = useState("")
+  const [query, setQuery] = useRetainedViewState(stateKey?`${stateKey}:query`:undefined,"")
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [submissionRequest,setSubmissionRequest]=useState(0)
-  const [status, setStatus] = useState<EntryStatus | "all">("all")
-  const [project, setProject] = useState("all")
-  const [dateFrom, setDateFrom] = useState("")
-  const [dateThrough, setDateThrough] = useState("")
-  const [sortBy, setSortBy] = useState("date_newest")
-  const [groupBy, setGroupBy] = useState("project")
+  const [status, setStatus] = useRetainedViewState<EntryStatus | "all">(stateKey?`${stateKey}:status`:undefined,`all`)
+  const [project, setProject] = useRetainedViewState(stateKey?`${stateKey}:project`:undefined,`all`)
+  const [dateFrom, setDateFrom] = useRetainedViewState(stateKey?`${stateKey}:from`:undefined,"")
+  const [dateThrough, setDateThrough] = useRetainedViewState(stateKey?`${stateKey}:through`:undefined,"")
+  const [sortBy, setSortBy] = useRetainedViewState(stateKey?`${stateKey}:sort`:undefined,`date_newest`)
+  const [groupBy, setGroupBy] = useRetainedViewState(stateKey?`${stateKey}:group`:undefined,`project`)
   const [review, setReview] = useState<{ entry: TimeEntry; decision: "approved" | "rejected" } | null>(null)
   const [clearConfirmationOpen, setClearConfirmationOpen] = useState(false)
   const [submissionDeadline,setSubmissionDeadline]=useState<string|null>(null)
   const [periods,setPeriods]=useState<Array<{id:string;name:string;startDate:string;endDate:string;submissionDeadline:string;managerGraceDays:number}>>([])
-  const [periodSelection,setPeriodSelection]=useState("current")
+  const [periodSelection,setPeriodSelection]=useRetainedViewState(stateKey?`${stateKey}:period`:undefined,`current`)
   const [periodsLoaded,setPeriodsLoaded]=useState(false)
   const [deadlineLoaded,setDeadlineLoaded]=useState(false)
   useEffect(()=>{if(!canReview)setReview(null)},[canReview])
@@ -251,7 +256,7 @@ export function EntriesLog({
   }
 
   return (
-    <div className="overflow-hidden border-y border-border bg-card">
+    <div className="w-full min-w-0 overflow-hidden border border-sky-200 bg-gradient-to-b from-white to-sky-50/30 shadow-sm">
       {clearConfirmationOpen && <WindowSurface title="Confirm clearing timesheets" onBack={() => setClearConfirmationOpen(false)} compact resizable>
         <section className="flex w-full max-w-xl flex-col bg-white text-slate-950">
           <header className="flex items-start gap-3 border-b border-red-200 bg-red-50 p-4">
@@ -269,7 +274,7 @@ export function EntriesLog({
         await onStatusChange(review.entry.id, review.decision, note || undefined, review.entry.revision)
         setReview(null)
       }} />}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-orange-200 bg-gradient-to-r from-orange-50 via-white to-sky-50 px-4 py-3">
         <div>
           <h2 className="text-sm font-semibold">{title}</h2>
           <p className="text-xs text-muted-foreground">
@@ -330,10 +335,10 @@ export function EntriesLog({
           {canRequestReview&&onRequestReview&&<Button size="sm" variant="outline" disabled={!requestable.some(entry=>selectedIdSet.has(entry.id))||requestable.filter(entry=>selectedIdSet.has(entry.id)).length>50} onClick={()=>onRequestReview(requestable.filter(entry=>selectedIdSet.has(entry.id)))}>Request reviewer help ({requestable.filter(entry=>selectedIdSet.has(entry.id)).length})</Button>}
         </div>}
         {visibleEntries.length === 0 && <p role="status" className="p-4 text-sm text-muted-foreground">{periodView&&periodsLoaded&&periods.length>0&&periodSelection==="current"&&!activePeriod?"No timesheet period is active today. Select an archived or upcoming period to retrieve entries.":periodView&&periodsLoaded&&periods.length===0?"No saved timesheets match the current filters.":"No matching entries."}</p>}
-        <div tabIndex={0} aria-label="Scrollable time entries" className="max-h-[65dvh] overflow-auto overscroll-contain">
-        <table className="w-full min-w-[900px] border-collapse text-left">
-          <thead className="sticky top-0 z-[1] bg-card">
-            <tr className="border-b border-border text-xs uppercase tracking-wide text-muted-foreground">
+        <div tabIndex={0} aria-label="Scrollable time entries" className="max-h-[calc(100dvh-14rem)] min-h-48 overflow-auto overscroll-contain">
+        <table className="w-full min-w-[1080px] border-collapse text-left">
+          <thead className="sticky top-0 z-[1] bg-sky-100">
+            <tr className="border-b border-sky-300 text-xs uppercase tracking-wide text-sky-950">
               {selectable && <th className="px-3 py-2"><input type="checkbox" aria-label="Select all matching eligible entries" checked={allMatchingSelected} disabled={!matchingEligible.length} ref={input => { if (input) input.indeterminate = !allMatchingSelected && matchingEligible.some(entry => selectedIds.includes(entry.id)) }} onChange={event => setSelectedIds(previous => event.target.checked ? [...new Set([...previous, ...matchingEligible.map(entry => entry.id)])] : previous.filter(id => !matchingEligible.some(entry => entry.id === id)))} className="size-4 accent-orange-700" /></th>}
               <th className="px-4 py-2 font-medium">Contractor</th>
               <th className="px-4 py-2 font-medium">Date</th>
@@ -355,7 +360,7 @@ export function EntriesLog({
               {groupBy!=="none"&&(index===0||entryGroupKey(visibleEntries[index-1],groupBy)!==entryGroupKey(entry,groupBy))&&<tr className="bg-gradient-to-r from-orange-50 via-sky-50 to-emerald-50"><th colSpan={selectable ? 8 : 7} className="border-y border-orange-100 px-3 py-2 text-left text-sm text-slate-900">{entryGroupLabel(entry,groupBy)} · {groupTotals.get(entryGroupKey(entry,groupBy))?.count} entries · {groupTotals.get(entryGroupKey(entry,groupBy))?.hours.toLocaleString(undefined,{maximumFractionDigits:2})}h</th></tr>}
                 <EntryLogRow entry={entry} showIdentity={showIdentity}
                   selection={selectable ? { checked: selectedIdSet.has(entry.id) && eligibleIdSet.has(entry.id), disabled: !eligibleIdSet.has(entry.id), onChange: checked => setSelectedIds(previous => checked ? [...new Set([...previous, entry.id])] : previous.filter(id => id !== entry.id)) } : undefined}
-                  canEdit={canEdit && unlocked} canDelete={canDelete && unlocked}
+                  canEdit={canEdit && unlocked} canDelete={canDelete && unlocked && (!deleteOwnOnly||own)}
                   canSubmit={canSubmit && (own||canSubmitOthers) && isEntrySubmissionOpen(entry,own)} canRecall={canSubmit && own} canReview={canReview && !own}
                   onUpdate={onUpdate} onStatusChange={onStatusChange} onDelete={onDelete}
                   onSubmit={canSubmit&&own?()=>{setSelectedIds([entry.id]);setSubmissionRequest(value=>value+1)}:undefined}
@@ -365,8 +370,8 @@ export function EntriesLog({
               )
             })}
           </tbody>
-          <tfoot className="sticky bottom-0 bg-card">
-            <tr className="bg-muted/40">
+          <tfoot className="sticky bottom-0 bg-white">
+            <tr className="border-t-2 border-emerald-300 bg-emerald-50">
               <td
                 className="px-4 py-2.5 text-xs font-medium uppercase tracking-wide text-muted-foreground"
                 colSpan={selectable ? 6 : 5}

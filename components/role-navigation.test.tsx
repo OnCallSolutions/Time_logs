@@ -89,6 +89,21 @@ it("keeps AI recommendations advisory until a manager confirms",async()=>{
   await userEvent.click(screen.getByRole("button",{name:"Timesheets"}))
   expect(await screen.findByRole("dialog",{name:"Team entries"})).toBeInTheDocument()
 })
+it("returns from a report to the exact approval page and restores its filters",async()=>{
+  testRole="manager"
+  render(<TimesheetApp role="manager" userEmail="manager@example.com" />)
+  await screen.findByRole("region",{name:"manager workspace home"})
+  await userEvent.click(screen.getByRole("button",{name:"Approvals"}))
+  const approvals=await screen.findByRole("dialog",{name:"Review queue"})
+  const search=within(approvals).getByRole("textbox",{name:"Search entries"})
+  await userEvent.type(search,"Project work")
+  await userEvent.click(within(approvals).getByRole("button",{name:"Team report"}))
+  expect(await screen.findByRole("dialog",{name:"Reports"})).toBeVisible()
+  await userEvent.click(within(screen.getByRole("dialog",{name:"Reports"})).getByRole("button",{name:"Back"}))
+  const restored=await screen.findByRole("dialog",{name:"Review queue"})
+  expect(within(restored).getByRole("textbox",{name:"Search entries"})).toHaveValue("Project work")
+  expect(within(restored).getByText("Employee A")).toBeVisible()
+})
 it("groups admin tools beneath Admin, Reports, and Timesheets while preserving landing commands",async()=>{
   testRole = "admin"
   render(<TimesheetApp role="admin" userEmail="admin@example.com" />)
@@ -126,6 +141,7 @@ it("groups admin tools beneath Admin, Reports, and Timesheets while preserving l
   expect(within(timesheetWindow).getByRole("heading",{name:"Timesheet workbench"})).toBeVisible()
   expect(within(timesheetWindow).getByRole("heading",{name:"Raw timesheet entries"})).toBeVisible()
   expect(within(timesheetWindow).getByRole("button",{name:"Log time"})).toBeVisible()
+  await userEvent.click(within(timesheetWindow).getByText("Review queue"))
   expect(within(timesheetWindow).getByRole("button",{name:"AI suggestions"})).toBeVisible()
   expect(within(timesheetWindow).getByRole("button",{name:"Refresh entries"})).toBeVisible()
   await userEvent.click(within(timesheetWindow).getByRole("button",{name:"Back"}))

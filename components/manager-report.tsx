@@ -7,8 +7,9 @@
  * approval status counts, date ranges, and exportable detail rows. It expects
  * authorization to have already happened upstream through the API response.
  */
-import { useMemo, useState } from "react"
+import { useMemo } from "react"
 import { Download, Users, Clock, FolderKanban, Search, FilterX, LayoutGrid, List } from "lucide-react"
+import { useRetainedViewState } from "@/components/use-retained-view-state"
 import { Button } from "@/components/ui/button"
 import type { EntryStatus, TimeEntry } from "@/lib/types"
 
@@ -64,16 +65,16 @@ function fmtDate(iso: string) {
  * @param props.entries - Entries available to summarize and export.
  * @returns A filterable report view for manager-facing summaries.
  */
-export function ManagerReport({ entries }: { entries: TimeEntry[] }) {
-  const [query, setQuery] = useState("")
-  const [contractor, setContractor] = useState("all")
-  const [project, setProject] = useState("all")
-  const [status, setStatus] = useState<"all" | EntryStatus>("all")
-  const [dateFrom,setDateFrom]=useState("")
-  const [dateThrough,setDateThrough]=useState("")
-  const [viewBy, setViewBy] = useState<"summary" | "entries">("summary")
-  const [groupBy, setGroupBy] = useState<"contractor" | "project" | "date" | "month" | "status">("contractor")
-  const [sortBy, setSortBy] = useState("hours_desc")
+export function ManagerReport({ entries, stateKey }: { entries: TimeEntry[]; stateKey?: string }) {
+  const [query, setQuery] = useRetainedViewState(stateKey?`${stateKey}:query`:undefined,"")
+  const [contractor, setContractor] = useRetainedViewState(stateKey?`${stateKey}:contractor`:undefined,`all`)
+  const [project, setProject] = useRetainedViewState(stateKey?`${stateKey}:project`:undefined,`all`)
+  const [status, setStatus] = useRetainedViewState<"all" | EntryStatus>(stateKey?`${stateKey}:status`:undefined,`all`)
+  const [dateFrom,setDateFrom]=useRetainedViewState(stateKey?`${stateKey}:from`:undefined,"")
+  const [dateThrough,setDateThrough]=useRetainedViewState(stateKey?`${stateKey}:through`:undefined,"")
+  const [viewBy, setViewBy] = useRetainedViewState<"summary" | "entries">(stateKey?`${stateKey}:view`:undefined,`summary`)
+  const [groupBy, setGroupBy] = useRetainedViewState<"contractor" | "project" | "date" | "month" | "status">(stateKey?`${stateKey}:group`:undefined,`contractor`)
+  const [sortBy, setSortBy] = useRetainedViewState(stateKey?`${stateKey}:sort`:undefined,`hours_desc`)
 
   const contractors = useMemo(
     () => Array.from(new Set(entries.map((e) => e.contractor))).sort(),

@@ -92,6 +92,14 @@ it("requires a confirmation window before deleting an entry",async()=>{
   expect(onDelete).toHaveBeenCalledExactlyOnceWith("one")
 })
 
+it("hides deletion for a manager's other people's entries while retaining their own delete control",()=>{
+  const foreign={...entry,id:"foreign",ownerEmail:"employee@example.com",status:"rejected" as const}
+  const {rerender}=render(<EntriesLog entries={[foreign]} userEmail="manager@example.com" canDelete deleteOwnOnly onUpdate={vi.fn()} onStatusChange={vi.fn()} onDelete={vi.fn()} onClear={vi.fn()}/> )
+  expect(screen.queryByRole("button",{name:"Delete entry"})).not.toBeInTheDocument()
+  rerender(<EntriesLog entries={[entry]} userEmail="person@example.com" canDelete deleteOwnOnly onUpdate={vi.fn()} onStatusChange={vi.fn()} onDelete={vi.fn()} onClear={vi.fn()}/> )
+  expect(screen.getByRole("button",{name:"Delete entry"})).toBeVisible()
+})
+
 it("requires confirmation before requesting a clear-all operation",async()=>{
   const onClear=vi.fn()
   const user=userEvent.setup()

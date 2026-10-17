@@ -28,7 +28,9 @@ it("binds approval, business handoff and audit to unchanged independently owned 
 it("rejects atomically with its audit and never persists the human reason in audit metadata",async()=>{
   expect(await rejectSubmittedEntry(id,actor,revision,"Private reason",context)).toBeNull()
   const decision=queries.find(query=>query.text.includes("WITH changed AS"))!
+  expect(decision.text).toContain("INSERT INTO entry_rejection_archive")
   expect(decision.text).toContain("INSERT INTO audit_events")
+  expect(decision.text).toContain("jsonb_build_object('fromStatus','submitted','toStatus','rejected')")
   expect(decision.text).toContain("status='submitted'")
   expect(decision.text).toContain("lower(owner_email)<>")
   expect(decision.values.filter(value=>value==="Private reason")).toHaveLength(1)

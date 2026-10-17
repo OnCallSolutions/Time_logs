@@ -27,7 +27,7 @@ it("shows the privacy shield only when session verification takes longer than th
   render(<SessionBoundary><p>Private work</p></SessionBoundary>)
   expect(screen.queryByRole("dialog",{name:"Session verification"})).not.toBeInTheDocument()
   expect(screen.getByText("Private work").closest("[hidden]")).not.toBeNull()
-  expect(await screen.findByRole("dialog",{name:"Session verification"})).toBeVisible()
+  expect(await screen.findByRole("dialog",{name:"Session verification"},{timeout:3000})).toBeVisible()
   expect(screen.getByRole("status")).toHaveTextContent("Checking your session...")
 })
 it("does not touch activity on restore and explicitly renews from the warning",async()=>{
@@ -59,6 +59,18 @@ it("checks browser restore with GET rather than extending idle automatically",as
   await screen.findByText("Work");fireEvent(window,new Event("pageshow"))
   await waitFor(()=>expect(request).toHaveBeenCalledTimes(2))
   expect(request.mock.calls.every(call=>(call as unknown as [unknown,RequestInit])[1].method==="GET")).toBe(true)
+})
+it("keeps the workspace visible during routine tab-return verification",async()=>{
+  const request=vi.fn()
+    .mockResolvedValueOnce(Response.json(deadlines()))
+    .mockImplementationOnce(()=>new Promise<Response>(()=>{}))
+  vi.stubGlobal("fetch",request)
+  render(<SessionBoundary><p>Work remains visible</p></SessionBoundary>)
+  await screen.findByText("Work remains visible")
+  fireEvent(document,new Event("visibilitychange"))
+  await waitFor(()=>expect(request).toHaveBeenCalledTimes(2))
+  expect(screen.getByText("Work remains visible")).toBeVisible()
+  expect(screen.queryByRole("dialog",{name:"Session verification"})).not.toBeInTheDocument()
 })
 it("shields an already-open private portal when restoring session verification fails",async()=>{
   const request=vi.fn().mockResolvedValueOnce(Response.json(deadlines())).mockResolvedValue(Response.json({error:"Unavailable"},{status:503}));vi.stubGlobal("fetch",request)

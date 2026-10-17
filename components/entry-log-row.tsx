@@ -20,6 +20,12 @@ const statusStyles: Record<EntryStatus, string> = {
   approved: "border-green-200 bg-green-50 text-green-800",
   rejected: "border-red-200 bg-red-50 text-red-800",
 }
+const statusRowStyles:Record<EntryStatus,string>={
+  draft:"border-l-4 border-l-slate-400 bg-slate-50/70 hover:bg-orange-50",
+  submitted:"border-l-4 border-l-blue-500 bg-blue-50/45 hover:bg-blue-50",
+  approved:"border-l-4 border-l-emerald-500 bg-emerald-50/45 hover:bg-emerald-50",
+  rejected:"border-l-4 border-l-red-500 bg-red-50/45 hover:bg-red-50",
+}
 
 /**
  * Keeps editable strings local until a validated Save is confirmed by the server.
@@ -113,7 +119,7 @@ export function EntryLogRow({ entry, showIdentity, canEdit, canDelete, canSubmit
         </footer>
       </section>
     </WindowSurface>}
-    <tr className="border-b border-border/60 align-top hover:bg-muted/30" aria-label={`Entry ${entry.description || entry.id}`}>
+    <tr className={`border-b border-border/60 align-top transition-colors ${statusRowStyles[entry.status]}`} aria-label={`Entry ${entry.description || entry.id}`}>
       {selection && <td className="px-3 py-3"><input type="checkbox" aria-label={`Select entry ${entry.id}`} checked={selection.checked} disabled={selection.disabled || busy} onChange={event => selection.onChange(event.target.checked)} className="size-4 accent-orange-700" /></td>}
       <td className="px-3 py-3">{showIdentity && <><span className="text-sm font-medium">{entry.contractor}</span>{entry.contractorNumber&&<span title={entry.contractorNumber} className="mt-1 block max-w-48 break-all font-mono text-xs text-muted-foreground">{entry.shortReference || entry.contractorNumber}</span>}{entry.employeeId&&<span className="block text-xs text-muted-foreground">Employee ID: {entry.employeeId}</span>}</>}</td>
       <td className="px-3 py-3">{showIdentity && <span className="whitespace-nowrap text-sm">{entry.date}</span>}</td>
@@ -121,13 +127,13 @@ export function EntryLogRow({ entry, showIdentity, canEdit, canDelete, canSubmit
       <td className="min-w-48 px-3 py-3"><p className="whitespace-pre-wrap break-words text-sm">{entry.description}</p>{error && !editing && <p role="alert" className="mt-2 text-sm text-destructive">{error}</p>}</td>
       <td className="px-3 py-3"><span className={`rounded border px-2 py-1 text-xs ${statusStyles[entry.status]}`}>{entry.status.charAt(0).toUpperCase() + entry.status.slice(1)}</span>{entry.reviewNote && <p className="mt-2 max-w-48 break-words text-xs">{entry.reviewNote}</p>}{entry.reviewedBy && <p className="mt-1 max-w-48 break-all text-xs text-muted-foreground">by {entry.reviewedBy}</p>}</td>
       <td className="px-3 py-3 text-right"><span className="text-sm tabular-nums">{entry.hours}h</span></td>
-      <td className="sticky right-0 bg-card px-2 py-3"><div className="flex justify-end gap-1">
+      <td className="sticky right-0 bg-inherit px-2 py-3"><div className="flex justify-end gap-1">
         {canEdit && <Button size="icon-sm" variant="outline" title="Edit entry" aria-label="Edit entry" disabled={busy} onClick={() => { setDraft({ ...entry, hours: String(entry.hours) }); setError("") }}><Pencil className="size-4" /></Button>}
         {canSubmit && (entry.status === "draft" || entry.status === "rejected") && <Button size="icon-sm" variant="outline" title="Submit entry" aria-label="Submit entry" disabled={busy} onClick={() => onSubmit ? onSubmit() : void perform(() => onStatusChange(entry.id, "submitted", undefined, entry.revision))}><Send className="size-4" /></Button>}
         {onRequestReview && <Button size="icon-sm" variant="outline" title="Request reviewer help" aria-label="Request reviewer help" disabled={busy} onClick={onRequestReview}><UserPlus className="size-4" /></Button>}
         {canRecall && entry.status === "submitted" && <Button size="icon-sm" variant="outline" title="Recall entry to draft" aria-label="Recall entry to draft" disabled={busy} onClick={() => void perform(() => onStatusChange(entry.id, "draft", undefined, entry.revision))}><ClipboardList className="size-4" /></Button>}
         {canReview && entry.reviewEligible !== false && entry.status === "submitted" && <><Button size="icon-sm" variant="outline" title={entry.approvalEligible===false?"Approval requires business-account forwarding permission":"Approve entry"} aria-label="Approve entry" disabled={busy||entry.approvalEligible===false} onClick={() => onReview(entry, "approved")}><CheckCircle2 className="size-4" /></Button><Button size="icon-sm" variant="outline" title="Reject entry" aria-label="Reject entry" disabled={busy} onClick={() => onReview(entry, "rejected")}><XCircle className="size-4" /></Button></>}
-        <Button size="icon-sm" variant="ghost" title="Delete entry" aria-label="Delete entry" disabled={!canDelete || busy} onClick={() => setDeleteConfirmationOpen(true)}><Trash2 className="size-4" /></Button>
+        {canDelete&&<Button size="icon-sm" variant="ghost" title="Delete entry" aria-label="Delete entry" disabled={busy} onClick={() => setDeleteConfirmationOpen(true)}><Trash2 className="size-4" /></Button>}
       </div></td>
     </tr>
     {editing && <WindowSurface title="Edit time entry" disabled={busy} onBack={cancel}>

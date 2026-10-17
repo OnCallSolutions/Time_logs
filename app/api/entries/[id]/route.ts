@@ -363,8 +363,7 @@ export async function DELETE(
     const scope = await createReviewAccess(access.email, access)(current)
     if(!scope.visible)return Response.json({error:"Entry not found."},{status:404})
     if(current.payoutEligible)return Response.json({error:"Authorized eligibility evidence cannot be deleted."},{status:409})
-    if(access.role==="manager"&&current.ownerEmail?.toLowerCase()!==access.email.toLowerCase()&&!scope.reviewable)return Response.json({error:"Review assistance rights are required."},{status:403})
-
+    if(access.role==="manager"&&current.ownerEmail?.toLowerCase()!==access.email.toLowerCase())return Response.json({error:"Managers cannot delete another person's timesheet. Reject it with a reason to return it for correction."},{status:403})
     if (
       (!access.canReview || current.ownerEmail?.toLowerCase()===access.email.toLowerCase()) &&
       current.status !== "draft" &&

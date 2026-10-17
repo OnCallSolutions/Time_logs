@@ -34,7 +34,7 @@ export function SessionBoundary({children,onExpired,accountEmail}:{children:Reac
   },[covered])
   useEffect(()=>{
     if(!covered||error){setShowChecking(false);return}
-    const timer=window.setTimeout(()=>setShowChecking(true),200)
+    const timer=window.setTimeout(()=>setShowChecking(true),1200)
     return()=>window.clearTimeout(timer)
   },[covered,error])
   const expire=useCallback(()=>{if(ended.current)return;ended.current=true;setExpired(true);invalidateClientData();if(onExpired)onExpired();else window.location.replace(`${basePath}?session=expired`)},[onExpired])
@@ -63,8 +63,10 @@ export function SessionBoundary({children,onExpired,accountEmail}:{children:Reac
   useEffect(()=>{
     mounted.current=true;void check()
     const activity=(event:Event)=>{if(document.visibilityState!=="visible"||!event.isTrusted||warningVisible.current)return;dirty.current=true;if(Date.now()-lastTouch.current>=60000)void check(true)}
-    const visible=()=>{setCovered(true);if(document.visibilityState==="visible")void check()}
-    const resume=()=>{setCovered(true);void check()}
+    // Keep the active workspace mounted during routine resume checks. Expiry or
+    // verification errors still cover it in check(), without flashing a modal.
+    const visible=()=>{if(document.visibilityState==="visible")void check()}
+    const resume=()=>{void check()}
     const timer=window.setInterval(()=>{if(document.visibilityState==="visible")void check(dirty.current&&Date.now()-lastTouch.current>=60000)},15000)
     for(const name of ["pointerdown","keydown","wheel","touchstart"])window.addEventListener(name,activity,{passive:true})
     document.addEventListener("visibilitychange",visible);window.addEventListener("pageshow",resume)
