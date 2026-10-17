@@ -4,7 +4,7 @@
  * These tests use isolated DOM fixtures rather than authenticated accounts.
  */
 import { useState } from "react"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { expect, it } from "vitest"
 import { WindowSurface } from "./window-surface"
@@ -70,6 +70,23 @@ it("Escape returns from the nested window without dismissing its parent", async 
   await user.keyboard("{Escape}")
   expect(screen.getByRole("dialog", { name: "Activity" })).toBeVisible()
   expect(screen.queryByRole("dialog", { name: "Security" })).not.toBeInTheDocument()
+})
+
+it("maps browser Back to the active window Back and restores the parent surface", async () => {
+  render(<Windows />)
+  const user = userEvent.setup()
+  await user.click(screen.getByRole("button", { name: "Open activity" }))
+  await user.click(screen.getByRole("button", { name: "Open security" }))
+  expect(screen.getByRole("dialog", { name: "Security" })).toBeVisible()
+
+  window.history.back()
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "Security" })).not.toBeInTheDocument())
+  expect(screen.getByRole("dialog", { name: "Activity" })).toBeVisible()
+  expect(screen.getByLabelText("Draft")).toHaveValue("Retained draft")
+
+  window.history.back()
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "Activity" })).not.toBeInTheDocument())
+  expect(screen.getByRole("button", { name: "Open activity" })).toBeVisible()
 })
 
 it("keeps window AI hidden until its bottom-right assistant button is opened",async()=>{

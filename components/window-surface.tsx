@@ -10,6 +10,7 @@ import { ArrowLeft, Maximize2, Minimize2, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useDialogFocus } from "@/components/use-dialog-focus"
 import { useWindowAssistantRenderer } from "@/components/window-assistant-context"
+import { createWindowHistoryId, registerWindowBack } from "@/lib/window-history"
 
 const windows: HTMLElement[] = []
 const background = new Map<HTMLElement, { inert: boolean; visibility: string }>()
@@ -48,10 +49,18 @@ export function WindowSurface({ title, onBack, disabled = false, children,sessio
   const [compactGeometry,setCompactGeometry]=useState<{left:number;top:number;width:number;height:number}|null>(null)
   const resizeTarget = useRef<HTMLDivElement>(null)
   const resizeStart = useRef<{ pointerId: number; edge: string; x: number; y: number; width: number; height: number; left: number; top: number } | null>(null)
+  const historyId = useRef<number | null>(null)
+  if (historyId.current === null) historyId.current = createWindowHistoryId()
+  const onBackRef = useRef(onBack)
+  const disabledRef = useRef(disabled)
   const ref = useDialogFocus<HTMLDivElement>(onBack, !disabled, mounted)
   const renderAssistant=useWindowAssistantRenderer()
   const assistantWorkspace=title.normalize("NFKD").replace(/[^a-zA-Z0-9_.-]+/g,"_").slice(0,100)||"workspace"
   useEffect(() => setMounted(true), [])
+  useLayoutEffect(() => {
+    onBackRef.current = onBack
+    disabledRef.current = disabled
+  }, [onBack, disabled])
   useLayoutEffect(() => {
     if (!mounted || !ref.current) return
     const window = ref.current
@@ -61,8 +70,12 @@ export function WindowSurface({ title, onBack, disabled = false, children,sessio
       }
     }
     windows.push(window)
+    const unregisterHistory = registerWindowBack(historyId.current!, () => {
+      if (!disabledRef.current) onBackRef.current()
+    })
     reconcileWindows()
     return () => {
+      unregisterHistory()
       windows.splice(windows.indexOf(window), 1)
       reconcileWindows()
     }
