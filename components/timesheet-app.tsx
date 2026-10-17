@@ -657,7 +657,7 @@ export function TimesheetApp({
   const pageTitle=view==="personal"?`${role==="manager"?"My managerial timesheets":"My timesheets"} · ${personalStatusLabel}`:view==="log"&&(role==="employee"||role==="contractor")?`My timesheets · ${personalStatusLabel}`:view==="log"?(permissions.view_team?"Team entries":role==="contractor"?"Contractor time submissions":"Employee time entries"):view==="approvals"?"Review queue":view==="report"||view==="my-report"?"Reports":view==="activity"?"Account activity":view==="permissions"?"Manage employees and contractors":view==="accounts"?"Final approvals":view==="periods"?"Timesheet periods":view==="admin"?adminStartSection==="reports"?"Reports":adminStartSection==="timesheets"?"Timesheets":"Admin dashboard":"Workspace"
   return (
     <WindowAssistantProvider renderAssistant={(workspace,onClose)=><AssistantPanel organizationName={organizationName} workspaceContext={workspace} handoffContext={assistantHandoff} onHandoffUsed={()=>setAssistantHandoff("")} onClose={onClose} onNavigate={(destination,handoff)=>{if(handoff)setAssistantHandoff(handoff);if(destination==="messages")setMessagesOpen(true);else openWorkspacePage(destination as View)}} onRefresh={()=>{setEntriesRefresh(value=>value+1);messageInbox.refresh()}} messageContext="" onContextUsed={()=>{}} onCompose={draft=>{setAssistantCompose(draft);setMessagesOpen(true)}}/>}>
-    <main className="app-workspace tech-surface flex h-dvh min-h-svh w-full min-w-0 flex-col gap-3 overflow-x-hidden overflow-y-auto overscroll-y-contain bg-background px-3 pb-8 pt-3 sm:px-5 md:pt-4">
+    <main className="app-workspace tech-surface flex h-dvh min-h-svh w-full min-w-0 flex-col gap-3 overflow-x-hidden overflow-y-auto overscroll-y-auto bg-background px-3 pb-8 pt-3 sm:px-5 md:pt-4">
       {syncError&&<div role="alert" className="fixed right-4 top-4 z-[160] flex w-[min(36rem,calc(100vw-2rem))] items-start gap-3 border border-red-300 bg-white px-4 py-3 text-sm text-red-950 shadow-xl"><span className="min-w-0 flex-1 break-words">{syncError}</span><button type="button" aria-label="Dismiss error message" title="Dismiss error message" onClick={()=>setSyncError(null)} className="grid size-7 shrink-0 place-items-center rounded border border-red-200 text-red-800 hover:bg-red-50"><X className="size-4"/></button></div>}
       {!accessDenied&&messagesOpen&&<WindowSurface title="Messages" onBack={()=>setMessagesOpen(false)}><section className="min-h-0 w-full overflow-auto bg-background p-3 sm:p-5"><MessagesPanel inbox={messageInbox} encryption={messageEncryption} canSend={permissions.send_messages&&(role==="admin"||role==="manager")} initialDraft={assistantCompose} onDraftConsumed={()=>setAssistantCompose(null)} onExplainMessage={text=>{setAssistantMessageContext(text);setMessagesOpen(false);focusAssistant()}}/></section></WindowSurface>}
       <header className="workspace-header flex flex-col gap-2 border-b border-border pb-2">
@@ -1381,6 +1381,9 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
   }
 
   const activityEvents = allActivityEvents.length > 0 ? allActivityEvents : auditEvents
+  const patronsNeedingAttention=users.filter(user=>!user.accessConfigured||user.accessStatus!=="active"||!user.displayName.trim())
+  const activeAdminCount=users.filter(user=>user.role==="admin"&&user.accessStatus==="active").length
+  const activeManagerCount=users.filter(user=>user.role==="manager"&&user.accessStatus==="active").length
 
   return (
     <div className="tech-surface flex min-w-0 flex-col gap-2.5 bg-white text-slate-950">
@@ -1402,6 +1405,24 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
             </div>
           </section>}
         </div>
+        {!rightsOnly&&adminSection===null&&<aside aria-label="Organization health" className="flex h-[min(72svh,54rem)] min-h-[26rem] min-w-0 flex-col overflow-auto rounded-lg border border-sky-200 bg-gradient-to-br from-sky-50 via-white to-emerald-50 shadow-sm shadow-sky-950/5">
+          <header className="border-b border-sky-200 bg-sky-100/70 px-4 py-3"><h2 className="text-sm font-semibold text-sky-950">Organization health</h2><p className="text-[11px] text-sky-900">People, access readiness, and account support</p></header>
+          <div className="grid grid-cols-2 gap-2 p-3 sm:grid-cols-3 lg:grid-cols-2 2xl:grid-cols-3">
+            <div className="rounded-md border border-sky-200 bg-white/90 p-3"><span className="block text-xs text-sky-800">Patrons</span><strong className="mt-1 block text-xl text-sky-950">{users.length}</strong></div>
+            <button type="button" onClick={()=>setPatronStatusFilter("needs_attention")} className="rounded-md border border-orange-300 bg-orange-50 p-3 text-left hover:bg-orange-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500"><span className="block text-xs text-orange-900">Needs attention</span><strong className="mt-1 block text-xl text-orange-950">{patronsNeedingAttention.length}</strong></button>
+            <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3"><span className="block text-xs text-emerald-900">Active admins</span><strong className="mt-1 block text-xl text-emerald-950">{activeAdminCount}</strong></div>
+          </div>
+          <div className="mx-3 mb-3 border-l-4 border-orange-500 bg-white/80 p-3">
+            <h3 className="text-sm font-semibold text-slate-900">Support priorities</h3>
+            <ul className="mt-2 space-y-2 text-xs text-slate-700">
+              <li className="flex items-center justify-between gap-3"><span>Access or profile needs review</span><strong className={patronsNeedingAttention.length?"text-orange-800":"text-emerald-800"}>{patronsNeedingAttention.length}</strong></li>
+              <li className="flex items-center justify-between gap-3"><span>Active managers available</span><strong className="text-sky-900">{activeManagerCount}</strong></li>
+              <li className="flex items-center justify-between gap-3"><span>Active administrators</span><strong className="text-emerald-800">{activeAdminCount}</strong></li>
+            </ul>
+            <Button type="button" variant="outline" size="sm" className="mt-3 w-full justify-center border-orange-300 bg-orange-50 text-orange-950 hover:bg-orange-100" onClick={()=>setPatronStatusFilter("needs_attention")}><Users className="size-4"/>Review people needing attention</Button>
+          </div>
+          <div className="mx-3 mb-3 rounded-md border border-blue-200 bg-blue-50/80 p-3 text-xs text-blue-950"><strong>Admin focus</strong><p className="mt-1 text-blue-900">Keep identities, role assignments, and account status current. Detailed time records remain in the Timesheets workspace.</p></div>
+        </aside>}
       </div>
       {!rightsOnly&&adminSection==="admin"&&<WindowSurface title="Admin" onBack={backAdminSection}>
         <section className="flex min-h-0 w-full flex-col gap-3 overflow-auto bg-white p-4 sm:p-6">

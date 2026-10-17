@@ -345,7 +345,15 @@
 .window-surface > .window-content {
   min-width: 0;
   min-height: 0;
-  overscroll-behavior: contain;
+  overscroll-behavior-y: auto;
+}
+
+/* Let wheel input follow the pointer's nearest scroll area, then chain at its edge. */
+.app-workspace,
+.app-workspace *,
+.window-surface,
+.window-surface * {
+  overscroll-behavior-y: auto !important;
 }
 
 .window-surface[data-window-expanded='false'] > .window-content {
