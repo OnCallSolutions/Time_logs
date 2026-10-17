@@ -7,12 +7,12 @@ vi.mock("@/lib/account-identities",()=>({listAccountIdentities:vi.fn(async()=>[]
 vi.mock("@/lib/message-history-store",()=>({historyPage:vi.fn(async()=>[])}))
 vi.mock("@/auth",()=>({auth:vi.fn()}))
 vi.mock("@/lib/effective-permissions",()=>({getEffectivePermissions:vi.fn()}))
-vi.mock("@/lib/collaboration",()=>({actorRoster:vi.fn(),listMessages:vi.fn(),sendMessage:vi.fn(),readMessages:vi.fn(),hideMessageFor:vi.fn(),changeMessage:vi.fn(),editableMessage:vi.fn()}))
+vi.mock("@/lib/collaboration",()=>({actorRoster:vi.fn(),listMessages:vi.fn(),sendMessage:vi.fn(),readMessages:vi.fn(),hideMessageFor:vi.fn(),changeMessage:vi.fn(),editableMessage:vi.fn(),getMessagePreferences:vi.fn(async()=>({readReceiptsEnabled:true})),setReadReceiptsEnabled:vi.fn()}))
 vi.mock("@/lib/message-keys",()=>({publicMessageKeys:vi.fn()}))
 vi.mock("@/lib/db",()=>({recordAuditEvent:vi.fn()}))
 import {auth} from "@/auth"
 import {getEffectivePermissions} from "@/lib/effective-permissions"
-import {listMessages,sendMessage,actorRoster,readMessages,hideMessageFor,changeMessage,editableMessage} from "@/lib/collaboration"
+import {listMessages,sendMessage,actorRoster,readMessages,hideMessageFor,changeMessage,editableMessage,setReadReceiptsEnabled} from "@/lib/collaboration"
 import {resolvePermissions} from "@/lib/permissions"
 import {listAccountIdentities} from "@/lib/account-identities"
 import {GET,POST,PATCH,DELETE} from "./route"
@@ -50,6 +50,11 @@ function request(method:string,body:object):Request{return new Request("http://l
 it("records read receipts with authenticated identity rather than request identity",async()=>{
   expect((await PATCH(request("PATCH",{action:"read",ids:[messageId],email:"victim@example.com"}))).status).toBe(200)
   expect(readMessages).toHaveBeenCalledWith("employee@example.com",true,[messageId])
+})
+it("saves read receipt privacy for the authenticated user only",async()=>{
+  const response=await PATCH(request("PATCH",{action:"read_receipts",enabled:false,email:"victim@example.com"}))
+  expect(response.status).toBe(200)
+  expect(setReadReceiptsEnabled).toHaveBeenCalledWith("employee@example.com",false)
 })
 it("deletes a message only from the authenticated viewer's inbox",async()=>{
   vi.mocked(hideMessageFor).mockResolvedValue(true)

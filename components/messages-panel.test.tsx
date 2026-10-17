@@ -19,6 +19,16 @@ it("keeps encryption controls out of the everyday inbox",async()=>{
   expect(screen.getByText("Messages connected")).toBeVisible()
   expect(screen.queryByRole("button",{name:"Device identities"})).not.toBeInTheDocument()
 })
+it("lets a user turn off read receipts from message settings",async()=>{
+  const fetchMock=requests();render(<MessagesPanel canSend inbox={inbox()}/>);const user=userEvent.setup()
+  await user.click(screen.getByRole("button",{name:"Message settings"}))
+  const toggle=screen.getByRole("checkbox",{name:"Send read receipts"})
+  expect(toggle).toBeChecked()
+  await user.click(toggle)
+  await waitFor(()=>expect(fetchMock).toHaveBeenCalledWith("/tanovo-time/api/messages",expect.objectContaining({method:"PATCH",body:JSON.stringify({action:"read_receipts",enabled:false})})))
+  expect(toggle).not.toBeChecked()
+  expect(screen.getByText(/Your own unread counts still work/)).toBeVisible()
+})
 it("shows sender-first inbox cards and opens a chronological thread with navigation",async()=>{
   requests();render(<MessagesPanel canSend inbox={inbox()}/>);const user=userEvent.setup()
   expect(screen.getByRole("button",{name:/Taylor/})).toBeVisible()

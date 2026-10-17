@@ -53,8 +53,13 @@ async function initializeMessages(): Promise<void> {
   await sql`ALTER TABLE app_messages ADD COLUMN IF NOT EXISTS priority text NOT NULL DEFAULT 'normal' CHECK(priority IN ('normal','high'))`
   await sql`CREATE TABLE IF NOT EXISTS app_message_receipts (
     message_id UUID NOT NULL REFERENCES app_messages(id) ON DELETE CASCADE,
-    recipient_email TEXT NOT NULL, delivered_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), read_at TIMESTAMPTZ,
+    recipient_email TEXT NOT NULL, delivered_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), read_at TIMESTAMPTZ, read_receipt_at TIMESTAMPTZ,
     PRIMARY KEY (message_id, recipient_email)
+  )`
+  await sql`ALTER TABLE app_message_receipts ADD COLUMN IF NOT EXISTS read_receipt_at TIMESTAMPTZ`
+  await sql`CREATE TABLE IF NOT EXISTS app_message_preferences (
+    account_email TEXT PRIMARY KEY, read_receipts_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )`
   await sql`CREATE TABLE IF NOT EXISTS app_message_hidden_for (
     message_id UUID NOT NULL REFERENCES app_messages(id) ON DELETE CASCADE,
@@ -95,15 +100,29 @@ export async function listMessages(email:string,receivesBroadcast:boolean) {
       AND (recipient_email = ${identity} OR (recipient_email IS NULL AND (encrypted_payload->'keys' ? ${identity} OR (${receivesBroadcast} AND encrypted_payload IS NULL))))
     ORDER BY created_at DESC,id DESC LIMIT 100 ON CONFLICT DO NOTHING`
   return sql`SELECT m.id,m.sender_email,m.recipient_email,m.body,to_char(m.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS created_at,m.edited_at,m.deleted_at,m.encrypted_payload,m.priority,
-    r.delivered_at,r.read_at,
+    r.delivered_at,CASE WHEN m.sender_email=${identity} THEN r.read_receipt_at ELSE r.read_at END AS read_at,
     (SELECT COUNT(*)::int FROM app_message_receipts WHERE message_id=m.id) AS delivered_count,
-    (SELECT COUNT(*)::int FROM app_message_receipts WHERE message_id=m.id AND read_at IS NOT NULL) AS read_count
+    (SELECT COUNT(*)::int FROM app_message_receipts WHERE message_id=m.id AND read_receipt_at IS NOT NULL) AS read_count
     FROM app_messages m LEFT JOIN app_message_receipts r ON r.message_id=m.id
       AND r.recipient_email=CASE WHEN m.sender_email=${identity} AND m.recipient_email IS NOT NULL THEN m.recipient_email ELSE ${identity} END
     WHERE (m.recipient_email = ${identity} OR m.sender_email = ${identity}
       OR (m.recipient_email IS NULL AND (m.encrypted_payload->'keys' ? ${identity} OR (${receivesBroadcast} AND m.encrypted_payload IS NULL))))
       AND NOT EXISTS(SELECT 1 FROM app_message_hidden_for h WHERE h.message_id=m.id AND h.account_email=${identity})
     ORDER BY m.created_at DESC,m.id DESC LIMIT 100`
+}
+
+/** @param email - Authenticated account identity. @returns Its persistent messaging privacy preference. */
+export async function getMessagePreferences(email:string):Promise<{readReceiptsEnabled:boolean}>{
+  await ensureMessages()
+  const rows=await sql`SELECT read_receipts_enabled FROM app_message_preferences WHERE account_email=${email.toLowerCase()} LIMIT 1`
+  return {readReceiptsEnabled:rows[0]?.read_receipts_enabled!==false}
+}
+
+/** @param email - Authenticated account identity. @param enabled - Whether opened messages disclose read receipts. @returns Promise<void> after preference persistence. */
+export async function setReadReceiptsEnabled(email:string,enabled:boolean):Promise<void>{
+  await ensureMessages()
+  await sql`INSERT INTO app_message_preferences(account_email,read_receipts_enabled) VALUES(${email.toLowerCase()},${enabled})
+    ON CONFLICT(account_email) DO UPDATE SET read_receipts_enabled=EXCLUDED.read_receipts_enabled,updated_at=NOW()`
 }
 
 /**
@@ -134,12 +153,13 @@ export async function canViewMessageProfile(viewer:string,participant:string,rec
  */
 export async function readMessages(email: string, receivesBroadcast: boolean, ids: string[]): Promise<void> {
   await ensureMessages()
-  await sql`INSERT INTO app_message_receipts (message_id,recipient_email,read_at)
-    SELECT id,${email.toLowerCase()},NOW() FROM app_messages WHERE id=ANY(${ids}::uuid[])
+  await sql`INSERT INTO app_message_receipts (message_id,recipient_email,read_at,read_receipt_at)
+    SELECT id,${email.toLowerCase()},NOW(),CASE WHEN COALESCE((SELECT read_receipts_enabled FROM app_message_preferences WHERE account_email=${email.toLowerCase()}),TRUE) THEN NOW() ELSE NULL END FROM app_messages WHERE id=ANY(${ids}::uuid[])
       AND sender_email<>${email.toLowerCase()} AND deleted_at IS NULL
       AND NOT EXISTS(SELECT 1 FROM app_message_hidden_for h WHERE h.message_id=app_messages.id AND h.account_email=${email.toLowerCase()})
       AND (recipient_email=${email.toLowerCase()} OR (recipient_email IS NULL AND (encrypted_payload->'keys' ? ${email.toLowerCase()} OR (${receivesBroadcast} AND encrypted_payload IS NULL))))
-    ON CONFLICT (message_id,recipient_email) DO UPDATE SET read_at=COALESCE(app_message_receipts.read_at,EXCLUDED.read_at)`
+    ON CONFLICT (message_id,recipient_email) DO UPDATE SET read_at=COALESCE(app_message_receipts.read_at,EXCLUDED.read_at),
+      read_receipt_at=COALESCE(app_message_receipts.read_receipt_at,EXCLUDED.read_receipt_at)`
 }
 
 /**

@@ -94,6 +94,8 @@ export function MessagesPanel({canSend,inbox,encryption:sharedEncryption,initial
   const [identitiesOpen,setIdentitiesOpen]=useState(false)
   const [securityOpen,setSecurityOpen]=useState(false)
   const [messageBackground,setMessageBackground]=useState<MessageBackground>("sky")
+  const [readReceiptsEnabled,setReadReceiptsEnabled]=useState(state.readReceiptsEnabled!==false)
+  const [savingReceiptPreference,setSavingReceiptPreference]=useState(false)
   const [query,setQuery]=useState("")
   const [senderFilter,setSenderFilter]=useState("")
   const [actionMenuId,setActionMenuId]=useState<string|null>(null)
@@ -170,10 +172,23 @@ export function MessagesPanel({canSend,inbox,encryption:sharedEncryption,initial
       if(saved&&Object.hasOwn(messageBackgrounds,saved))setMessageBackground(saved as MessageBackground)
     }catch{/* Keep the default when browser storage is unavailable. */}
   },[state.email])
+  useEffect(()=>setReadReceiptsEnabled(state.readReceiptsEnabled!==false),[state.readReceiptsEnabled])
   /** Persists this user's chosen conversation canvas on the current device. */
   function chooseMessageBackground(background:MessageBackground):void{
     setMessageBackground(background)
     try{localStorage.setItem(`tanovo-message-background:${state.email.toLowerCase()}`,background)}catch{/* The in-memory preference still applies for this visit. */}
+  }
+  async function chooseReadReceipts(enabled:boolean):Promise<void>{
+    if(savingReceiptPreference)return
+    setSavingReceiptPreference(true);setError(null)
+    try{
+      const response=await fetch(apiPath("/api/messages"),{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"read_receipts",enabled})})
+      const data=await response.json()
+      if(!response.ok)throw new Error(data.error||"Could not save read receipt preference.")
+      setReadReceiptsEnabled(data.readReceiptsEnabled===true)
+      state.refresh()
+    }catch(error){setError(error instanceof Error?error.message:"Could not save read receipt preference.")}
+    finally{setSavingReceiptPreference(false)}
   }
   const messageCanvasClass=messageBackgrounds[messageBackground].canvas
   const previousSend=useRef<{key:string;encrypted:Awaited<ReturnType<typeof encryption.encrypt>>}|null>(null)
@@ -357,6 +372,7 @@ export function MessagesPanel({canSend,inbox,encryption:sharedEncryption,initial
     {encryption.error&&<Button size="sm" variant="outline" onClick={()=>encryption.retry?.()}>Retry connection</Button>}
     {encryption.error&&<p role="alert" className="text-sm text-destructive">{state.admin?encryption.error:"Message connection unavailable. Retry or contact an administrator."}</p>}
     {securityOpen&&<WindowSurface title="Message settings" onBack={()=>setSecurityOpen(false)} disabled={encryption.busy}><div className="w-full max-w-xl overflow-auto p-4">
+      <section className="mb-4 flex items-start justify-between gap-4 border-b pb-4"><div><h2 className="font-semibold">Read receipts</h2><p className="mt-1 max-w-md text-xs text-muted-foreground">When off, people who message you will not see when you have read their messages. Your own unread counts still work.</p></div><label className="flex shrink-0 items-center gap-2 text-sm font-medium"><input aria-label="Send read receipts" type="checkbox" checked={readReceiptsEnabled} disabled={savingReceiptPreference} onChange={event=>void chooseReadReceipts(event.target.checked)} className="size-4 accent-blue-600"/>{readReceiptsEnabled?"On":"Off"}</label></section>
       <section className="mb-4 border-b pb-4"><h2 className="font-semibold">Message appearance</h2><p className="my-2 text-xs text-muted-foreground">Choose a conversation background for this account on this device.</p><div role="group" aria-label="Message background" className="flex flex-wrap gap-2">{(Object.entries(messageBackgrounds) as [MessageBackground,typeof messageBackgrounds[MessageBackground]][]).map(([key,theme])=><Button key={key} type="button" variant="outline" size="sm" aria-label={`${theme.label} message background`} aria-pressed={messageBackground===key} onClick={()=>chooseMessageBackground(key)} className={messageBackground===key?"border-orange-500 ring-2 ring-orange-200":""}><span aria-hidden="true" className={`size-4 rounded-full border border-black/10 ${theme.color}`}/>{theme.label}</Button>)}</div></section>
       {state.admin?<div className="flex flex-wrap items-center justify-between gap-2"><p className="flex items-center gap-2 text-sm font-medium"><LockKeyhole className="size-4 text-primary"/>{encryption.unlocked?"End-to-end encryption connected":"Secure messaging is connecting"}</p></div>:<p className="text-sm">{encryption.unlocked?"Messages connected":"Messages connecting"}</p>}
       {encryption.error&&<p role="alert" className="mt-2 text-sm text-destructive">{state.admin?encryption.error:"Message connection unavailable. Retry or contact an administrator."}</p>}
