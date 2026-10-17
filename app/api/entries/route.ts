@@ -12,6 +12,7 @@ import { getEffectiveUserRole } from "@/lib/access"
 import { canReviewRole } from "@/lib/review-policy"
 import { createReviewAccess } from "@/lib/review-access"
 import { listAccountIdentities } from "@/lib/account-identities"
+import { ensureAccountHandoffStorage } from "@/lib/account-handoffs"
 import { getAuditContext } from "@/lib/audit"
 import {
   clearTimeEntries,
@@ -152,19 +153,21 @@ export async function DELETE(req: Request) {
       return Response.json({ error: "Unauthorized." }, { status: 401 })
     }
     if (!access.permissions.delete_entries) return Response.json({error:"Forbidden."},{status:403})
-
+    const input=z.object({scope:z.enum(["own_entries","all_entries"]).default("own_entries")}).strict().parse(await req.json().catch(()=>({})))
+    if(input.scope==="all_entries"&&(access.role!=="admin"||!access.permissions.view_team))return Response.json({error:"Only an administrator can clear all organization timesheets."},{status:403})
     if(access.role==="manager"&&access.includeAll)return Response.json({error:"Managers must use individual authorized entry controls; hidden records cannot be bulk-cleared."},{status:403})
-    await clearTimeEntries(access.email, access.includeAll)
+    if(input.scope==="all_entries")await ensureAccountHandoffStorage()
+    const deletedCount=await clearTimeEntries(access.email,input.scope==="all_entries")
     await recordAuditEvent({
       actorEmail: access.email,
       action: "entries_cleared",
       targetType: "time_entries",
       targetId: null,
-      metadata: { scope: access.includeAll ? "all_visible" : "own_entries" },
+      metadata: { scope: input.scope,deletedCount,financeHandoffsPreserved:input.scope==="all_entries" },
       ...getAuditContext(req),
     })
 
-    return Response.json({ ok: true })
+    return Response.json({ ok: true,deletedCount })
   } catch (err) {
     console.error("[entries] clear failed")
     return Response.json(

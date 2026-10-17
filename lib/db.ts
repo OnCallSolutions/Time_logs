@@ -1552,13 +1552,15 @@ export async function deleteTimeEntry(
  * @param includeAll - Whether elevated roles should clear all entries.
  * @returns A promise that resolves after the clear query completes.
  */
-export async function clearTimeEntries(ownerEmail: string, includeAll = false) {
+export async function clearTimeEntries(ownerEmail: string, includeAll = false):Promise<number> {
   await ensureTimeEntriesTable()
 
-  await sql`
+  const rows=await sql`
     DELETE FROM time_entries
-    WHERE (${includeAll} OR owner_email = ${ownerEmail})
-      AND payout_eligible_at IS NULL
-      AND (lower(owner_email) <> lower(${ownerEmail}) OR status IN ('draft','rejected'))
+    WHERE ${includeAll} OR (
+      lower(owner_email)=lower(${ownerEmail}) AND payout_eligible_at IS NULL
+      AND (lower(owner_email)<>lower(${ownerEmail}) OR status IN ('draft','rejected'))
+    ) RETURNING id
   `
+  return rows.length
 }

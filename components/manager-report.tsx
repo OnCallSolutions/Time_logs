@@ -8,7 +8,7 @@
  * authorization to have already happened upstream through the API response.
  */
 import { useMemo } from "react"
-import { Download, Users, Clock, FolderKanban, Search, FilterX, LayoutGrid, List } from "lucide-react"
+import { Download, Users, Clock, FolderKanban, Search, FilterX, LayoutGrid, List, ChevronDown, SlidersHorizontal } from "lucide-react"
 import { useRetainedViewState } from "@/components/use-retained-view-state"
 import { Button } from "@/components/ui/button"
 import type { EntryStatus, TimeEntry } from "@/lib/types"
@@ -271,7 +271,10 @@ export function ManagerReport({ entries, stateKey }: { entries: TimeEntry[]; sta
               <button type="button" aria-pressed={viewBy === "summary"} onClick={() => setViewBy("summary")} className={`inline-flex h-7 items-center gap-1.5 rounded px-2.5 text-xs font-medium ${viewBy === "summary" ? "bg-sky-700 text-white" : "text-slate-700 hover:bg-sky-50"}`}><LayoutGrid className="size-3.5" /> Summary</button>
               <button type="button" aria-pressed={viewBy === "entries"} onClick={() => setViewBy("entries")} className={`inline-flex h-7 items-center gap-1.5 rounded px-2.5 text-xs font-medium ${viewBy === "entries" ? "bg-orange-600 text-white" : "text-slate-700 hover:bg-orange-50"}`}><List className="size-3.5" /> Entries</button>
             </div>
-            <label className="ml-1 flex items-center gap-1.5 text-xs text-slate-600" htmlFor="report-group">Group
+            <details className="group relative ml-1">
+              <summary className="flex h-8 cursor-pointer list-none items-center rounded-md border border-sky-200 bg-white px-2 text-xs font-medium text-sky-950 hover:bg-sky-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 [&::-webkit-details-marker]:hidden"><SlidersHorizontal className="mr-1.5 size-3.5"/>Group and sort<ChevronDown className="ml-2 size-3.5 transition-transform group-open:rotate-180"/></summary>
+              <div className="absolute left-0 z-10 mt-1 flex flex-wrap items-end gap-2 rounded-md border border-sky-200 bg-white p-3 shadow-lg">
+            <label className="flex items-center gap-1.5 text-xs text-slate-600" htmlFor="report-group">Group
               <select id="report-group" aria-label="Group by" className={selectCls} value={groupBy} onChange={(event) => setGroupBy(event.target.value as typeof groupBy)}>
                 <option value="contractor">Contractor</option><option value="project">Project</option><option value="date">Date</option><option value="month">Month</option><option value="status">Status</option>
               </select>
@@ -281,6 +284,8 @@ export function ManagerReport({ entries, stateKey }: { entries: TimeEntry[]; sta
                 <option value="hours_desc">Hours: high to low</option><option value="hours_asc">Hours: low to high</option><option value="name_asc">Name: A to Z</option><option value="newest">Newest first</option><option value="oldest">Oldest first</option>
               </select>
             </label>
+              </div>
+            </details>
           </div>
           <p className="text-xs tabular-nums text-slate-600">{filtered.length} {filtered.length === 1 ? "entry" : "entries"} · {dateRange}</p>
         </div>

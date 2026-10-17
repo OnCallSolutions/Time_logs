@@ -254,6 +254,8 @@ describe("TimesheetApp admin directory", () => {
     const activity = await screen.findByRole("dialog", { name: "All app activity" })
     expect(activity).toHaveAttribute("data-window-expanded", "true")
     expect(within(activity).getByRole("searchbox",{name:"Search audit logs"})).toBeVisible()
+    expect(within(activity).getByRole("combobox",{name:"Group audit logs by",hidden:true})).not.toBeVisible()
+    await user.click(within(activity).getByText("View options"))
     expect(within(activity).getByRole("combobox",{name:"Group audit logs by"})).toBeVisible()
     expect(within(activity).getByRole("combobox",{name:"Audit timesheet period filter"})).toBeVisible()
     expect(within(activity).getByText("Distinct actors")).toBeVisible()
@@ -317,7 +319,7 @@ describe("TimesheetApp admin directory", () => {
     expect(within(analyticsReport).getByTestId("manager-report")).toBeInTheDocument()
   })
 
-  it("keeps one assistant dock and focuses its composer from the header shortcut", async () => {
+  it("opens the floating assistant over the workspace and focuses its composer", async () => {
     const user = await renderAdminPanel()
     await user.click(screen.getByRole("button", { name: "Back" }))
     await user.click(within(screen.getByRole("dialog", { name: "Admin" })).getByRole("button", { name: "Back" }))
@@ -326,6 +328,7 @@ describe("TimesheetApp admin directory", () => {
     await user.click(screen.getByRole("button", { name: "Go to DevOnCall assistant" }))
     const mainAssistant = await screen.findByRole("region", { name: "DevOnCall assistant" })
     expect(within(mainAssistant).getByRole("heading", { name: "DevOnCall" })).toBeVisible()
+    expect(document.querySelector("[data-assistant-overlay='true']")).toHaveClass("fixed", "bottom-3", "right-3")
     const composer = within(mainAssistant).getByLabelText("Ask DevOnCall")
     await waitFor(() => expect(composer).toHaveFocus())
     expect(within(mainAssistant).getByText("Tanovo Time · Workspace assistant")).toBeVisible()
@@ -359,6 +362,8 @@ describe("TimesheetApp admin directory", () => {
     expect(dialog).toHaveAttribute("data-window-resizable", "true")
     expect(dialog).toHaveAttribute("data-window-expanded", "true")
     expect(within(dialog).getByRole("button", { name: "Account manager" })).toBeInTheDocument()
+    expect(within(dialog).getByLabelText("Export visible timesheets")).not.toBeVisible()
+    await user.click(within(dialog).getByText("Team review and reporting"))
     expect(within(dialog).getByLabelText("Export visible timesheets")).toBeInTheDocument()
     expect(within(dialog).getByRole("button", { name: "Account manager" }).parentElement).toHaveClass("role-choice-grid")
     await user.click(within(dialog).getByRole("button", { name: "Restore window" }))

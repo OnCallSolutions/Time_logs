@@ -8,14 +8,14 @@ vi.mock("@/auth",()=>({auth:vi.fn()}))
 vi.mock("@/lib/effective-permissions",()=>({getEffectivePermissions:vi.fn()}))
 vi.mock("@/lib/access",()=>({getEffectiveUserRole:vi.fn()}))
 vi.mock("@/lib/collaboration",()=>({actorRoster:vi.fn()}))
-vi.mock("@/lib/db",()=>({getTimeEntry:vi.fn(),listTimeEntries:vi.fn(),recordAuditEvent:vi.fn()}))
+vi.mock("@/lib/db",()=>({getTimeEntry:vi.fn(),listTimeEntries:vi.fn(),listTimesheetPeriods:vi.fn().mockResolvedValue([]),recordAuditEvent:vi.fn()}))
 vi.mock("@/lib/account-identities",()=>({listAccountIdentities:vi.fn()}))
 vi.mock("@/lib/account-handoffs",()=>({createHandoffs:vi.fn(),listHandoffs:vi.fn(),reviewHandoff:vi.fn(),actOnHandoffs:vi.fn(),accountTriageStates:["pending","needs_information","ready_for_finance","archived"]}))
 import { actorRoster } from "@/lib/collaboration"
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { getEffectiveUserRole } from "@/lib/access"
-import { getTimeEntry } from "@/lib/db"
+import { getTimeEntry,listTimesheetPeriods } from "@/lib/db"
 import { listAccountIdentities } from "@/lib/account-identities"
 import { createHandoffs,listHandoffs,reviewHandoff } from "@/lib/account-handoffs"
 import { resolvePermissions } from "@/lib/permissions"
@@ -32,6 +32,7 @@ beforeEach(()=>{
   vi.mocked(getTimeEntry).mockResolvedValue({id,status:"approved",ownerEmail:"supplier@example.com"} as never)
   vi.mocked(listAccountIdentities).mockResolvedValue([{email:"supplier@example.com"}] as never)
   vi.mocked(createHandoffs).mockResolvedValue([{id,entry_id:id}])
+  vi.mocked(listTimesheetPeriods).mockResolvedValue([{id:"period-1",name:"October 2026",startDate:"2026-10-01",endDate:"2026-10-31"}] as never)
 })
 it("respects an administrator-denied handoff permission",async()=>{
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"manager",permissions:resolvePermissions("manager",{send_to_accounts:false})})
@@ -72,6 +73,9 @@ it("allows authorized business accounts to inspect the shared queue",async()=>{
   vi.mocked(auth).mockResolvedValue({user:{email:"accounts@example.com"}} as never)
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"account_manager",permissions:resolvePermissions("account_manager",{view_accounts:true})})
   vi.mocked(listHandoffs).mockResolvedValue([])
-  expect((await GET()).status).toBe(200)
+  const response=await GET()
+  expect(response.status).toBe(200)
+  expect(await response.json()).toMatchObject({periods:[{id:"period-1",name:"October 2026"}],handoffs:[]})
   expect(listHandoffs).toHaveBeenCalledWith("accounts@example.com",true)
+  expect(listTimesheetPeriods).toHaveBeenCalledOnce()
 })

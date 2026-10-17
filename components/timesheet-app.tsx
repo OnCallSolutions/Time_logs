@@ -8,7 +8,7 @@
  * translates the user's role into visible navigation choices so the UI matches
  * the permissions enforced by the API routes.
  */
-import { Fragment,useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
+import { Fragment,useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
 import { signIn } from "next-auth/react"
 import { AssistantPanel } from "@/components/assistant-panel"
 import { AssistantRunReport } from "@/components/assistant-run-report"
@@ -37,6 +37,7 @@ import { WorkspaceUtilities } from "@/components/workspace-utilities"
 import {
   Activity,
   CalendarClock,
+  ChevronDown,
   ChevronRight,
   Layers3,
   BarChart3,
@@ -50,6 +51,7 @@ import {
   Send,
   Sparkles,
   ShieldCheck,
+  SlidersHorizontal,
   Trash2,
   UserPlus,
   Users,
@@ -80,8 +82,19 @@ type WorkspaceHistoryFrame = { view: View; adminStartSection: AdminStartSection;
 
 const manageableRoles: UserRole[] = ["admin", "manager", "account_manager", "employee", "contractor"]
 const manageableStatuses: AccessStatus[] = ["active", "suspended", "retired", "blocked", "denied"]
+const permissionGroups:{label:string;tone:"orange"|"blue"|"green"|"red"|"sky";permissions:Permission[]}[]=[
+  {label:"Timesheet entry",tone:"orange",permissions:["create_entries","edit_entries","delete_entries","submit_entries"]},
+  {label:"Team review and reporting",tone:"blue",permissions:["review_entries","view_team","view_reports","export_entries","ai_review","view_manager_entries","review_manager_entries","view_other_manager_entries","review_other_manager_entries"]},
+  {label:"Messages and review support",tone:"sky",permissions:["send_messages","request_review_help","accept_review_requests"]},
+  {label:"Finance and periods",tone:"green",permissions:["send_to_accounts","view_accounts","review_accounts","ai_accounts","authorize_payouts","manage_timesheet_periods"]},
+  {label:"Access and personal reporting",tone:"red",permissions:["delegate_permissions","view_personal_reports"]},
+]
 const pendingAccessChangeKey = "tanovo-time:pending-access-change"
 const pendingClearEntriesKey = "tanovo-time:pending-clear-entries"
+
+function canAssignPermission(role:UserRole,permission:Permission):boolean{
+  return resolvePermissions(role,{[permission]:true})[permission]
+}
 
 /**
  * User directory row returned by the administrator users API.
@@ -236,7 +249,6 @@ export function TimesheetApp({
   const [assistantCompose,setAssistantCompose]=useState<{recipient:string;body:string;confirmed:boolean}|null>(null)
   function focusAssistant():void {
     setAssistantDockOpen(true)
-    assistantDockRef.current?.scrollIntoView?.({behavior:"smooth",block:"center"})
     setAssistantFocusRequest(value=>value+1)
   }
   /**
@@ -604,7 +616,7 @@ export function TimesheetApp({
     setEntries([])
     let statusCode:number|undefined
     try {
-      const res = await fetch(apiPath("/api/entries"), { method: "DELETE" })
+      const res = await fetch(apiPath("/api/entries"), { method: "DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({scope:"all_entries"}) })
       statusCode=res.status
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? "Failed to clear entries.")
@@ -637,7 +649,7 @@ export function TimesheetApp({
   const personalStatusLabel=personalStatuses.find(([status])=>status===personalStatus)?.[1]??"All entries"
 
   const accountsContent=<BusinessAccounts key={`${role}:${permissions.send_to_accounts}:${permissions.view_accounts}:${permissions.review_accounts}:${permissions.ai_accounts}`} canSend={false} canReview={permissions.view_accounts&&permissions.review_accounts&&(role==="account_manager"||role==="admin")} canAI={permissions.view_accounts&&permissions.ai_accounts&&(role==="account_manager"||role==="admin")} canAuthorize={permissions.authorize_payouts} canPreviewSamples={role==="admin"} onManagePeriods={permissions.manage_timesheet_periods?()=>openWorkspacePage("periods"):undefined}/>
-  const assistantPane=accessDenied||!assistantDockOpen?null:<div ref={assistantDockRef} style={{height:assistantHeight,width:assistantWidth||undefined,maxWidth:"calc(100vw - 1.5rem)",maxHeight:"calc(100dvh - 1.5rem)"}} className="fixed bottom-3 right-3 z-40 min-h-[18rem] min-w-0 w-[min(50vw,44rem)] max-sm:w-[calc(100vw-1.5rem)]">
+  const assistantPane=accessDenied||!assistantDockOpen?null:<div ref={assistantDockRef} data-assistant-overlay="true" style={{height:assistantHeight,width:assistantWidth||undefined,maxWidth:"calc(100vw - 1.5rem)",maxHeight:"calc(100dvh - 1.5rem)"}} className="fixed bottom-3 right-3 z-[60] min-h-[18rem] min-w-0 w-[min(50vw,44rem)] max-sm:w-[calc(100vw-1.5rem)]">
     <div role="separator" aria-label="Resize assistant width" aria-orientation="vertical" aria-valuenow={assistantWidth||undefined} tabIndex={0} onPointerDown={beginAssistantWidthResize} onPointerMove={moveAssistantWidthResize} onPointerUp={endAssistantWidthResize} onPointerCancel={endAssistantWidthResize} onKeyDown={event=>{if(event.key==="ArrowLeft")setAssistantWidth(value=>Math.min(Math.floor(window.innerWidth*.72),(value||Math.min(window.innerWidth*.5,704))+32));if(event.key==="ArrowRight")setAssistantWidth(value=>Math.max(320,(value||Math.min(window.innerWidth*.5,704))-32))}} className="absolute -left-2 top-1/2 z-10 hidden h-16 w-4 -translate-y-1/2 cursor-ew-resize rounded-full bg-transparent after:absolute after:left-1/2 after:top-1/2 after:h-10 after:w-1 after:-translate-x-1/2 after:-translate-y-1/2 after:rounded-full after:bg-emerald-500/50 hover:after:bg-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 sm:block" />
     <div role="separator" aria-label="Resize assistant panel" aria-orientation="horizontal" aria-valuenow={assistantHeight} tabIndex={0} onPointerDown={beginAssistantResize} onPointerMove={moveAssistantResize} onPointerUp={endAssistantResize} onPointerCancel={endAssistantResize} onKeyDown={event=>{if(event.key==="ArrowUp")setAssistantHeight(value=>Math.min(Math.floor(window.innerHeight*.78),value+32));if(event.key==="ArrowDown")setAssistantHeight(value=>Math.max(300,value-32))}} className="absolute -top-2 left-1/2 z-10 h-4 w-16 -translate-x-1/2 cursor-ns-resize rounded-full bg-transparent after:absolute after:left-1/2 after:top-1/2 after:h-1 after:w-10 after:-translate-x-1/2 after:-translate-y-1/2 after:rounded-full after:bg-emerald-500/50 hover:after:bg-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500" />
     <AssistantPanel organizationName={organizationName} workspaceContext="main" handoffContext={assistantHandoff} onHandoffUsed={()=>setAssistantHandoff("")} onClose={()=>setAssistantDockOpen(false)} onNavigate={(destination,handoff)=>{if(handoff)setAssistantHandoff(handoff);if(destination==="messages")setMessagesOpen(true);else openWorkspacePage(destination as View)}} onRefresh={()=>{setEntriesRefresh(value=>value+1);messageInbox.refresh()}} messageContext={assistantMessageContext} onContextUsed={()=>setAssistantMessageContext("")} onCompose={draft=>{setAssistantCompose(draft);setMessagesOpen(true)}} focusRequest={assistantFocusRequest} onPreferredHeight={height=>setAssistantHeight(current=>current===height?current:height)}/>
@@ -701,7 +713,7 @@ export function TimesheetApp({
         <WorkspacePageSurface open={pageWindow} title={pageTitle} onBack={closeWorkspacePage}><AdminPanel initialSection={adminStartSection==="landing"?undefined:adminStartSection} role={role} entries={entries} pendingEntries={pendingEntries} userEmail={userEmail??""} onEntryUpdate={updateEntry} onEntryStatusChange={changeEntryStatus} onEntryDelete={deleteEntry} onEntryClear={clearEntries} onRefreshEntries={()=>setEntriesRefresh(value=>value+1)} onOpenEntryCapture={()=>setWorkspaceWindow("notes")} onApprovalUpdated={entry=>{entryReadEpoch.current++;setEntries(previous=>previous.map(current=>current.id===entry.id?entry:current))}} canCreateEntries={permissions.create_entries} canEditEntries={permissions.edit_entries} canDeleteEntries={permissions.delete_entries} canClearEntries={canClearVisibleEntries} canReviewEntries={canReviewEntries} canAIReview={canAIReview} canSubmitEntries={canSubmitEntries} canExportEntries={permissions.export_entries} canManagePeriods={permissions.manage_timesheet_periods} openRequest={directoryRequest} reportContent={<ManagerReport entries={entries} stateKey={`admin-report:${userEmail?.toLowerCase()??"user"}`}/>} onSecurity={()=>setTechnologyReports(true)} onLifecycle={()=>setLifecycleOpen(true)} /></WorkspacePageSurface>
       ) : view === "permissions" && role === "admin" ? (
         <WorkspacePageSurface open={pageWindow} title={pageTitle} onBack={closeWorkspacePage}><AdminPanel role={role} entries={entries} pendingEntries={pendingEntries} userEmail={userEmail??""} onEntryUpdate={updateEntry} onEntryStatusChange={changeEntryStatus} onEntryDelete={deleteEntry} onEntryClear={clearEntries} onRefreshEntries={()=>setEntriesRefresh(value=>value+1)} onOpenEntryCapture={()=>setWorkspaceWindow("notes")} onApprovalUpdated={entry=>{entryReadEpoch.current++;setEntries(previous=>previous.map(current=>current.id===entry.id?entry:current))}} canCreateEntries={permissions.create_entries} canEditEntries={permissions.edit_entries} canDeleteEntries={permissions.delete_entries} canClearEntries={canClearVisibleEntries} canReviewEntries={canReviewEntries} canAIReview={canAIReview} canSubmitEntries={canSubmitEntries} canExportEntries={permissions.export_entries} canManagePeriods={permissions.manage_timesheet_periods} rightsOnly openRequest={directoryRequest} reportContent={<ManagerReport entries={entries}/>} onSecurity={()=>setTechnologyReports(true)} onLifecycle={()=>setLifecycleOpen(true)} /></WorkspacePageSurface>
-      ) : <WorkspacePageSurface open={pageWindow} title={pageTitle} onBack={closeWorkspacePage}><div className={`grid min-w-0 w-full flex-1 items-start gap-4 ${assistantDockOpen&&role!=="admin"?"grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,var(--assistant-track))]":"grid-cols-1"}`} style={{"--assistant-track":assistantWidth?`${assistantWidth}px`:"min(50vw,44rem)"} as CSSProperties}>
+      ) : <WorkspacePageSurface open={pageWindow} title={pageTitle} onBack={closeWorkspacePage}><div className="flex min-w-0 w-full flex-1 flex-col items-stretch gap-4">
         <div className="flex min-w-0 flex-col gap-4">
           {view==="home"&&(role==="contractor"||role==="employee"||role==="manager")&&<RoleWorkspaceHome
             role={role}
@@ -828,7 +840,6 @@ export function TimesheetApp({
       )}
           </>}
         </div>
-        {assistantDockOpen&&role!=="admin"&&<div aria-hidden="true" className="hidden min-h-[18rem] min-w-0 lg:block"/>}
       </div></WorkspacePageSurface>}
       {assistantPane}
       {view!=="home"&&<footer className="mt-auto pt-4 text-center text-xs text-muted-foreground">
@@ -842,7 +853,7 @@ export function TimesheetApp({
             <ShieldCheck className="mt-0.5 size-5 shrink-0 text-red-700" aria-hidden="true" />
             <div><h2 className="font-semibold text-red-950">Microsoft verification complete</h2><p className="mt-1 text-sm text-red-900">You reauthenticated as {userEmail}. Confirm only if you intend to permanently clear all entries visible to this administrator account.</p></div>
           </header>
-          <p className="p-4 text-sm">This action cannot be undone. {entries.length} entries are currently loaded. Cancel leaves all data unchanged.</p>
+          <p className="p-4 text-sm">This action cannot be undone. It deletes all source timesheet entries while preserving audit/security logs, patrons, configured periods, and finance handoff snapshots. {entries.length} entries are currently loaded. Cancel leaves all data unchanged.</p>
           <footer className="flex justify-end gap-2 border-t p-4">
             <Button variant="outline" disabled={clearEntriesBusy} onClick={() => setClearEntriesConfirmationOpen(false)}>Cancel</Button>
             <Button variant="destructive" disabled={clearEntriesBusy || !permissionsLoaded || !canClearVisibleEntries} onClick={() => void confirmClearEntries()}><Trash2 className="size-4" />{clearEntriesBusy ? "Clearing..." : !permissionsLoaded ? "Checking access..." : "Clear all entries"}</Button>
@@ -1717,12 +1728,38 @@ function AdminUserAccessEditor({
             />
           </label>
 
-          <fieldset className="grid gap-2 rounded-md border border-green-200 bg-green-50/40 p-3 sm:grid-cols-2 lg:col-span-2 lg:grid-cols-3">
-            <legend className="mb-2 px-1 text-sm font-semibold text-green-950">Control permissions</legend>
-            {(Object.entries(permissionLabels) as [Permission,string][]).map(([permission,label]) => <label key={permission} className="flex items-center gap-2 text-sm text-slate-800">
-              <input className="accent-green-700" type="checkbox" disabled={saving} checked={resolvePermissions(editor.role,editor.permissions)[permission]} onChange={event => onChange({...editor,permissions:{...editor.permissions,[permission]:event.target.checked}})} />{label}
-            </label>)}
-            <Button variant="outline" disabled={saving} onClick={() => onChange({...editor,permissions:{}})}>Use role defaults</Button>
+          <fieldset className="min-w-0 rounded-md border border-emerald-200 bg-emerald-50/30 p-3 lg:col-span-2">
+            <legend className="mb-2 px-1 text-sm font-semibold text-emerald-950">Patron controls</legend>
+            <p className="mb-3 text-xs text-slate-600">Set access by work area. Controls that conflict with the selected role stay disabled; saved changes require confirmation.</p>
+            <div className="grid gap-x-5 gap-y-1 md:grid-cols-2">
+              {permissionGroups.map(group=>{
+                const effective=resolvePermissions(editor.role,editor.permissions)
+                const assignable=group.permissions.filter(permission=>canAssignPermission(editor.role,permission))
+                const enabled=assignable.filter(permission=>effective[permission]).length
+                const tone={orange:"border-orange-400",blue:"border-blue-400",green:"border-emerald-400",red:"border-red-400",sky:"border-sky-400"}[group.tone]
+                return <details key={group.label} aria-label={group.label} className={`group min-w-0 border-l-2 ${tone} py-1 pl-3`}>
+                  <summary className="flex cursor-pointer list-none items-center gap-2 py-1 text-xs hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 [&::-webkit-details-marker]:hidden">
+                    <ChevronRight className="size-3.5 shrink-0 text-slate-500 transition-transform group-open:rotate-90" aria-hidden="true" />
+                    <span className="min-w-0 flex-1 font-semibold text-slate-900">{group.label}<span className="ml-2 font-normal text-slate-500">{enabled}/{assignable.length} enabled</span></span>
+                  </summary>
+                  <div className="pb-2 pl-1">
+                  <header className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex gap-1"><Button type="button" size="sm" variant="outline" className="h-7 px-2 text-xs" disabled={saving||!assignable.length||enabled===assignable.length} onClick={()=>onChange({...editor,permissions:{...editor.permissions,...Object.fromEntries(assignable.map(permission=>[permission,true]))}})}>Enable all</Button><Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={saving||!assignable.length||enabled===0} onClick={()=>onChange({...editor,permissions:{...editor.permissions,...Object.fromEntries(assignable.map(permission=>[permission,false]))}})}>Disable all</Button></div>
+                  </header>
+                  <div className="grid gap-x-3 gap-y-2 sm:grid-cols-2">
+                    {group.permissions.map(permission=>{
+                      const allowed=canAssignPermission(editor.role,permission)
+                      return <label key={permission} title={allowed?permissionLabels[permission]:`Unavailable to the ${roleDisplayName(editor.role)} role`} className={`flex min-w-0 items-start gap-2 text-xs ${allowed?"text-slate-800":"text-slate-400"}`}>
+                        <input className="mt-0.5 accent-emerald-700" type="checkbox" disabled={saving||!allowed} checked={effective[permission]} onChange={event=>onChange({...editor,permissions:{...editor.permissions,[permission]:event.target.checked}})} />
+                        <span className="min-w-0">{permissionLabels[permission]}{!allowed&&<span className="ml-1 text-[10px]">(role-limited)</span>}</span>
+                      </label>
+                    })}
+                  </div>
+                  </div>
+                </details>
+              })}
+            </div>
+            <Button type="button" variant="outline" size="sm" className="mt-3" disabled={saving||Object.keys(editor.permissions??{}).length===0} onClick={() => onChange({...editor,permissions:{}})}>Use role defaults</Button>
           </fieldset>
 
           {error && (
@@ -1917,11 +1954,16 @@ function AdminActivityWindow({
 
         <div className="flex shrink-0 flex-wrap items-end gap-2 border-b border-sky-200 bg-gradient-to-r from-sky-50 via-white to-emerald-50 p-3">
           <label className="min-w-48 flex-1 text-xs font-medium text-slate-700">Search logs<input aria-label="Search audit logs" type="search" value={search} onChange={event=>setSearch(event.target.value)} placeholder="Actor, action, request, target…" className="mt-1 h-8 w-full rounded-md border border-slate-300 bg-white px-2 text-sm"/></label>
+          <details className="group relative min-w-0">
+            <summary className="flex h-8 cursor-pointer list-none items-center rounded-md border border-sky-200 bg-white px-3 text-xs font-medium text-sky-950 hover:bg-sky-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 [&::-webkit-details-marker]:hidden"><SlidersHorizontal className="mr-1.5 size-3.5"/>View options<ChevronDown className="ml-2 size-3.5 transition-transform group-open:rotate-180"/></summary>
+            <div className="absolute z-10 mt-1 flex flex-wrap items-end gap-2 rounded-md border border-sky-200 bg-white p-3 shadow-lg">
           <label className="text-xs font-medium text-slate-700">From<input aria-label="Audit date from" type="date" value={dateFrom} max={dateThrough||undefined} onChange={event=>setDateFrom(event.target.value)} className="mt-1 h-8 rounded-md border border-slate-300 bg-white px-2 text-xs"/></label>
           <label className="text-xs font-medium text-slate-700">Through<input aria-label="Audit date through" type="date" value={dateThrough} min={dateFrom||undefined} onChange={event=>setDateThrough(event.target.value)} className="mt-1 h-8 rounded-md border border-slate-300 bg-white px-2 text-xs"/></label>
           <label className="text-xs font-medium text-slate-700">Timesheet period<select aria-label="Audit timesheet period filter" value={periodFilter} onChange={event=>setPeriodFilter(event.target.value)} className="mt-1 h-8 max-w-48 rounded-md border border-slate-300 bg-white px-2 text-xs"><option value="all">All periods</option>{periods.map(period=><option key={period.id} value={period.id}>{period.name}</option>)}</select></label>
           <label className="text-xs font-medium text-slate-700">Group by<select aria-label="Group audit logs by" value={groupBy} onChange={event=>setGroupBy(event.target.value as typeof groupBy)} className="mt-1 h-8 rounded-md border border-slate-300 bg-white px-2 text-xs"><option value="day">Day</option><option value="month">Month</option><option value="year">Year</option><option value="period">Timesheet period</option></select></label>
           <label className="text-xs font-medium text-slate-700">Sort<select aria-label="Sort audit logs" value={sortOrder} onChange={event=>setSortOrder(event.target.value as typeof sortOrder)} className="mt-1 h-8 rounded-md border border-slate-300 bg-white px-2 text-xs"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></label>
+            </div>
+          </details>
           <span className="pb-2 text-xs tabular-nums text-slate-600">{visibleEvents.length} events</span>
         </div>
         {error&&events.length>0&&<p role="alert" className="shrink-0 border-b border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>}

@@ -7,7 +7,7 @@ import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { getEffectiveUserRole } from "@/lib/access"
 import { actorRoster } from "@/lib/collaboration"
-import { getTimeEntry,listTimeEntries,recordAuditEvent } from "@/lib/db"
+import { getTimeEntry,listTimeEntries,listTimesheetPeriods,recordAuditEvent } from "@/lib/db"
 import { createHandoffs,listHandoffs,reviewHandoff,accountTriageStates,actOnHandoffs } from "@/lib/account-handoffs"
 import { getAuditContext } from "@/lib/audit"
 import { listAccountIdentities } from "@/lib/account-identities"
@@ -20,8 +20,8 @@ export async function GET(){
     if(!email||!access.role)return Response.json({error:"Forbidden."},{status:403})
     const canRead=(access.role==="account_manager"||access.role==="admin")&&access.permissions.view_accounts
     if(!canRead)return Response.json({error:"Business-accounts dashboard is restricted to administrators and business accounts managers."},{status:403})
-    const managers=(await actorRoster()).filter(user=>user.role==="manager"&&user.accessStatus==="active").map(user=>({email:user.email}))
-    return Response.json({candidates:[],assignees:[],managers,handoffs:await listHandoffs(email,true)},{headers:{"Cache-Control":"no-store"}})
+    const managers=(await actorRoster()).filter(user=>user.role==="manager"&&user.accessStatus==="active").map(user=>({email:user.email,officialName:user.displayName}))
+    return Response.json({candidates:[],assignees:[],managers,periods:await listTimesheetPeriods(),handoffs:await listHandoffs(email,true)},{headers:{"Cache-Control":"no-store"}})
   }catch{return Response.json({error:"Business-account queue unavailable."},{status:500})}
 }
 

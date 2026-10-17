@@ -14,18 +14,21 @@ const initialize=createDatabaseInitializer()
 export const accountTriageStates=["pending","needs_information","ready_for_finance","archived"] as const
 export const accountReviewStates=[...accountTriageStates,"returned_to_manager","returned_to_submitter","payout_eligible"] as const
 export type AccountReviewState=typeof accountReviewStates[number]
-export type AccountHandoff={id:string;entry_id:string;assigned_to:string;handed_by:string;created_at:string;current:boolean;review_state:AccountReviewState;review_note:string;review_version:number;evidence:{contractor:string;ownerEmail:string;workerCategory?:"contractor"|"employee";date:string;hours:number;project:string;description:string;reviewedBy:string;reviewedAt:string}}
+export type AccountHandoff={id:string;entry_id:string|null;assigned_to:string;handed_by:string;created_at:string;current:boolean;review_state:AccountReviewState;review_note:string;review_version:number;evidence:{contractor:string;ownerEmail:string;workerCategory?:"contractor"|"employee";date:string;hours:number;project:string;description:string;reviewedBy:string;reviewedAt:string}}
 
 /** @returns Promise<void> after idempotent handoff storage and lookup indexes exist. */
 async function ensureHandoffs(){
   await ensureTimeEntriesTable()
   await initialize(async()=>{
     await sql`CREATE TABLE IF NOT EXISTS account_handoffs (
-      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),entry_id uuid NOT NULL REFERENCES time_entries(id),
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),entry_id uuid REFERENCES time_entries(id) ON DELETE SET NULL,
       assigned_to text NOT NULL,handed_by text NOT NULL,source_updated_at timestamptz NOT NULL,
       evidence jsonb NOT NULL,created_at timestamptz NOT NULL DEFAULT now(),
       UNIQUE(entry_id,source_updated_at)
     )`
+    await sql`ALTER TABLE account_handoffs ALTER COLUMN entry_id DROP NOT NULL`
+    await sql`ALTER TABLE account_handoffs DROP CONSTRAINT IF EXISTS account_handoffs_entry_id_fkey`
+    await sql`ALTER TABLE account_handoffs ADD CONSTRAINT account_handoffs_entry_id_fkey FOREIGN KEY(entry_id) REFERENCES time_entries(id) ON DELETE SET NULL`
     await sql`CREATE INDEX IF NOT EXISTS account_handoffs_assignee_date_idx ON account_handoffs(assigned_to,created_at DESC)`
     await sql`ALTER TABLE account_handoffs ADD COLUMN IF NOT EXISTS review_state text NOT NULL DEFAULT 'pending'
       CHECK(review_state IN ('pending','needs_information','ready_for_finance','archived')),
@@ -40,6 +43,9 @@ async function ensureHandoffs(){
       END IF; END $$`
   })
 }
+
+/** Ensures the historical handoff snapshot survives deletion of its source entry. */
+export function ensureAccountHandoffStorage():Promise<void>{return ensureHandoffs()}
 
 /**
  * Captures approved entries with reviewer separation checked again in SQL.
@@ -71,8 +77,8 @@ export async function createHandoffs(ids:string[],actor:string,recipient:string,
 export async function listHandoffs(email:string,admin:boolean,asSender=false){
   await ensureHandoffs()
   return await sql`SELECT h.id,h.entry_id,h.assigned_to,h.handed_by,h.evidence,h.created_at,h.review_state,h.review_note,h.review_version,
-    (e.status='approved' AND e.updated_at=h.source_updated_at) AS current
-    FROM account_handoffs h JOIN time_entries e ON e.id=h.entry_id
+    COALESCE(e.status='approved' AND e.updated_at=h.source_updated_at,false) AS current
+    FROM account_handoffs h LEFT JOIN time_entries e ON e.id=h.entry_id
     WHERE ${admin} OR (${asSender} AND h.handed_by=${email.toLowerCase()}) OR (${!asSender} AND h.assigned_to=${email.toLowerCase()})
     ORDER BY h.created_at DESC LIMIT 100` as unknown as AccountHandoff[]
 }

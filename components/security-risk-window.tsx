@@ -5,7 +5,7 @@
  */
 "use client"
 import { useEffect, useState } from "react"
-import { RefreshCw, ShieldCheck, AlertTriangle, Search } from "lucide-react"
+import { RefreshCw, ShieldCheck, AlertTriangle, Search, ChevronDown, SlidersHorizontal } from "lucide-react"
 import { apiPath } from "@/lib/paths"
 import { WindowSurface } from "@/components/window-surface"
 import { Button } from "@/components/ui/button"
@@ -66,10 +66,15 @@ export function SecurityRiskWindow({ onClose }: { onClose: () => void }) {
         <div className="flex flex-wrap items-center gap-2">
           <label className="text-sm">Severity <select value={severity} onChange={event => setSeverity(event.target.value)} className="rounded-md border border-input bg-white px-2 py-2"><option value="all">All severities</option>{["critical","high","medium","low"].map(value => <option key={value} value={value}>{value}</option>)}</select></label>
           <label className="relative min-w-44 flex-1 text-xs font-medium">Search<input aria-label="Search security reports" type="search" value={search} onChange={event=>setSearch(event.target.value)} placeholder="Summary, finding, recommendation…" className="mt-1 h-9 w-full rounded-md border border-slate-300 bg-white py-1 pl-8 pr-2 text-sm"/><Search className="absolute left-2 top-7 size-4 text-slate-500"/></label>
-          <label className="text-xs">From<input aria-label="Security report date from" type="date" value={dateFrom} max={dateThrough||undefined} onChange={event=>setDateFrom(event.target.value)} className="mt-1 block h-9 rounded-md border border-slate-300 bg-white px-2"/></label>
-          <label className="text-xs">Through<input aria-label="Security report date through" type="date" value={dateThrough} min={dateFrom||undefined} onChange={event=>setDateThrough(event.target.value)} className="mt-1 block h-9 rounded-md border border-slate-300 bg-white px-2"/></label>
-          <label className="text-xs">Group by<select aria-label="Group security reports by" value={groupBy} onChange={event=>setGroupBy(event.target.value as typeof groupBy)} className="mt-1 block h-9 rounded-md border border-slate-300 bg-white px-2"><option value="day">Day</option><option value="month">Month</option><option value="year">Year</option><option value="period">Timesheet period</option></select></label>
-          <label className="text-xs">Sort<select aria-label="Sort security reports" value={sortOrder} onChange={event=>setSortOrder(event.target.value as typeof sortOrder)} className="mt-1 block h-9 rounded-md border border-slate-300 bg-white px-2"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></label>
+          <details className="group relative">
+            <summary className="flex h-9 cursor-pointer list-none items-center rounded-md border border-red-200 bg-white px-3 text-xs font-medium text-red-950 hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 [&::-webkit-details-marker]:hidden"><SlidersHorizontal className="mr-1.5 size-3.5"/>View options<ChevronDown className="ml-2 size-3.5 transition-transform group-open:rotate-180"/></summary>
+            <div className="absolute right-0 z-10 mt-1 flex flex-wrap items-end gap-2 rounded-md border border-red-200 bg-white p-3 shadow-lg">
+              <label className="text-xs">From<input aria-label="Security report date from" type="date" value={dateFrom} max={dateThrough||undefined} onChange={event=>setDateFrom(event.target.value)} className="mt-1 block h-9 rounded-md border border-slate-300 bg-white px-2"/></label>
+              <label className="text-xs">Through<input aria-label="Security report date through" type="date" value={dateThrough} min={dateFrom||undefined} onChange={event=>setDateThrough(event.target.value)} className="mt-1 block h-9 rounded-md border border-slate-300 bg-white px-2"/></label>
+              <label className="text-xs">Group by<select aria-label="Group security reports by" value={groupBy} onChange={event=>setGroupBy(event.target.value as typeof groupBy)} className="mt-1 block h-9 rounded-md border border-slate-300 bg-white px-2"><option value="day">Day</option><option value="month">Month</option><option value="year">Year</option><option value="period">Timesheet period</option></select></label>
+              <label className="text-xs">Sort<select aria-label="Sort security reports" value={sortOrder} onChange={event=>setSortOrder(event.target.value as typeof sortOrder)} className="mt-1 block h-9 rounded-md border border-slate-300 bg-white px-2"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></label>
+            </div>
+          </details>
           <Button variant="outline" size="icon-sm" aria-label="Refresh security reports" title="Refresh security reports" disabled={loading} onClick={() => setRefresh(value => value + 1)}><RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} /></Button>
         </div>
       </header>

@@ -26,6 +26,8 @@ it("filters severity and refreshes stored reports without starting analysis", as
   await user.selectOptions(screen.getByRole("combobox",{name:"Severity"}), "low")
   expect(screen.getByText("No reports match this severity.")).toBeInTheDocument()
   await user.selectOptions(screen.getByRole("combobox",{name:"Severity"}), "all")
+  expect(screen.getByRole("combobox",{name:"Group security reports by",hidden:true})).not.toBeVisible()
+  await user.click(screen.getByText("View options"))
   await user.selectOptions(screen.getByRole("combobox",{name:"Group security reports by"}),"period")
   expect(screen.getByText(/October period/)).toBeVisible()
   await user.type(screen.getByRole("searchbox",{name:"Search security reports"}),"failed sign-ins")

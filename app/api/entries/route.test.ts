@@ -5,8 +5,9 @@ vi.mock("@/lib/access",()=>({getEffectiveUserRole:vi.fn()}))
 vi.mock("@/lib/review-policy",()=>({canReviewRole:vi.fn()}))
 vi.mock("@/lib/review-access",()=>({createReviewAccess:vi.fn()}))
 vi.mock("@/lib/account-identities",()=>({listAccountIdentities:vi.fn()}))
+vi.mock("@/lib/account-handoffs",()=>({ensureAccountHandoffStorage:vi.fn()}))
 vi.mock("@/lib/audit",()=>({getAuditContext:vi.fn(()=>({ipAddress:"127.0.0.1",userAgent:"test",requestMethod:"POST",requestPath:"/api/entries",requestId:"req-1"}))}))
-vi.mock("@/lib/db",()=>({clearTimeEntries:vi.fn(),createTimeEntries:vi.fn(),listTimeEntries:vi.fn()}))
+vi.mock("@/lib/db",()=>({clearTimeEntries:vi.fn(),createTimeEntries:vi.fn(),listTimeEntries:vi.fn(),recordAuditEvent:vi.fn()}))
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { createReviewAccess } from "@/lib/review-access"
@@ -14,7 +15,7 @@ import { listAccountIdentities } from "@/lib/account-identities"
 import { createTimeEntries,listTimeEntries } from "@/lib/db"
 import { resolvePermissions } from "@/lib/permissions"
 import type { TimeEntry } from "@/lib/types"
-import { GET,POST } from "./route"
+import { DELETE,GET,POST } from "./route"
 
 const savedEntry:TimeEntry={id:"10000000-0000-4000-8000-000000000001",ownerEmail:"person@example.com",contractor:"Official Person",contractorNumber:"DEVONCALL-000001",shortReference:"TN-000001",date:"2026-10-15",hours:4,project:"Project A",description:"Saved work",status:"draft",revision:"2026-10-15T12:00:00.000Z"}
 
@@ -54,4 +55,24 @@ it("rejects unauthenticated writes and never calls persistence",async()=>{
   const response=await POST(new Request("http://localhost/api/entries",{method:"POST",body:JSON.stringify({entries:[{contractor:"Person",date:"2026-10-15",hours:4,project:"Project A",description:"Work"}]})}))
   expect(response.status).toBe(401)
   expect(createTimeEntries).not.toHaveBeenCalled()
+})
+
+it("allows only administrators to request an organization-wide timesheet clear and audits its scope",async()=>{
+  const {clearTimeEntries,recordAuditEvent}=await import("@/lib/db")
+  vi.mocked(auth).mockResolvedValue({user:{email:"admin@example.com"}} as never)
+  vi.mocked(getEffectivePermissions).mockResolvedValue({role:"admin",permissions:resolvePermissions("admin")} as never)
+  vi.mocked(clearTimeEntries).mockResolvedValue(4)
+  const response=await DELETE(new Request("http://localhost/api/entries",{method:"DELETE",headers:{"content-type":"application/json"},body:JSON.stringify({scope:"all_entries"})}))
+  expect(response.status).toBe(200)
+  expect(await response.json()).toEqual({ok:true,deletedCount:4})
+  expect(clearTimeEntries).toHaveBeenCalledWith("admin@example.com",true)
+  expect(recordAuditEvent).toHaveBeenCalledWith(expect.objectContaining({action:"entries_cleared",metadata:expect.objectContaining({scope:"all_entries",deletedCount:4,financeHandoffsPreserved:true})}))
+})
+
+it("rejects an organization-wide clear request from a non-admin",async()=>{
+  const {clearTimeEntries}=await import("@/lib/db")
+  vi.mocked(getEffectivePermissions).mockResolvedValue({role:"contractor",permissions:resolvePermissions("contractor",{delete_entries:true})} as never)
+  const response=await DELETE(new Request("http://localhost/api/entries",{method:"DELETE",headers:{"content-type":"application/json"},body:JSON.stringify({scope:"all_entries"})}))
+  expect(response.status).toBe(403)
+  expect(clearTimeEntries).not.toHaveBeenCalled()
 })

@@ -13,7 +13,7 @@ afterEach(()=>vi.unstubAllGlobals())
  * Installs an isolated queue fixture with both internal and outsourced evidence.
  * @returns Mock fetch recording all attempted mutations.
  */
-function fixture(){const fetch=vi.fn(async()=>new Response(JSON.stringify({candidates:[],assignees:[],handoffs:[row,{...row,id:"second",evidence:{...row.evidence,contractor:"Staff",workerCategory:"employee"}}]})));vi.stubGlobal("fetch",fetch);return fetch}
+function fixture(){const fetch=vi.fn(async()=>new Response(JSON.stringify({candidates:[],assignees:[],periods:[{id:"period-oct",name:"October 2026",startDate:"2026-10-01",endDate:"2026-10-31"}],managers:[{email:"manager@example.com",officialName:"Morgan Manager"}],handoffs:[row,{...row,id:"second",evidence:{...row.evidence,contractor:"Staff",workerCategory:"employee"}}]})));vi.stubGlobal("fetch",fetch);return fetch}
 it("shows a compact triage summary and filters employee evidence",async()=>{
   fixture();render(<BusinessAccounts canSend={false}/>);await screen.findByText("Supplier",{selector:"span"})
   expect(screen.getByRole("heading",{name:"Final hours and finance review"})).toBeVisible()
@@ -39,11 +39,14 @@ it("requires an explicit review note before saving",async()=>{
   expect(screen.getByRole("button",{name:"Confirm review"})).toBeDisabled()
   await waitFor(()=>expect(fetch).toHaveBeenCalledTimes(1))
 })
-it("groups the queue by manager and drills into that manager's people",async()=>{
+it("shows a vertical period and manager navigator for drilling into manager-owned people",async()=>{
   fixture();render(<BusinessAccounts canSend={false}/>);await screen.findByText("Supplier",{selector:"span"})
-  expect(screen.getAllByText(/Manager · manager@example\.com/)[0]).toBeVisible()
+  expect(screen.getByRole("navigation",{name:"Timesheet periods"})).toBeVisible()
+  expect(screen.getByRole("button",{name:/October 2026/})).toBeVisible()
+  expect(screen.getByRole("navigation",{name:"Managers in selected period"})).toBeVisible()
+  expect(screen.getByRole("button",{name:/Morgan Manager/})).toBeVisible()
+  await userEvent.click(screen.getByRole("button",{name:/Morgan Manager/}))
   await userEvent.click(screen.getByText("Filter and sort"))
-  await userEvent.selectOptions(screen.getByRole("combobox",{name:"Approving reviewer"}),"manager@example.com")
   await userEvent.selectOptions(screen.getByRole("combobox",{name:"Manager contractor filter"}),"Supplier")
   expect(screen.getByText("Supplier",{selector:"span"})).toBeVisible()
   expect(screen.queryByText("Staff",{selector:"span"})).not.toBeInTheDocument()
