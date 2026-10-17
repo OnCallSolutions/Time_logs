@@ -280,14 +280,17 @@ describe("TimesheetApp admin directory", () => {
     expect(within(activity).getByText("Distinct actors")).toBeVisible()
     expect(within(activity).getByText("entry approved")).toHaveClass("bg-emerald-50")
     expect(within(activity).getByText("time entry")).toHaveClass("bg-blue-50")
-    expect(within(activity).getByText("/tanovo-time/api/entries/entry-1")).toBeVisible()
+    expect(within(activity).queryByText("/tanovo-time/api/entries/entry-1")).not.toBeInTheDocument()
     expect(within(activity).queryByText("203.0.113.10")).not.toBeInTheDocument()
 
     await user.click(within(activity).getByRole("row", { name: /admin@example.com entry approved/i }))
-    const details = await screen.findByRole("dialog", { name: "Activity detail" })
+    const details = await within(activity).findByRole("region", { name: "Activity detail" })
+    expect(within(details).getByText("/tanovo-time/api/entries/entry-1")).toBeVisible()
     expect(within(details).getByText("203.0.113.10")).toBeVisible()
     expect(within(details).getByText(/fromStatus/)).toBeVisible()
     expect(within(details).getByText("req-test-1")).toBeVisible()
+    await user.click(within(activity).getByRole("row", { name: /admin@example.com entry approved/i }))
+    expect(within(activity).queryByRole("region", { name: "Activity detail" })).not.toBeInTheDocument()
   })
 
   it("uses the admin landing area to find people and resolve access issues", async () => {

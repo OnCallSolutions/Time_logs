@@ -1958,9 +1958,9 @@ function AuditSummary({label,value,tone}:{label:string;value:string;tone:"blue"|
     orange:"border-orange-200 text-orange-800",
     purple:"border-violet-200 text-violet-800",
   }
-  return <div className={`min-w-0 border-r px-4 py-2 last:border-r-0 ${tones[tone]}`}>
-    <p className="text-[11px] font-semibold uppercase tracking-wide">{label}</p>
-    <p className="mt-0.5 truncate text-sm font-medium text-slate-900" title={value}>{value}</p>
+  return <div className={`min-w-0 border-r px-2 py-1.5 last:border-r-0 ${tones[tone]}`}>
+    <p className="text-[10px] font-semibold uppercase tracking-wide">{label}</p>
+    <p className="truncate text-xs font-medium text-slate-900" title={value}>{value}</p>
   </div>
 }
 
@@ -2026,19 +2026,15 @@ function AdminActivityWindow({
   return (
     <WindowSurface title="All app activity" onBack={onClose}>
       <section className="tech-surface flex h-full min-h-0 w-full flex-col overflow-hidden border-0 bg-white text-slate-950">
-        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-blue-200 bg-blue-50 px-4 py-3">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-blue-200 bg-blue-50 px-3 py-1.5">
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-1.5">
               <Activity className="size-4 text-blue-700" aria-hidden="true" />
-              <h2 className="text-base font-semibold text-blue-950">All app activity</h2>
+              <h2 className="mr-1 text-sm font-semibold text-blue-950">All app activity</h2>
               <Button variant={showErrors?"default":"outline"} size="sm" onClick={()=>setShowErrors(false)}>All activity</Button>
               <Button variant={showErrors?"default":"outline"} size="sm" className={showErrors?"bg-red-700 hover:bg-red-800":"border-red-200 bg-red-50 text-red-800 hover:bg-red-100"} onClick={()=>setShowErrors(true)}>Application errors ({events.filter(event=>event.action==="client_error_reported").length})</Button>
               <Button variant="outline" className="border-red-200 bg-red-50 text-red-800 hover:bg-red-100" onClick={() => setShowSecurity(true)}>Security risks</Button>
             </div>
-            <p className="mt-1 text-xs text-slate-600">
-              Full admin view of recent audited actions across entries, profiles,
-              approvals, and deletions.
-            </p>
           </div>
           <Button
             type="button"
@@ -2053,10 +2049,10 @@ function AdminActivityWindow({
           </Button>
         </div>
 
-        <div className="flex shrink-0 flex-wrap items-end gap-2 border-b border-sky-200 bg-gradient-to-r from-sky-50 via-white to-emerald-50 p-3">
-          <label className="min-w-48 flex-1 text-xs font-medium text-slate-700">Search logs<input aria-label="Search audit logs" type="search" value={search} onChange={event=>setSearch(event.target.value)} placeholder="Actor, action, request, target…" className="mt-1 h-8 w-full rounded-md border border-slate-300 bg-white px-2 text-sm"/></label>
+        <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-sky-200 bg-gradient-to-r from-sky-50 via-white to-emerald-50 px-2 py-1.5">
+          <label className="min-w-48 flex-1 text-[11px] font-medium text-slate-700">Search logs<input aria-label="Search audit logs" type="search" value={search} onChange={event=>setSearch(event.target.value)} placeholder="Actor, action, request, target…" className="mt-0.5 h-7 w-full rounded-md border border-slate-300 bg-white px-2 text-xs"/></label>
           <details className="group relative min-w-0">
-            <summary className="flex h-8 cursor-pointer list-none items-center rounded-md border border-sky-200 bg-white px-3 text-xs font-medium text-sky-950 hover:bg-sky-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 [&::-webkit-details-marker]:hidden"><SlidersHorizontal className="mr-1.5 size-3.5"/>View options<ChevronDown className="ml-2 size-3.5 transition-transform group-open:rotate-180"/></summary>
+            <summary className="flex h-7 cursor-pointer list-none items-center rounded-md border border-sky-200 bg-white px-2 text-[11px] font-medium text-sky-950 hover:bg-sky-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 [&::-webkit-details-marker]:hidden"><SlidersHorizontal className="mr-1 size-3"/>View options<ChevronDown className="ml-1.5 size-3 transition-transform group-open:rotate-180"/></summary>
             <div className="absolute z-10 mt-1 flex flex-wrap items-end gap-2 rounded-md border border-sky-200 bg-white p-3 shadow-lg">
           <label className="text-xs font-medium text-slate-700">From<input aria-label="Audit date from" type="date" value={dateFrom} max={dateThrough||undefined} onChange={event=>setDateFrom(event.target.value)} className="mt-1 h-8 rounded-md border border-slate-300 bg-white px-2 text-xs"/></label>
           <label className="text-xs font-medium text-slate-700">Through<input aria-label="Audit date through" type="date" value={dateThrough} min={dateFrom||undefined} onChange={event=>setDateThrough(event.target.value)} className="mt-1 h-8 rounded-md border border-slate-300 bg-white px-2 text-xs"/></label>
@@ -2065,7 +2061,7 @@ function AdminActivityWindow({
           <label className="text-xs font-medium text-slate-700">Sort<select aria-label="Sort audit logs" value={sortOrder} onChange={event=>setSortOrder(event.target.value as typeof sortOrder)} className="mt-1 h-8 rounded-md border border-slate-300 bg-white px-2 text-xs"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></label>
             </div>
           </details>
-          <span className="pb-2 text-xs tabular-nums text-slate-600">{visibleEvents.length} events</span>
+          <span className="text-[11px] tabular-nums text-slate-600">{visibleEvents.length} events</span>
         </div>
         {error&&events.length>0&&<p role="alert" className="shrink-0 border-b border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>}
 
@@ -2097,63 +2093,52 @@ function AdminActivityWindow({
           </div>
         ) : (
           <div tabIndex={0} aria-label="Activity table" className="min-h-0 flex-1 overflow-auto overscroll-contain">
-            <table className="w-full min-w-[1200px] border-collapse text-left text-sm">
+            <table className="w-full min-w-[760px] border-collapse text-left text-xs">
             <thead className="sticky top-0 z-[1] bg-blue-50 shadow-sm">
-                <tr className="border-b border-blue-200 text-xs uppercase tracking-wide text-blue-900">
-                  <th className="px-4 py-2 font-medium">Time</th>
-                  <th className="px-4 py-2 font-medium">Actor</th>
-                  <th className="px-4 py-2 font-medium">Action</th>
-                  <th className="px-4 py-2 font-medium">Target</th>
-                  <th className="px-4 py-2 font-medium">Request</th>
-                  <th className="px-4 py-2 font-medium">User agent</th>
-                  <th className="px-4 py-2 font-medium">Metadata</th>
+                <tr className="border-b border-blue-200 text-[10px] uppercase tracking-wide text-blue-900">
+                  <th className="w-36 px-2 py-1 font-medium">Time</th>
+                  <th className="w-48 px-2 py-1 font-medium">Actor</th>
+                  <th className="w-44 px-2 py-1 font-medium">Action</th>
+                  <th className="px-2 py-1 font-medium">Target / request</th>
+                  <th className="w-28 px-2 py-1 text-right font-medium">Details</th>
                 </tr>
               </thead>
               {groupedEvents.map(([groupKey,group])=><tbody key={groupKey}>
-                <tr className="sticky top-9 z-[1] bg-emerald-50 text-xs text-emerald-950"><th colSpan={7} className="border-y border-emerald-200 px-4 py-2 text-left font-semibold">{group.label}<span className="ml-2 font-normal text-emerald-800">{group.events.length} {group.events.length===1?"event":"events"}</span></th></tr>
+                <tr className="sticky top-7 z-[1] bg-emerald-50 text-[11px] text-emerald-950"><th colSpan={5} className="border-y border-emerald-200 px-2 py-1 text-left font-semibold">{group.label}<span className="ml-2 font-normal text-emerald-800">{group.events.length}</span></th></tr>
                 {group.events.map((event) => (
+                  <Fragment key={event.id}>
                   <tr
-                    key={event.id}
-                    className={`cursor-pointer border-b border-slate-200 align-top outline-none odd:bg-white even:bg-sky-50/60 last:border-0 hover:bg-orange-50 focus:bg-blue-100 ${
+                    className={`cursor-pointer border-b border-slate-200 align-middle outline-none odd:bg-white even:bg-sky-50/60 last:border-0 hover:bg-orange-50 focus:bg-blue-100 ${
                       selectedEvent?.id === event.id ? "bg-blue-100" : ""
                     }`}
                     tabIndex={0}
-                    onClick={() => setSelectedEvent(event)}
+                    aria-expanded={selectedEvent?.id === event.id}
+                    onClick={() => setSelectedEvent(current=>current?.id===event.id?null:event)}
                     onKeyDown={(keyboardEvent) => {
                       if (
                         keyboardEvent.key === "Enter" ||
                         keyboardEvent.key === " "
                       ) {
                         keyboardEvent.preventDefault()
-                        setSelectedEvent(event)
+                        setSelectedEvent(current=>current?.id===event.id?null:event)
                       }
                     }}
                   >
-                    <td className="px-4 py-3 text-xs text-slate-600">
+                    <td className="whitespace-nowrap px-2 py-1 text-[11px] text-slate-600">
                       {formatAdminDateTime(event.occurredAt)}
                     </td>
-                    <td className="px-4 py-3 font-medium"><span className="inline-flex rounded-md border border-sky-200 bg-sky-50 px-2 py-1 text-sky-950">{event.actorEmail}</span></td>
-                    <td className="px-4 py-3"><span className={`inline-flex rounded-md border px-2 py-1 text-xs font-semibold capitalize ${auditActionTone(event.action)}`}>{formatAuditAction(event.action)}</span></td>
-                    <td className="px-4 py-3 text-xs text-slate-600">
-                      <p><span className={`inline-flex rounded-md border px-2 py-1 font-medium ${auditTargetTone(event.targetType)}`}>{event.targetType.replaceAll("_", " ")}</span></p>
-                      <p className="mt-1 break-all font-mono">
-                        {event.targetId ?? "No target id"}
-                      </p>
+                    <td className="px-2 py-1 font-medium"><span className="inline-flex max-w-full truncate rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-[11px] text-sky-950">{event.actorEmail}</span></td>
+                    <td className="px-2 py-1"><span className={`inline-flex max-w-full truncate rounded border px-1.5 py-0.5 text-[11px] font-semibold capitalize ${auditActionTone(event.action)}`}>{formatAuditAction(event.action)}</span></td>
+                    <td className="px-2 py-1 text-[11px] text-slate-600">
+                      <span className={`mr-1 inline-flex rounded border px-1 py-0.5 font-medium ${auditTargetTone(event.targetType)}`}>{event.targetType.replaceAll("_", " ")}</span>
+                      <span className="truncate font-mono">{event.requestMethod??""} {event.requestPath??event.targetId??""}</span>
                     </td>
-                    <td className="max-w-xs px-4 py-3 text-xs text-slate-600">
-                      <span className="inline-flex rounded border border-violet-200 bg-violet-50 px-1.5 py-0.5 font-semibold text-violet-800">{event.requestMethod ?? "Unknown"}</span>
-                      <p className="mt-1 break-all font-mono">{event.requestPath ?? "Path unavailable"}</p>
-                    </td>
-                    <td className="max-w-sm px-4 py-3 text-xs text-slate-600">
-                      <span className="line-clamp-1">
-                        {event.userAgent ?? "Unknown"}
-                      </span>
-                    </td>
-                    <td className="max-w-xs px-4 py-3 text-xs text-slate-600">
-                      <p className="line-clamp-2">{formatAuditMetadata(event)}</p>
-                      <p className="mt-1 text-[11px] font-medium text-slate-500">{Object.keys(event.metadata).length} metadata fields · open row for details</p>
+                    <td className="px-2 py-1 text-right text-[10px] text-slate-600">
+                      {selectedEvent?.id === event.id ? "Close details" : `${Object.keys(event.metadata).length} fields · open`}
                     </td>
                   </tr>
+                  {selectedEvent?.id===event.id&&<tr className="bg-blue-50/70"><td colSpan={5} className="border-b border-blue-200 p-2"><AdminActivityEventDetails event={event} onClose={()=>setSelectedEvent(null)}/></td></tr>}
+                  </Fragment>
                 ))}
               </tbody>)}
             </table>
@@ -2162,13 +2147,6 @@ function AdminActivityWindow({
 
         {!loading&&hasMore&&<div className="flex shrink-0 justify-center border-t border-sky-200 bg-sky-50/70 p-2"><Button variant="outline" size="sm" disabled={loadingMore} onClick={onLoadMore}>{loadingMore?"Loading older events…":error?"Retry loading older events":"Load older activity"}</Button></div>}
 
-        {selectedEvent && (
-          <AdminActivityEventDetails
-            key={selectedEvent.id}
-            event={selectedEvent}
-            onClose={() => setSelectedEvent(null)}
-          />
-        )}
       </section>
     </WindowSurface>
   )
@@ -2207,12 +2185,11 @@ function AdminActivityEventDetails({
   ]
 
   return (
-    <WindowSurface title="Activity detail" onBack={onClose}>
-    <section className="flex h-full w-full flex-col overflow-y-auto overscroll-contain bg-white p-4 sm:p-6">
-      <div className="sticky top-0 z-[1] mb-3 flex items-start justify-between gap-4 bg-white pb-2">
+    <section aria-label="Activity detail" className="w-full bg-white">
+      <div className="mb-2 flex items-center justify-between gap-2">
         <div>
-          <h3 className="text-sm font-semibold">Activity detail</h3>
-          <p className="mt-1 text-xs text-slate-600">
+          <h3 className="text-xs font-semibold">Activity detail</h3>
+          <p className="text-[11px] text-slate-600">
             {formatAuditAction(event.action)} by {event.actorEmail}
           </p>
         </div>
@@ -2229,34 +2206,33 @@ function AdminActivityEventDetails({
         </Button>
       </div>
 
-      <div className="grid flex-1 content-start gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)]">
-        <dl className="grid gap-2 sm:grid-cols-2">
+      <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.8fr)]">
+        <dl className="grid gap-1.5 sm:grid-cols-3">
           {details.map((detail) => (
             <div
               key={detail.label}
-              className="rounded-lg border border-blue-200 bg-blue-50/70 p-3"
+              className="rounded border border-blue-200 bg-blue-50/70 px-2 py-1.5"
             >
-              <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">
+              <dt className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
                 {detail.label}
               </dt>
-              <dd className="mt-1 break-words text-sm text-slate-900">
+              <dd className="break-all text-xs text-slate-900">
                 {detail.value}
               </dd>
             </div>
           ))}
         </dl>
 
-        <div className="rounded-lg border border-orange-200 bg-orange-50/70 p-3">
-          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+        <div className="rounded border border-orange-200 bg-orange-50/70 p-2">
+          <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
             Metadata
           </p>
-          <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-md border border-orange-100 bg-white p-3 font-mono text-xs leading-relaxed text-slate-800">
+          <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded border border-orange-100 bg-white p-2 font-mono text-[11px] leading-snug text-slate-800">
             {formatAuditMetadataBlock(event)}
           </pre>
         </div>
       </div>
     </section>
-    </WindowSurface>
   )
 }
 
