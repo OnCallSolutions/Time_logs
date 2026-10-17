@@ -14,6 +14,7 @@ import { createReviewAccess } from "@/lib/review-access"
 import { approveAndForward } from "@/lib/account-handoffs"
 import { listAccountIdentities } from "@/lib/account-identities"
 import { resolveSubmissionReviewer } from "@/lib/submission-reviewer"
+import { persistenceFailureDetails } from "@/lib/persistence-diagnostics"
 import {
   auditActionForStatus,
   changedFieldMetadata,
@@ -274,19 +275,43 @@ export async function PATCH(
     if(patch.status==="submitted"){
       const submissionDeadline=await getTimesheetSubmissionDeadline()
       if(submissionDeadline&&Date.now()>=Date.parse(submissionDeadline))return Response.json({error:`The organization submission deadline passed on ${new Date(submissionDeadline).toLocaleString()}. Contact an administrator if an exception is needed.`},{status:409})
-      const submitted=await submitTimeEntryWithAudit(
-        access.email,
-        id,
-        patch as typeof patch & {status:"submitted"},
-        access.includeAll,
-        access.canReview ? access.email : undefined,
-        revision,
-        access.email,
-        current.status,
-        changedFieldMetadata(patch),
-        access.role,
-        getAuditContext(req),
-      )
+      let submitted: TimeEntry | null
+      try {
+        submitted=await submitTimeEntryWithAudit(
+          access.email,
+          id,
+          patch as typeof patch & {status:"submitted"},
+          access.includeAll,
+          access.canReview ? access.email : undefined,
+          revision,
+          access.email,
+          current.status,
+          changedFieldMetadata(patch),
+          access.role,
+          getAuditContext(req),
+        )
+      } catch (writeError) {
+        // A transport can fail after PostgreSQL commits. Confirm the durable state
+        // before telling the user to retry an operation that may already have saved.
+        try {
+          const persisted=await getTimeEntry(access.email,id,access.includeAll)
+          const expectedReviewer=patch.reviewManagerEmail
+          const requestedFieldsPersisted=(patch.contractor===undefined||persisted?.contractor===patch.contractor)&&
+            (patch.date===undefined||persisted?.date.slice(0,10)===patch.date)&&
+            (patch.hours===undefined||persisted?.hours===patch.hours)&&
+            (patch.project===undefined||persisted?.project===patch.project)&&
+            (patch.description===undefined||persisted?.description===patch.description)
+          if(persisted?.status==="submitted"&&persisted.ownerEmail?.toLowerCase()===current.ownerEmail?.toLowerCase()&&
+            requestedFieldsPersisted&&
+            (expectedReviewer===undefined||(expectedReviewer===null?persisted.reviewManagerEmail==null:persisted.reviewManagerEmail?.toLowerCase()===expectedReviewer.toLowerCase()))){
+            console.warn("[entries] submission confirmed after persistence error",{id,...persistenceFailureDetails(writeError)})
+            return Response.json({entry:persisted})
+          }
+        } catch (readError) {
+          console.warn("[entries] submission read-back failed",{id,...persistenceFailureDetails(readError)})
+        }
+        throw writeError
+      }
       if(!submitted){
         const latestDeadline=await getTimesheetSubmissionDeadline()
         if(latestDeadline&&Date.now()>=Date.parse(latestDeadline))return Response.json({error:`The organization submission deadline passed on ${new Date(latestDeadline).toLocaleString()}. Contact an administrator if an exception is needed.`},{status:409})
@@ -295,7 +320,23 @@ export async function PATCH(
       return Response.json({entry:submitted})
     }
     if(patch.status==="rejected"){
-      const rejected=await rejectSubmittedEntry(id,access.email,revision,patch.reviewNote!.trim(),getAuditContext(req))
+      const reason=patch.reviewNote!.trim()
+      let rejected: TimeEntry | null
+      try {
+        rejected=await rejectSubmittedEntry(id,access.email,revision,reason,getAuditContext(req))
+      } catch (writeError) {
+        try {
+          const persisted=await getTimeEntry(access.email,id,access.includeAll)
+          if(persisted?.status==="rejected"&&persisted.ownerEmail?.toLowerCase()===current.ownerEmail?.toLowerCase()&&
+            persisted.reviewedBy?.toLowerCase()===access.email.toLowerCase()&&persisted.reviewNote===reason){
+            console.warn("[entries] rejection confirmed after persistence error",{id,...persistenceFailureDetails(writeError)})
+            return Response.json({entry:persisted})
+          }
+        } catch (readError) {
+          console.warn("[entries] rejection read-back failed",{id,...persistenceFailureDetails(readError)})
+        }
+        throw writeError
+      }
       if(!rejected)return Response.json({error:"Evidence changed or was already reviewed. Refresh before rejecting."},{status:409})
       return Response.json({entry:rejected})
     }
@@ -327,8 +368,7 @@ export async function PATCH(
   } catch (err) {
     if(err instanceof z.ZodError||err instanceof SyntaxError)return Response.json({error:"Invalid entry update. Check the selected fields and rejection reason."},{status:400})
     const reference=crypto.randomUUID()
-    const databaseCode=err&&typeof err==="object"&&"code" in err&&typeof err.code==="string"&&/^[A-Z0-9]{5}$/.test(err.code)?err.code:"unavailable"
-    console.error("[entries] update failed",{reference,databaseCode})
+    console.error("[entries] update failed",{reference,...persistenceFailureDetails(err)})
     return Response.json(
       { error: "The update could not be confirmed. Refresh before retrying; the server may have saved it.",reference },
       { status: 503 },
