@@ -33,6 +33,7 @@ import { PeriodExpirationNotice } from "@/components/period-expiration-notice"
 import { AccessLifecyclePanel } from "@/components/access-lifecycle-panel"
 import { SecurityRiskWindow } from "@/components/security-risk-window"
 import { SubmissionDeadlineSettings } from "@/components/submission-deadline-settings"
+import { SubmissionDeadlineNotice } from "@/components/submission-deadline-notice"
 import { PatronAccountActivity } from "@/components/patron-account-activity"
 import { WindowSurface } from "@/components/window-surface"
 import { WindowAssistantProvider } from "@/components/window-assistant-context"
@@ -725,6 +726,7 @@ export function TimesheetApp({
           {permissions.delegate_permissions&&role==="manager"&&<Button variant="outline" onClick={()=>openWorkspacePage("permissions")}><KeyRound className="size-4"/>Manage team access</Button>}
         </>}
       </nav>}
+      {!accessDenied&&!(view==="log"||view==="personal"||(view==="admin"&&adminStartSection==="timesheets"))&&<SubmissionDeadlineNotice/>}
       {lifecycleOpen&&!accessDenied&&(canViewAdmin||(role==="manager"&&permissions.delegate_permissions))&&<WindowSurface title={canViewAdmin?"Access lifecycle":"Temporary coverage"} onBack={()=>setLifecycleOpen(false)}><section className="min-h-0 w-full overflow-auto bg-white"><AccessLifecyclePanel key={role} admin={canViewAdmin} permissions={permissions}/></section></WindowSurface>}
       {canViewAdmin && technologyReports && <SecurityRiskWindow onClose={() => setTechnologyReports(false)} />}
 
