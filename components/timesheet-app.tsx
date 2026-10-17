@@ -9,7 +9,7 @@
  * the permissions enforced by the API routes.
  */
 import { Fragment,useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
-import { signIn } from "next-auth/react"
+import { getSession } from "next-auth/react"
 import { AssistantPanel } from "@/components/assistant-panel"
 import { AssistantRunReport } from "@/components/assistant-run-report"
 import { ReviewerHelpDialog } from "@/components/reviewer-help-dialog"
@@ -26,6 +26,7 @@ import { notifyPermissionsChanged } from "@/lib/permission-events"
 import { EntryReviewDialog, ManagerWorkspace } from "@/components/manager-workspace"
 import { permissionLabels, resolvePermissions, type Permission, type PermissionOverrides } from "@/lib/permissions"
 import { accessChangeRequiresStepUp } from "@/lib/admin-policy"
+import { openEntraReauthentication } from "@/lib/entra-reauth-popup"
 import { AdminWorkspace } from "@/components/admin-workspace"
 import { AccessLifecyclePanel } from "@/components/access-lifecycle-panel"
 import { SecurityRiskWindow } from "@/components/security-risk-window"
@@ -315,6 +316,9 @@ export function TimesheetApp({
   }
   const [clearEntriesConfirmationOpen, setClearEntriesConfirmationOpen] = useState(false)
   const [clearEntriesBusy, setClearEntriesBusy] = useState(false)
+  const [clearEntriesScope,setClearEntriesScope]=useState<"all_entries"|"preview_reset">("all_entries")
+  const [previewResetPhrase,setPreviewResetPhrase]=useState("")
+  const reauthenticationPopup=useRef<Window|null>(null)
   const [savedStatus,setSavedStatus]=useState("")
   const [personalStatus, setPersonalStatus] = useState<EntryStatus | "all">("all")
   const [suggestedReview,setSuggestedReview] = useState<{entry:TimeEntry;decision:"approved"|"rejected";reason:string}|null>(null)
@@ -356,23 +360,22 @@ export function TimesheetApp({
   }
   useEffect(() => {
     if (!userEmail) return
-    const stored = window.sessionStorage.getItem(pendingClearEntriesKey)
-    if (!stored) return
-    window.sessionStorage.removeItem(pendingClearEntriesKey)
-    if (new URL(window.location.href).searchParams.has("error")) {
-      setSyncError("Microsoft reauthentication failed. No entries were cleared.")
-      return
-    }
-    try {
-      const pending = JSON.parse(stored) as { email?: string; expiresAt?: number }
-      if (typeof pending.expiresAt === "number" && pending.expiresAt >= Date.now() && typeof pending.email === "string" && pending.email.toLowerCase() === userEmail.toLowerCase()) {
+    const onMessage=async(event:MessageEvent)=>{
+      if(event.origin!==window.location.origin||event.source!==reauthenticationPopup.current||event.data?.type!=="tanovo:microsoft-reauth-complete")return
+      reauthenticationPopup.current=null
+      const stored=window.sessionStorage.getItem(pendingClearEntriesKey)
+      window.sessionStorage.removeItem(pendingClearEntriesKey)
+      try{
+        const pending=stored?JSON.parse(stored) as {email?:string;expiresAt?:number;scope?:"all_entries"|"preview_reset";state?:string}:null
+        const session=await getSession()
+        if(!event.data.ok||!pending||pending.state!==event.data.state||typeof pending.expiresAt!=="number"||pending.expiresAt<Date.now()||pending.email?.toLowerCase()!==userEmail.toLowerCase()||session?.user?.email?.toLowerCase()!==userEmail.toLowerCase())throw new Error()
+        setClearEntriesScope(pending.scope??"all_entries")
+        setPreviewResetPhrase("")
         setClearEntriesConfirmationOpen(true)
-        return
-      }
-      setSyncError("Microsoft verification expired or returned to a different account. No entries were cleared.")
-    } catch {
-      setSyncError("The pending clear request could not be verified. No entries were cleared.")
+      }catch{setSyncError("Microsoft reauthentication was cancelled, expired, or returned a different account. No data was changed.")}
     }
+    window.addEventListener("message",onMessage)
+    return()=>window.removeEventListener("message",onMessage)
   }, [userEmail])
   /** Clears this account's brief entries snapshot after authorization or writes change. */
   const invalidateEntriesCache = () => {
@@ -598,17 +601,38 @@ export function TimesheetApp({
     if (!canClearVisibleEntries || !userEmail) return
     setSyncError(null)
     try {
-      window.sessionStorage.setItem(pendingClearEntriesKey, JSON.stringify({ email: userEmail.toLowerCase(), expiresAt: Date.now() + 5 * 60_000 }))
-      await signIn("microsoft-entra-id", { redirectTo: window.location.href }, { max_age: "0", prompt: "login" })
+      setClearEntriesScope("all_entries")
+      const state=crypto.randomUUID()
+      window.sessionStorage.setItem(pendingClearEntriesKey, JSON.stringify({ email: userEmail.toLowerCase(), expiresAt: Date.now() + 5 * 60_000,scope:"all_entries",state }))
+      const popup=openEntraReauthentication(state,()=>{window.sessionStorage.removeItem(pendingClearEntriesKey);setSyncError("Microsoft reauthentication could not start. No entries were cleared.")})
+      if(!popup){window.sessionStorage.removeItem(pendingClearEntriesKey);setSyncError("Allow the Microsoft verification popup to continue. No entries were cleared.");return}
+      reauthenticationPopup.current=popup
     } catch {
       window.sessionStorage.removeItem(pendingClearEntriesKey)
       setSyncError("Microsoft reauthentication did not complete. No entries were cleared.")
     }
   }
 
+  async function startPreviewDataReset(){
+    if(role!=="admin"||!userEmail)return
+    setSyncError(null)
+    try{
+      setClearEntriesScope("preview_reset")
+      const state=crypto.randomUUID()
+      window.sessionStorage.setItem(pendingClearEntriesKey,JSON.stringify({email:userEmail.toLowerCase(),expiresAt:Date.now()+5*60_000,scope:"preview_reset",state}))
+      const popup=openEntraReauthentication(state,()=>{window.sessionStorage.removeItem(pendingClearEntriesKey);setSyncError("Microsoft reauthentication could not start. No preview data was cleared.")})
+      if(!popup){window.sessionStorage.removeItem(pendingClearEntriesKey);setSyncError("Allow the Microsoft verification popup to continue. No preview data was cleared.");return}
+      reauthenticationPopup.current=popup
+    }catch{
+      window.sessionStorage.removeItem(pendingClearEntriesKey)
+      setSyncError("Microsoft reauthentication did not complete. No preview data was cleared.")
+    }
+  }
+
   /** Executes a clear only after fresh Entra authentication and a second explicit confirmation. */
   async function confirmClearEntries() {
     if (!canClearVisibleEntries || clearEntriesBusy) return
+    if(clearEntriesScope==="preview_reset"&&previewResetPhrase!=="RESET PREVIEW DATA")return
     setClearEntriesBusy(true)
     invalidateEntriesCache()
     pendingEntryWrites.current++;entryReadEpoch.current++
@@ -616,7 +640,9 @@ export function TimesheetApp({
     setEntries([])
     let statusCode:number|undefined
     try {
-      const res = await fetch(apiPath("/api/entries"), { method: "DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({scope:"all_entries"}) })
+      const res = clearEntriesScope==="preview_reset"
+        ? await fetch(apiPath("/api/admin/preview-reset"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({confirmation:previewResetPhrase})})
+        : await fetch(apiPath("/api/entries"), { method: "DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({scope:"all_entries"}) })
       statusCode=res.status
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? "Failed to clear entries.")
@@ -631,6 +657,7 @@ export function TimesheetApp({
     } finally {
       setClearEntriesBusy(false)
       setClearEntriesConfirmationOpen(false)
+      setPreviewResetPhrase("")
       invalidateEntriesCache()
       pendingEntryWrites.current--
       entryReadEpoch.current++
@@ -656,7 +683,7 @@ export function TimesheetApp({
   </div>
   const pageTitle=view==="personal"?`${role==="manager"?"My managerial timesheets":"My timesheets"} · ${personalStatusLabel}`:view==="log"&&(role==="employee"||role==="contractor")?`My timesheets · ${personalStatusLabel}`:view==="log"?(permissions.view_team?"Team entries":role==="contractor"?"Contractor time submissions":"Employee time entries"):view==="approvals"?"Review queue":view==="report"||view==="my-report"?"Reports":view==="activity"?"Account activity":view==="permissions"?"Manage employees and contractors":view==="accounts"?"Final approvals":view==="periods"?"Timesheet periods":view==="admin"?adminStartSection==="reports"?"Reports":adminStartSection==="timesheets"?"Timesheets":"Admin dashboard":"Workspace"
   return (
-    <WindowAssistantProvider renderAssistant={(workspace,onClose)=><AssistantPanel organizationName={organizationName} workspaceContext={workspace} handoffContext={assistantHandoff} onHandoffUsed={()=>setAssistantHandoff("")} onClose={onClose} onNavigate={(destination,handoff)=>{if(handoff)setAssistantHandoff(handoff);if(destination==="messages")setMessagesOpen(true);else openWorkspacePage(destination as View)}} onRefresh={()=>{setEntriesRefresh(value=>value+1);messageInbox.refresh()}} messageContext="" onContextUsed={()=>{}} onCompose={draft=>{setAssistantCompose(draft);setMessagesOpen(true)}}/>}>
+    <WindowAssistantProvider renderAssistant={(workspace,onClose,onPreferredHeight)=><AssistantPanel organizationName={organizationName} workspaceContext={workspace} handoffContext={assistantHandoff} onHandoffUsed={()=>setAssistantHandoff("")} onClose={onClose} onNavigate={(destination,handoff)=>{if(handoff)setAssistantHandoff(handoff);if(destination==="messages")setMessagesOpen(true);else openWorkspacePage(destination as View)}} onRefresh={()=>{setEntriesRefresh(value=>value+1);messageInbox.refresh()}} messageContext="" onContextUsed={()=>{}} onCompose={draft=>{setAssistantCompose(draft);setMessagesOpen(true)}} onPreferredHeight={onPreferredHeight}/> }>
     <main className="app-workspace tech-surface flex h-dvh min-h-svh w-full min-w-0 flex-col gap-3 overflow-x-hidden overflow-y-auto overscroll-y-auto bg-background px-3 pb-8 pt-3 sm:px-5 md:pt-4">
       {syncError&&<div role="alert" className="fixed right-4 top-4 z-[160] flex w-[min(36rem,calc(100vw-2rem))] items-start gap-3 border border-red-300 bg-white px-4 py-3 text-sm text-red-950 shadow-xl"><span className="min-w-0 flex-1 break-words">{syncError}</span><button type="button" aria-label="Dismiss error message" title="Dismiss error message" onClick={()=>setSyncError(null)} className="grid size-7 shrink-0 place-items-center rounded border border-red-200 text-red-800 hover:bg-red-50"><X className="size-4"/></button></div>}
       {!accessDenied&&messagesOpen&&<WindowSurface title="Messages" onBack={()=>setMessagesOpen(false)}><section className="min-h-0 w-full overflow-auto bg-background p-3 sm:p-5"><MessagesPanel inbox={messageInbox} encryption={messageEncryption} canSend={permissions.send_messages&&(role==="admin"||role==="manager")} initialDraft={assistantCompose} onDraftConsumed={()=>setAssistantCompose(null)} onExplainMessage={text=>{setAssistantMessageContext(text);setMessagesOpen(false);focusAssistant()}}/></section></WindowSurface>}
@@ -710,9 +737,9 @@ export function TimesheetApp({
       }} />}
       {accessDenied && <p role="alert">Access is unavailable. Contact your administrator.</p>}
       {view === "admin" ? (
-        <WorkspacePageSurface open={pageWindow} title={pageTitle} onBack={closeWorkspacePage}><AdminPanel initialSection={adminStartSection==="landing"?undefined:adminStartSection} role={role} entries={entries} pendingEntries={pendingEntries} userEmail={userEmail??""} onEntryUpdate={updateEntry} onEntryStatusChange={changeEntryStatus} onEntryDelete={deleteEntry} onEntryClear={clearEntries} onRefreshEntries={()=>setEntriesRefresh(value=>value+1)} onOpenEntryCapture={()=>setWorkspaceWindow("notes")} onApprovalUpdated={entry=>{entryReadEpoch.current++;setEntries(previous=>previous.map(current=>current.id===entry.id?entry:current))}} canCreateEntries={permissions.create_entries} canEditEntries={permissions.edit_entries} canDeleteEntries={permissions.delete_entries} canClearEntries={canClearVisibleEntries} canReviewEntries={canReviewEntries} canAIReview={canAIReview} canSubmitEntries={canSubmitEntries} canExportEntries={permissions.export_entries} canManagePeriods={permissions.manage_timesheet_periods} openRequest={directoryRequest} reportContent={<ManagerReport entries={entries} stateKey={`admin-report:${userEmail?.toLowerCase()??"user"}`}/>} onSecurity={()=>setTechnologyReports(true)} onLifecycle={()=>setLifecycleOpen(true)} /></WorkspacePageSurface>
+        <WorkspacePageSurface open={pageWindow} title={pageTitle} onBack={closeWorkspacePage}><AdminPanel initialSection={adminStartSection==="landing"?undefined:adminStartSection} role={role} entries={entries} pendingEntries={pendingEntries} userEmail={userEmail??""} onEntryUpdate={updateEntry} onEntryStatusChange={changeEntryStatus} onEntryDelete={deleteEntry} onEntryClear={clearEntries} onPreviewDataReset={startPreviewDataReset} onRefreshEntries={()=>setEntriesRefresh(value=>value+1)} onOpenEntryCapture={()=>setWorkspaceWindow("notes")} onApprovalUpdated={entry=>{entryReadEpoch.current++;setEntries(previous=>previous.map(current=>current.id===entry.id?entry:current))}} canCreateEntries={permissions.create_entries} canEditEntries={permissions.edit_entries} canDeleteEntries={permissions.delete_entries} canClearEntries={canClearVisibleEntries} canReviewEntries={canReviewEntries} canAIReview={canAIReview} canSubmitEntries={canSubmitEntries} canExportEntries={permissions.export_entries} canManagePeriods={permissions.manage_timesheet_periods} openRequest={directoryRequest} reportContent={<ManagerReport entries={entries} stateKey={`admin-report:${userEmail?.toLowerCase()??"user"}`}/>} onSecurity={()=>setTechnologyReports(true)} onLifecycle={()=>setLifecycleOpen(true)} /></WorkspacePageSurface>
       ) : view === "permissions" && role === "admin" ? (
-        <WorkspacePageSurface open={pageWindow} title={pageTitle} onBack={closeWorkspacePage}><AdminPanel role={role} entries={entries} pendingEntries={pendingEntries} userEmail={userEmail??""} onEntryUpdate={updateEntry} onEntryStatusChange={changeEntryStatus} onEntryDelete={deleteEntry} onEntryClear={clearEntries} onRefreshEntries={()=>setEntriesRefresh(value=>value+1)} onOpenEntryCapture={()=>setWorkspaceWindow("notes")} onApprovalUpdated={entry=>{entryReadEpoch.current++;setEntries(previous=>previous.map(current=>current.id===entry.id?entry:current))}} canCreateEntries={permissions.create_entries} canEditEntries={permissions.edit_entries} canDeleteEntries={permissions.delete_entries} canClearEntries={canClearVisibleEntries} canReviewEntries={canReviewEntries} canAIReview={canAIReview} canSubmitEntries={canSubmitEntries} canExportEntries={permissions.export_entries} canManagePeriods={permissions.manage_timesheet_periods} rightsOnly openRequest={directoryRequest} reportContent={<ManagerReport entries={entries}/>} onSecurity={()=>setTechnologyReports(true)} onLifecycle={()=>setLifecycleOpen(true)} /></WorkspacePageSurface>
+        <WorkspacePageSurface open={pageWindow} title={pageTitle} onBack={closeWorkspacePage}><AdminPanel role={role} entries={entries} pendingEntries={pendingEntries} userEmail={userEmail??""} onEntryUpdate={updateEntry} onEntryStatusChange={changeEntryStatus} onEntryDelete={deleteEntry} onEntryClear={clearEntries} onPreviewDataReset={startPreviewDataReset} onRefreshEntries={()=>setEntriesRefresh(value=>value+1)} onOpenEntryCapture={()=>setWorkspaceWindow("notes")} onApprovalUpdated={entry=>{entryReadEpoch.current++;setEntries(previous=>previous.map(current=>current.id===entry.id?entry:current))}} canCreateEntries={permissions.create_entries} canEditEntries={permissions.edit_entries} canDeleteEntries={permissions.delete_entries} canClearEntries={canClearVisibleEntries} canReviewEntries={canReviewEntries} canAIReview={canAIReview} canSubmitEntries={canSubmitEntries} canExportEntries={permissions.export_entries} canManagePeriods={permissions.manage_timesheet_periods} rightsOnly openRequest={directoryRequest} reportContent={<ManagerReport entries={entries}/>} onSecurity={()=>setTechnologyReports(true)} onLifecycle={()=>setLifecycleOpen(true)} /></WorkspacePageSurface>
       ) : <WorkspacePageSurface open={pageWindow} title={pageTitle} onBack={closeWorkspacePage}><div className="flex min-w-0 w-full flex-1 flex-col items-stretch gap-4">
         <div className="flex min-w-0 flex-col gap-4">
           {view==="home"&&(role==="contractor"||role==="employee"||role==="manager")&&<RoleWorkspaceHome
@@ -830,7 +857,7 @@ export function TimesheetApp({
       ) : view === "accounts" ? (
         <section className="min-h-0 w-full overflow-auto bg-white p-4">{accountsContent}</section>
       ) : view === "periods" ? (
-        <section className="min-h-0 w-full overflow-auto bg-white p-4 sm:p-6"><header className="mb-4 border-b border-orange-200 bg-orange-50 px-4 py-3"><h2 className="font-semibold text-orange-950">Timesheet periods</h2><p className="text-sm text-orange-900">Set work-date ranges, submission deadlines, manager grace, and reminder lead times. Older timesheets remain archived in place and retrievable by period.</p></header><SubmissionDeadlineSettings/></section>
+        <section className="min-h-0 w-full overflow-auto bg-white p-4 sm:p-6"><header className="mb-4 border-b border-orange-200 bg-orange-50 px-4 py-3"><h2 className="font-semibold text-orange-950">Timesheet periods</h2><p className="text-sm text-orange-900">Create new work-date ranges or edit and save existing periods. New periods become the current view when their dates begin; older timesheets remain archived and retrievable.</p></header><SubmissionDeadlineSettings defaultOpen/></section>
       ) : view === "messages" ? (
         <MessagesPanel inbox={messageInbox} canSend={permissions.send_messages && (role === "admin" || role === "manager")} />
       ) : view === "permissions" ? (
@@ -847,16 +874,16 @@ export function TimesheetApp({
         {totalHours.toLocaleString(undefined, { maximumFractionDigits: 2 })}h logged
         total · {approvedEntries.length} approved
       </footer>}
-      {clearEntriesConfirmationOpen && <WindowSurface title="Confirm clearing all timesheets" compact resizable assistant={false} disabled={clearEntriesBusy} onBack={() => setClearEntriesConfirmationOpen(false)}>
+      {clearEntriesConfirmationOpen && <WindowSurface title={clearEntriesScope==="preview_reset"?"Reset preview data":"Confirm clearing all timesheets"} compact resizable assistant={false} disabled={clearEntriesBusy} onBack={() => setClearEntriesConfirmationOpen(false)}>
         <section className="flex w-full max-w-xl flex-col bg-white text-slate-950">
           <header className="flex items-start gap-3 border-b border-red-200 bg-red-50 p-4">
             <ShieldCheck className="mt-0.5 size-5 shrink-0 text-red-700" aria-hidden="true" />
-            <div><h2 className="font-semibold text-red-950">Microsoft verification complete</h2><p className="mt-1 text-sm text-red-900">You reauthenticated as {userEmail}. Confirm only if you intend to permanently clear all entries visible to this administrator account.</p></div>
+            <div><h2 className="font-semibold text-red-950">Microsoft verification complete</h2><p className="mt-1 text-sm text-red-900">You reauthenticated as {userEmail}. {clearEntriesScope==="preview_reset"?"This action is available only on a Vercel Preview deployment connected to a database explicitly marked as preview.":"Confirm only if you intend to permanently clear all entries visible to this administrator account."}</p></div>
           </header>
-          <p className="p-4 text-sm">This action cannot be undone. It deletes all source timesheet entries while preserving audit/security logs, patrons, configured periods, and finance handoff snapshots. {entries.length} entries are currently loaded. Cancel leaves all data unchanged.</p>
+          <div className="space-y-3 p-4 text-sm">{clearEntriesScope==="preview_reset"?<><p>This permanently clears preview timesheets, rejection history, audit/authentication events, security reports, AI activity, and deadline reminders. It preserves patrons, active sessions, configured periods, messages, and finance handoff snapshots. One audit record will document this reset. Nothing runs automatically during deployment.</p><label className="block text-xs font-medium text-red-950">Type RESET PREVIEW DATA to enable the reset<input value={previewResetPhrase} onChange={event=>setPreviewResetPhrase(event.target.value)} autoComplete="off" className="mt-1 h-10 w-full rounded-md border border-red-300 bg-white px-3 text-sm" /></label></>:<p>This action cannot be undone. It deletes all source timesheet entries while preserving audit/security logs, patrons, configured periods, and finance handoff snapshots. {entries.length} entries are currently loaded. Cancel leaves all data unchanged.</p>}</div>
           <footer className="flex justify-end gap-2 border-t p-4">
             <Button variant="outline" disabled={clearEntriesBusy} onClick={() => setClearEntriesConfirmationOpen(false)}>Cancel</Button>
-            <Button variant="destructive" disabled={clearEntriesBusy || !permissionsLoaded || !canClearVisibleEntries} onClick={() => void confirmClearEntries()}><Trash2 className="size-4" />{clearEntriesBusy ? "Clearing..." : !permissionsLoaded ? "Checking access..." : "Clear all entries"}</Button>
+            <Button variant="destructive" disabled={clearEntriesBusy || !permissionsLoaded || !canClearVisibleEntries || (clearEntriesScope==="preview_reset"&&previewResetPhrase!=="RESET PREVIEW DATA")} onClick={() => void confirmClearEntries()}><Trash2 className="size-4" />{clearEntriesBusy ? "Clearing..." : !permissionsLoaded ? "Checking access..." : clearEntriesScope==="preview_reset"?"Reset preview data":"Clear all entries"}</Button>
           </footer>
         </section>
       </WindowSurface>}
@@ -991,7 +1018,7 @@ function WorkflowOverview({
  * @param props.role - Effective role for the signed-in user.
  * @returns The administrator user directory panel, or null for non-admin roles.
  */
-function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, onEntryStatusChange, onEntryDelete, onEntryClear, onRefreshEntries, onOpenEntryCapture, onApprovalUpdated, canCreateEntries, canEditEntries, canDeleteEntries, canClearEntries, canReviewEntries, canAIReview, canSubmitEntries, canExportEntries, canManagePeriods, rightsOnly = false,initialSection,openRequest = 0,reportContent,onSecurity,onLifecycle }: { role: UserRole; entries:TimeEntry[]; pendingEntries:TimeEntry[]; userEmail:string; onEntryUpdate:(id:string,patch:Partial<TimeEntry>,revision?:string)=>void|Promise<void>; onEntryStatusChange:(id:string,status:EntryStatus,note?:string,revision?:string,manager?:string)=>Promise<void>; onEntryDelete:(id:string)=>void; onEntryClear:()=>void; onRefreshEntries:()=>void; onOpenEntryCapture:()=>void; onApprovalUpdated:(entry:TimeEntry)=>void; canCreateEntries:boolean; canEditEntries:boolean; canDeleteEntries:boolean; canClearEntries:boolean; canReviewEntries:boolean; canAIReview:boolean; canSubmitEntries:boolean; canExportEntries:boolean; canManagePeriods:boolean; rightsOnly?: boolean;initialSection?:"admin"|"reports"|"timesheets";openRequest?:number;reportContent?:ReactNode;onSecurity?:()=>void;onLifecycle?:()=>void }) {
+function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, onEntryStatusChange, onEntryDelete, onEntryClear,onPreviewDataReset, onRefreshEntries, onOpenEntryCapture, onApprovalUpdated, canCreateEntries, canEditEntries, canDeleteEntries, canClearEntries, canReviewEntries, canAIReview, canSubmitEntries, canExportEntries, canManagePeriods, rightsOnly = false,initialSection,openRequest = 0,reportContent,onSecurity,onLifecycle }: { role: UserRole; entries:TimeEntry[]; pendingEntries:TimeEntry[]; userEmail:string; onEntryUpdate:(id:string,patch:Partial<TimeEntry>,revision?:string)=>void|Promise<void>; onEntryStatusChange:(id:string,status:EntryStatus,note?:string,revision?:string,manager?:string)=>Promise<void>; onEntryDelete:(id:string)=>void; onEntryClear:()=>void; onPreviewDataReset:()=>void; onRefreshEntries:()=>void; onOpenEntryCapture:()=>void; onApprovalUpdated:(entry:TimeEntry)=>void; canCreateEntries:boolean; canEditEntries:boolean; canDeleteEntries:boolean; canClearEntries:boolean; canReviewEntries:boolean; canAIReview:boolean; canSubmitEntries:boolean; canExportEntries:boolean; canManagePeriods:boolean; rightsOnly?: boolean;initialSection?:"admin"|"reports"|"timesheets";openRequest?:number;reportContent?:ReactNode;onSecurity?:()=>void;onLifecycle?:()=>void }) {
   const [users, setUsers] = useState<AdminDirectoryUser[]>([])
   const [auditEvents, setAuditEvents] = useState<AdminAuditEvent[]>([])
   const [allActivityEvents, setAllActivityEvents] = useState<AdminAuditEvent[]>([])
@@ -1001,6 +1028,11 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
   const [directoryOpen,setDirectoryOpen] = useState(rightsOnly)
   const [adminSection,setAdminSection] = useState<"admin"|"reports"|"timesheets"|null>(initialSection??null)
   const [adminSectionHistory,setAdminSectionHistory]=useState<Array<"admin"|"reports"|"timesheets"|null>>([])
+  const [adminTimesheetTool,setAdminTimesheetTool]=useState<"periods"|"entries"|null>(null)
+  const [adminPeriodSelection,setAdminPeriodSelection]=useState("current")
+  const [adminPeriods,setAdminPeriods]=useState<Array<{id:string;name:string;startDate:string;endDate:string}>>([])
+  const [adminPeriodsLoading,setAdminPeriodsLoading]=useState(false)
+  const [adminPeriodsError,setAdminPeriodsError]=useState("")
   const [adminReportOpen,setAdminReportOpen]=useState(false)
   const [assistantRunsOpen,setAssistantRunsOpen]=useState(false)
   const [patronSearch,setPatronSearch]=useState("")
@@ -1017,11 +1049,23 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
   )
   const [accessConfirmationOpen, setAccessConfirmationOpen] = useState(false)
   const [reauthenticatedPendingChange, setReauthenticatedPendingChange] = useState(false)
+  const accessReauthenticationPopup=useRef<Window|null>(null)
   const [savingUser, setSavingUser] = useState<string | null>(null)
   useEffect(()=>{
     setAdminSection(initialSection??null)
     setAdminSectionHistory([])
   },[initialSection])
+  useEffect(()=>{
+    if(adminSection!=="timesheets")return
+    const controller=new AbortController()
+    setAdminPeriodsLoading(true);setAdminPeriodsError("")
+    void fetch(apiPath("/api/timesheet-periods"),{cache:"no-store",signal:controller.signal}).then(async response=>{
+      const data=await response.json()
+      if(!response.ok)throw new Error(data.error??"Could not load timesheet periods.")
+      setAdminPeriods(Array.isArray(data.periods)?data.periods:[])
+    }).catch(cause=>{if(!controller.signal.aborted)setAdminPeriodsError(cause instanceof Error?cause.message:"Could not load timesheet periods.")}).finally(()=>{if(!controller.signal.aborted)setAdminPeriodsLoading(false)})
+    return()=>controller.abort()
+  },[adminSection])
   function navigateAdminSection(next:"admin"|"reports"|"timesheets"):void {
     setAdminSectionHistory(history=>[...history,adminSection])
     setAdminSection(next)
@@ -1042,22 +1086,23 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
 
   useEffect(() => {
     if (role !== "admin") return
-    const stored = window.sessionStorage.getItem(pendingAccessChangeKey)
-    if (!stored) return
-    window.sessionStorage.removeItem(pendingAccessChangeKey)
-    try {
-      const pending = JSON.parse(stored) as AccessEditorState & { expiresAt: number }
-      if (pending.expiresAt < Date.now() || !pending.email || !manageableRoles.includes(pending.role) || !manageableStatuses.includes(pending.accessStatus) || typeof pending.note !== "string") {
-        setManagementError("The pending access change expired or could not be verified. Review and submit it again.")
-        return
-      }
-      setAccessEditor({ ...pending, mode: "edit" })
-      setReauthenticatedPendingChange(true)
-      setAccessConfirmationOpen(true)
-    } catch {
-      setManagementError("The pending access change could not be restored. Please review it again.")
+    const onMessage=async(event:MessageEvent)=>{
+      if(event.origin!==window.location.origin||event.source!==accessReauthenticationPopup.current||event.data?.type!=="tanovo:microsoft-reauth-complete")return
+      accessReauthenticationPopup.current=null
+      const stored=window.sessionStorage.getItem(pendingAccessChangeKey)
+      window.sessionStorage.removeItem(pendingAccessChangeKey)
+      try{
+        const pending=stored?JSON.parse(stored) as AccessEditorState&{expiresAt:number;state:string}:null
+        const session=await getSession()
+        if(!event.data.ok||!pending||pending.state!==event.data.state||pending.expiresAt<Date.now()||!pending.email||pending.email.toLowerCase()!==userEmail.toLowerCase()||session?.user?.email?.toLowerCase()!==userEmail.toLowerCase()||!manageableRoles.includes(pending.role)||!manageableStatuses.includes(pending.accessStatus)||typeof pending.note!=="string")throw new Error()
+        setAccessEditor({ ...pending, mode: "edit" })
+        setReauthenticatedPendingChange(true)
+        setAccessConfirmationOpen(true)
+      }catch{setManagementError("Microsoft reauthentication was cancelled, expired, or returned a different account. No access change was saved.")}
     }
-  }, [role])
+    window.addEventListener("message",onMessage)
+    return()=>window.removeEventListener("message",onMessage)
+  }, [role,userEmail])
 
   useEffect(() => {
     let active = true
@@ -1292,14 +1337,12 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
     })
 
     if (requiresStepUp && !reauthenticatedPendingChange) {
-      window.sessionStorage.setItem(pendingAccessChangeKey, JSON.stringify({ ...accessEditor, expiresAt: Date.now() + 5 * 60_000 }))
+      const state=crypto.randomUUID()
+      window.sessionStorage.setItem(pendingAccessChangeKey, JSON.stringify({ ...accessEditor, expiresAt: Date.now() + 5 * 60_000,state }))
       setAccessConfirmationOpen(false)
-      try {
-        await signIn("microsoft-entra-id", { redirectTo: window.location.href }, { max_age: "0", prompt: "login" })
-      } catch {
-        window.sessionStorage.removeItem(pendingAccessChangeKey)
-        setManagementError("Microsoft reauthentication did not complete. No access change was saved.")
-      }
+      const popup=openEntraReauthentication(state,()=>{window.sessionStorage.removeItem(pendingAccessChangeKey);setManagementError("Microsoft reauthentication could not start. No access change was saved.")})
+      if(!popup){window.sessionStorage.removeItem(pendingAccessChangeKey);setManagementError("Allow the Microsoft verification popup to continue. No access change was saved.");return}
+      accessReauthenticationPopup.current=popup
       return
     }
     const saved = await saveManagedUserAccess({
@@ -1434,7 +1477,7 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
             </section>
             <section className="space-y-2 border-l-4 border-sky-500 bg-sky-50/80 p-3">
               <h3 className="text-sm font-semibold text-sky-950">Account operations</h3>
-              <div className="grid gap-2"><Button variant="outline" className="justify-start" onClick={()=>onLifecycle?.()}><CalendarClock className="size-4"/>Access lifecycle</Button></div>
+              <div className="grid gap-2"><Button variant="outline" className="justify-start" onClick={()=>onLifecycle?.()}><CalendarClock className="size-4"/>Access lifecycle</Button>{role==="admin"&&<Button variant="destructive" className="justify-start" onClick={onPreviewDataReset}><Trash2 className="size-4"/>Reset preview data</Button>}</div>
             </section>
           </div>
         </section>
@@ -1452,21 +1495,22 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
       </WindowSurface>}
       {!rightsOnly&&adminSection==="timesheets"&&<WindowSurface title="Timesheets" onBack={backAdminSection}>
         <section className="flex min-h-0 w-full flex-col gap-3 overflow-auto bg-white p-4 sm:p-6">
-          <header className="flex flex-wrap items-center justify-between gap-2 border-b border-green-200 bg-green-50 px-3 py-2"><div><h2 className="font-semibold text-green-950">Timesheet workbench</h2><p className="text-xs text-green-900">Create source entries, prepare and send approvals, then inspect or manually edit saved records.</p></div><div className="flex flex-wrap gap-2">{canCreateEntries&&<Button variant="outline" size="sm" onClick={onOpenEntryCapture}><Pencil className="size-4"/>Log time</Button>}<Button variant="outline" size="sm" onClick={onRefreshEntries}><Activity className="size-4"/>Refresh entries</Button></div></header>
-          {canManagePeriods&&<SubmissionDeadlineSettings/>}
-          <div className="min-h-0 flex-1 overflow-auto">
-            <details className="group rounded-md border border-orange-200 bg-orange-50/35">
-              <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 hover:bg-orange-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 [&::-webkit-details-marker]:hidden">
-                <CheckCircle2 className="size-4 shrink-0 text-orange-700" aria-hidden="true"/>
-                <span className="min-w-0 flex-1"><span className="block text-sm font-semibold text-orange-950">Review queue</span><span className="block text-[11px] text-orange-900">{pendingEntries.length} awaiting review · AI advice and confirmed decisions</span></span>
-                <ChevronRight className="size-4 shrink-0 text-orange-800 transition-transform group-open:rotate-90" aria-hidden="true"/>
-              </summary>
-              <section aria-label="Approval preparation" className="border-t border-orange-200 px-3 py-2"><h3 className="mb-1 text-sm font-semibold text-orange-950">Prepare and send for approval</h3><p className="mb-2 text-xs text-orange-900">AI suggestions are advisory. A person confirms every approval, rejection, or return.</p><ApprovalSelection entries={pendingEntries} email={userEmail} canReview={canReviewEntries} canAI={canAIReview} onUpdated={onApprovalUpdated}/></section>
-            </details>
-            <EntriesLog stateKey={`admin-timesheets:${userEmail.toLowerCase()}`} userEmail={userEmail} entries={entries} onUpdate={onEntryUpdate} onStatusChange={onEntryStatusChange} onDelete={onEntryDelete} onClear={onEntryClear} canEdit={canEditEntries} canDelete={canDeleteEntries} canClear={canClearEntries} canReview={canReviewEntries} canSubmit={canSubmitEntries} canSubmitOthers canExport={canExportEntries} periodView title="Raw timesheet entries" description="Source records with period archives, search, status, project and date filters, sorting, grouping, individual edits, and permission-based actions."/>
+          <header className="flex flex-wrap items-center justify-between gap-2 border-b border-green-200 bg-green-50 px-3 py-2"><div><h2 className="font-semibold text-green-950">Timesheet periods</h2><p className="text-xs text-green-900">Choose a period to open its raw timesheets, approval tools, and manual or AI-assisted workflows.</p></div><div className="flex flex-wrap gap-2">{canManagePeriods&&<Button variant="outline" size="sm" onClick={()=>setAdminTimesheetTool("periods")}><CalendarClock className="size-4"/>Period settings</Button>}<Button variant="outline" size="sm" onClick={onRefreshEntries}><Activity className="size-4"/>Refresh</Button></div></header>
+          <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[minmax(15rem,0.72fr)_minmax(0,1.28fr)]">
+            <nav aria-label="Timesheet periods" className="min-h-0 overflow-auto rounded-lg border border-sky-200 bg-sky-50/40 p-2">
+              <h3 className="px-2 py-1 text-xs font-semibold uppercase text-sky-950">Period archive</h3>
+              {adminPeriodsLoading?<p role="status" className="px-2 py-3 text-sm text-slate-600">Loading periods…</p>:adminPeriodsError?<p role="alert" className="px-2 py-3 text-sm text-red-800">{adminPeriodsError}</p>:<div className="mt-1 space-y-1">
+                <button type="button" onClick={()=>{setAdminPeriodSelection("all");setAdminTimesheetTool("entries")}} className="flex w-full items-center justify-between rounded-md border-l-2 border-blue-400 bg-white px-2.5 py-2 text-left hover:bg-blue-50"><span><span className="block text-sm font-semibold text-blue-950">All periods</span><span className="text-[11px] text-slate-600">Every saved source entry</span></span><span className="text-xs tabular-nums text-blue-900">{entries.length}</span></button>
+                {[...adminPeriods].sort((a,b)=>b.startDate.localeCompare(a.startDate)).map(period=>{const today=new Date().toISOString().slice(0,10);const current=period.startDate<=today&&period.endDate>=today;const upcoming=period.startDate>today;const count=entries.filter(entry=>entry.date>=period.startDate&&entry.date<=period.endDate).length;return <button key={period.id} type="button" onClick={()=>{setAdminPeriodSelection(period.id);setAdminTimesheetTool("entries")}} className={`flex w-full items-center justify-between gap-3 rounded-md border-l-2 px-2.5 py-2 text-left transition ${current?"border-emerald-500 bg-emerald-50 hover:bg-emerald-100":upcoming?"border-sky-400 bg-white hover:bg-sky-50":"border-orange-400 bg-white hover:bg-orange-50"}`}><span className="min-w-0"><span className="block truncate text-sm font-semibold text-slate-950">{period.name}{current?" · Current":upcoming?" · Upcoming":" · Archived"}</span><span className="block text-[11px] text-slate-600">{period.startDate} – {period.endDate}</span></span><span className="shrink-0 text-xs tabular-nums text-slate-700">{count} {count===1?"sheet":"sheets"}</span></button>})}
+                {!adminPeriods.length&&<p className="px-2 py-3 text-xs text-slate-600">No periods configured. All saved timesheets remain available above.</p>}
+              </div>}
+            </nav>
+            <section className="flex min-h-40 flex-col justify-center rounded-lg border border-orange-200 bg-gradient-to-br from-orange-50/70 via-white to-sky-50 p-4"><h3 className="text-sm font-semibold text-orange-950">Select a period</h3><p className="mt-1 max-w-xl text-sm text-slate-700">Each period opens a focused raw-timesheets workspace. The current period starts empty and receives entries as people log time; past periods remain archived and can be reviewed without mixing them into the active view.</p></section>
           </div>
         </section>
       </WindowSurface>}
+      {!rightsOnly&&adminTimesheetTool==="periods"&&<WindowSurface title="Timesheet period settings" onBack={()=>setAdminTimesheetTool(null)}><section className="min-h-0 w-full overflow-auto bg-white p-4 sm:p-6"><header className="mb-4 border-l-4 border-orange-500 bg-orange-50 px-3 py-2"><h2 className="font-semibold text-orange-950">Timesheet periods and submission windows</h2><p className="text-xs text-orange-900">Create a new period or edit and save an existing window. When a period's dates take effect, it becomes the current empty timesheet view for everyone; prior periods remain available in Timesheets archives.</p></header><SubmissionDeadlineSettings defaultOpen/></section></WindowSurface>}
+      {!rightsOnly&&adminTimesheetTool==="entries"&&<WindowSurface title="Timesheet view" onBack={()=>setAdminTimesheetTool(null)}><section className="flex min-h-0 w-full flex-col gap-3 overflow-auto bg-white p-4 sm:p-6"><header className="flex flex-wrap items-center justify-between gap-2 border-b border-green-200 bg-green-50 px-3 py-2"><div><h2 className="font-semibold text-green-950">Raw timesheet entries</h2><p className="text-xs text-green-900">Source records with period archives, search, status, project and date filters, sorting, grouping, individual edits, and permission-based actions.</p></div><div className="flex flex-wrap gap-2">{canCreateEntries&&<Button variant="outline" size="sm" onClick={onOpenEntryCapture}><Pencil className="size-4"/>Log time</Button>}<Button variant="outline" size="sm" onClick={onRefreshEntries}><Activity className="size-4"/>Refresh entries</Button></div></header><details className="group rounded-md border border-orange-200 bg-orange-50/35"><summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 hover:bg-orange-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 [&::-webkit-details-marker]:hidden"><CheckCircle2 className="size-4 shrink-0 text-orange-700" aria-hidden="true"/><span className="min-w-0 flex-1"><span className="block text-sm font-semibold text-orange-950">Review queue</span><span className="block text-[11px] text-orange-900">{pendingEntries.length} awaiting review · AI advice and confirmed decisions</span></span><ChevronRight className="size-4 shrink-0 text-orange-800 transition-transform group-open:rotate-90" aria-hidden="true"/></summary><section aria-label="Approval preparation" className="border-t border-orange-200 px-3 py-2"><h3 className="mb-1 text-sm font-semibold text-orange-950">Prepare and send for approval</h3><p className="mb-2 text-xs text-orange-900">AI suggestions are advisory. A person confirms every approval, rejection, or return.</p><ApprovalSelection entries={pendingEntries} email={userEmail} canReview={canReviewEntries} canAI={canAIReview} onUpdated={onApprovalUpdated}/></section></details><EntriesLog stateKey={`admin-timesheets:${userEmail.toLowerCase()}`} userEmail={userEmail} entries={entries} onUpdate={onEntryUpdate} onStatusChange={onEntryStatusChange} onDelete={onEntryDelete} onClear={onEntryClear} canEdit={canEditEntries} canDelete={canDeleteEntries} canClear={canClearEntries} canReview={canReviewEntries} canSubmit={canSubmitEntries} canSubmitOthers canExport={canExportEntries} periodView initialPeriodSelection={adminPeriodSelection} title="Raw timesheet entries" description="Source records with period archives, search, status, project and date filters, sorting, grouping, individual edits, and permission-based actions."/></section></WindowSurface>}
       {!rightsOnly&&adminReportOpen&&<WindowSurface title="Analytics reports" onBack={()=>setAdminReportOpen(false)}><section className="min-h-0 w-full overflow-auto bg-white p-4 sm:p-6">{reportContent}</section></WindowSurface>}
       {!rightsOnly&&assistantRunsOpen&&<WindowSurface title="AI workflow activity" onBack={()=>setAssistantRunsOpen(false)}><AssistantRunReport/></WindowSurface>}
       {directoryOpen&&<WindowSurface title={rightsOnly?"Manage employees/contractors":"User directory"} onBack={()=>setDirectoryOpen(false)}>

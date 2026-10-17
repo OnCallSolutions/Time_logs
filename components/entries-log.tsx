@@ -130,6 +130,7 @@ export function EntriesLog({
   canSubmit = false,
   canSubmitOthers = false,
   periodView = false,
+  initialPeriodSelection,
   description = "Review your saved entries.",
   entries,
   onUpdate,
@@ -152,6 +153,7 @@ export function EntriesLog({
   canSubmit?: boolean
   canSubmitOthers?: boolean
   periodView?: boolean
+  initialPeriodSelection?: string
   description?: string
   entries: TimeEntry[]
   onUpdate: EntryMutation
@@ -175,6 +177,7 @@ export function EntriesLog({
   const [submissionDeadline,setSubmissionDeadline]=useState<string|null>(null)
   const [periods,setPeriods]=useState<Array<{id:string;name:string;startDate:string;endDate:string;submissionDeadline:string;managerGraceDays:number}>>([])
   const [periodSelection,setPeriodSelection]=useRetainedViewState(stateKey?`${stateKey}:period`:undefined,`current`)
+  useEffect(()=>{if(initialPeriodSelection)setPeriodSelection(initialPeriodSelection)},[initialPeriodSelection,setPeriodSelection])
   const [periodsLoaded,setPeriodsLoaded]=useState(false)
   const [deadlineLoaded,setDeadlineLoaded]=useState(false)
   useEffect(()=>{if(!canReview)setReview(null)},[canReview])

@@ -271,9 +271,9 @@ export function ManagerReport({ entries, stateKey }: { entries: TimeEntry[]; sta
               <button type="button" aria-pressed={viewBy === "summary"} onClick={() => setViewBy("summary")} className={`inline-flex h-7 items-center gap-1.5 rounded px-2.5 text-xs font-medium ${viewBy === "summary" ? "bg-sky-700 text-white" : "text-slate-700 hover:bg-sky-50"}`}><LayoutGrid className="size-3.5" /> Summary</button>
               <button type="button" aria-pressed={viewBy === "entries"} onClick={() => setViewBy("entries")} className={`inline-flex h-7 items-center gap-1.5 rounded px-2.5 text-xs font-medium ${viewBy === "entries" ? "bg-orange-600 text-white" : "text-slate-700 hover:bg-orange-50"}`}><List className="size-3.5" /> Entries</button>
             </div>
-            <details className="group relative ml-1">
+            <details className="group relative z-20 ml-1">
               <summary className="flex h-8 cursor-pointer list-none items-center rounded-md border border-sky-200 bg-white px-2 text-xs font-medium text-sky-950 hover:bg-sky-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 [&::-webkit-details-marker]:hidden"><SlidersHorizontal className="mr-1.5 size-3.5"/>Group and sort<ChevronDown className="ml-2 size-3.5 transition-transform group-open:rotate-180"/></summary>
-              <div className="absolute left-0 z-10 mt-1 flex flex-wrap items-end gap-2 rounded-md border border-sky-200 bg-white p-3 shadow-lg">
+              <div className="absolute left-0 z-50 mt-1 flex min-w-56 flex-wrap items-end gap-2 rounded-md border border-sky-200 bg-white p-3 shadow-lg">
             <label className="flex items-center gap-1.5 text-xs text-slate-600" htmlFor="report-group">Group
               <select id="report-group" aria-label="Group by" className={selectCls} value={groupBy} onChange={(event) => setGroupBy(event.target.value as typeof groupBy)}>
                 <option value="contractor">Contractor</option><option value="project">Project</option><option value="date">Date</option><option value="month">Month</option><option value="status">Status</option>

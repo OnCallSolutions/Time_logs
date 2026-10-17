@@ -1,7 +1,7 @@
 "use client"
 import { createContext,useContext,type ReactNode } from "react"
 
-type WindowAssistantRenderer=(workspace:string,onClose:()=>void)=>ReactNode
+type WindowAssistantRenderer=(workspace:string,onClose:()=>void,onPreferredHeight?:(height:number)=>void)=>ReactNode
 const WindowAssistantContext=createContext<WindowAssistantRenderer|null>(null)
 
 /** Provides the signed-in application's renderer to independent window surfaces. */

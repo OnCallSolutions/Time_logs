@@ -28,6 +28,9 @@ async function ensureRequests(): Promise<void> {
   })
 }
 
+/** Ensures the review-request grants exist before an authorized preview reset. */
+export function ensureReviewRequestStorage():Promise<void>{return ensureRequests()}
+
 /**
  * Reads only the caller's requests whose evidence is still submitted and unchanged.
  * @param email - Authenticated recipient; sender authority is rechecked by the caller.

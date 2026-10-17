@@ -13,6 +13,7 @@ import { canReviewRole } from "@/lib/review-policy"
 import { createReviewAccess } from "@/lib/review-access"
 import { listAccountIdentities } from "@/lib/account-identities"
 import { ensureAccountHandoffStorage } from "@/lib/account-handoffs"
+import { isAppSessionFresh } from "@/lib/app-sessions"
 import { getAuditContext } from "@/lib/audit"
 import {
   clearTimeEntries,
@@ -56,6 +57,7 @@ async function getAccess() {
 
   return {
     email,
+    appSessionId:session?.appSessionId,
     role,
     includeAll: role==="manager"||permissions.view_team||(role==="account_manager"&&permissions.view_manager_entries),
     permissions,
@@ -155,6 +157,7 @@ export async function DELETE(req: Request) {
     if (!access.permissions.delete_entries) return Response.json({error:"Forbidden."},{status:403})
     const input=z.object({scope:z.enum(["own_entries","all_entries"]).default("own_entries")}).strict().parse(await req.json().catch(()=>({})))
     if(input.scope==="all_entries"&&(access.role!=="admin"||!access.permissions.view_team))return Response.json({error:"Only an administrator can clear all organization timesheets."},{status:403})
+    if(input.scope==="all_entries"&&(!access.appSessionId||!await isAppSessionFresh(access.appSessionId,access.email)))return Response.json({error:"Reauthenticate with Microsoft before clearing organization timesheets.",requiresReauthentication:true},{status:428})
     if(access.role==="manager"&&access.includeAll)return Response.json({error:"Managers must use individual authorized entry controls; hidden records cannot be bulk-cleared."},{status:403})
     if(input.scope==="all_entries")await ensureAccountHandoffStorage()
     const deletedCount=await clearTimeEntries(access.email,input.scope==="all_entries")

@@ -7,6 +7,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { signIn } from "next-auth/react"
 import { TimesheetApp } from "@/components/timesheet-app"
 import { resolvePermissions } from "@/lib/permissions"
 
@@ -137,6 +138,7 @@ function mockTimesheetFetch() {
     if (url === "/tanovo-time/api/entries") {
       return jsonResponse({ entries: [] })
     }
+    if (url === "/tanovo-time/api/timesheet-periods") return jsonResponse({ periods: [{ id: "period-october", name: "October 2026", startDate: "2026-10-01", endDate: "2026-10-31", submissionDeadline: "2026-11-02T17:00:00.000Z", managerGraceDays: 3, reminderDays: 3 }] })
 
     if (url === "/tanovo-time/api/users" && method === "GET") {
       return jsonResponse({ users: adminUsers })
@@ -221,6 +223,11 @@ describe("TimesheetApp admin directory", () => {
     fetchCalls.length = 0
     vi.restoreAllMocks()
     window.sessionStorage.clear()
+    vi.mocked(signIn).mockResolvedValue({ ok: true, error: "", code: "", status: 200, url: "/tanovo-time/api/auth/signin/microsoft-entra-id" })
+    vi.spyOn(window, "open").mockReturnValue({
+      location: { href: "about:blank" },
+      close: vi.fn(),
+    } as unknown as Window)
     mockTimesheetFetch()
   })
 
@@ -301,16 +308,26 @@ describe("TimesheetApp admin directory", () => {
     await user.click(within(reports).getByRole("button", { name: "Back" }))
     await user.click(within(screen.getByRole("navigation", { name: "Admin dashboard commands" })).getByRole("button", { name: "Timesheets" }))
     const timesheets = await screen.findByRole("dialog", { name: "Timesheets" })
-    expect(within(timesheets).getByRole("heading", { name: "Timesheet workbench" })).toBeVisible()
-    expect(within(timesheets).getByTestId("entries-log")).toBeInTheDocument()
-    expect(within(timesheets).getByRole("button", { name: "Log time" })).toBeVisible()
-    const reviewDisclosure = within(timesheets).getByText("Review queue")
+    expect(within(timesheets).getByRole("button", { name: /Period settings/ })).toBeVisible()
+    expect(within(timesheets).queryByTestId("entries-log")).not.toBeInTheDocument()
+    const periodIndex=within(timesheets).getByRole("navigation",{name:"Timesheet periods"})
+    await user.click(within(timesheets).getByRole("button", { name: /Period settings/ }))
+    const periodWindow = await screen.findByRole("dialog", { name: "Timesheet period settings" })
+    expect(within(periodWindow).getByRole("heading", { name: "Timesheet periods and submission windows" })).toBeVisible()
+    expect(within(periodWindow).getByRole("button",{name:"Create new period"})).toBeVisible()
+    await user.click(within(periodWindow).getByRole("button", { name: "Back" }))
+    await user.click(within(periodIndex).getByRole("button", { name: /October 2026/ }))
+    const entryWindow = await screen.findByRole("dialog", { name: "Timesheet view" })
+    expect(within(entryWindow).getByTestId("entries-log")).toBeInTheDocument()
+    expect(within(entryWindow).getByRole("button", { name: "Log time" })).toBeVisible()
+    const reviewDisclosure = within(entryWindow).getByText("Review queue")
     expect(reviewDisclosure).toBeVisible()
     expect(reviewDisclosure.closest("details")).not.toHaveProperty("open", true)
     await user.click(reviewDisclosure)
-    expect(within(timesheets).getByRole("heading", { name: "Prepare and send for approval" })).toBeVisible()
-    expect(within(timesheets).getByRole("button", { name: "AI suggestions" })).toBeVisible()
-    expect(within(timesheets).getByRole("button", { name: "Refresh entries" })).toBeVisible()
+    expect(within(entryWindow).getByRole("heading", { name: "Prepare and send for approval" })).toBeVisible()
+    expect(within(entryWindow).getByRole("button", { name: "AI suggestions" })).toBeVisible()
+    expect(within(entryWindow).getByRole("button", { name: "Refresh entries" })).toBeVisible()
+    await user.click(within(entryWindow).getByRole("button", { name: "Back" }))
     await user.click(within(timesheets).getByRole("button", { name: "Back" }))
     await user.click(within(screen.getByRole("navigation", { name: "Admin dashboard commands" })).getByRole("button", { name: "Reports" }))
     const reportsAgain = await screen.findByRole("dialog", { name: "Reports" })

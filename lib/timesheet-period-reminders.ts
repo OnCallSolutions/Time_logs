@@ -7,7 +7,7 @@ import { createDatabaseInitializer } from "@/lib/database-initializer"
 
 const sql=neon(process.env.DATABASE_URL!)
 const initialize=createDatabaseInitializer()
-async function ensureReminders(){
+export async function ensureReminders(){
   await ensureTimesheetPeriodsTable()
   await initialize(async()=>{
     await sql`CREATE TABLE IF NOT EXISTS timesheet_period_reminders(

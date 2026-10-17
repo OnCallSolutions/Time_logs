@@ -8,7 +8,7 @@ import { apiPath } from "@/lib/paths"
 import type { TimesheetPeriod } from "@/lib/db"
 
 /** Admin interface for dated work periods, reminder lead time, and manager grace. */
-export function SubmissionDeadlineSettings() {
+export function SubmissionDeadlineSettings({defaultOpen=false}:{defaultOpen?:boolean}) {
   const [periods,setPeriods]=useState<TimesheetPeriod[]>([])
   const [name,setName]=useState("")
   const [startDate,setStartDate]=useState("")
@@ -57,7 +57,7 @@ export function SubmissionDeadlineSettings() {
     setManagerGraceDays(period.managerGraceDays);setReminderDays(period.reminderDays);setReason("");setError("")
   }
 
-  return <details className="group rounded-md border border-red-200 bg-red-50/60">
+  return <details open={defaultOpen} className="group rounded-md border border-red-200 bg-red-50/60">
     <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 [&::-webkit-details-marker]:hidden">
       <CalendarClock className="size-4 shrink-0 text-red-700"/>
       <span className="min-w-0 flex-1"><span className="block text-sm font-semibold text-red-950">Timesheet periods and deadlines</span><span className="block text-[11px] text-red-900">{periods.length} configured · submission windows and reminders</span></span>
@@ -74,7 +74,7 @@ export function SubmissionDeadlineSettings() {
       <label className="grid gap-1 text-xs font-medium text-slate-700">Manager grace (days)<input aria-label="Manager grace days" type="number" min={0} max={30} value={managerGraceDays} onChange={event=>setManagerGraceDays(Number(event.target.value))} className="h-9 rounded-md border border-red-200 bg-white px-2 text-sm"/></label>
       <label className="grid gap-1 text-xs font-medium text-slate-700">Reminder lead (days)<input aria-label="Reminder lead days" type="number" min={1} max={30} value={reminderDays} onChange={event=>setReminderDays(Number(event.target.value))} className="h-9 rounded-md border border-red-200 bg-white px-2 text-sm"/></label>
       {editingId&&<label className="grid gap-1 text-xs font-medium text-slate-700 sm:col-span-2">Reason for changing this period<input aria-label="Period change reason" value={reason} onChange={event=>setReason(event.target.value)} minLength={5} maxLength={500} placeholder="Explain the deadline or window override" className="h-9 rounded-md border border-orange-200 bg-white px-2 text-sm"/></label>}
-      <div className="flex items-end gap-2">{editingId&&<Button variant="ghost" onClick={()=>{setEditingId(null);setName("");setStartDate("");setEndDate("");setDeadline("");setReason("")}}>Cancel edit</Button>}<Button variant="outline" disabled={loading||saving||!name.trim()||!startDate||!endDate||!deadline||(!!editingId&&reason.trim().length<5)} onClick={()=>setConfirming(true)}><Save className="size-4"/>{editingId?"Save changes":"Create period"}</Button></div>
+      <div className="flex items-end gap-2">{editingId&&<Button variant="ghost" onClick={()=>{setEditingId(null);setName("");setStartDate("");setEndDate("");setDeadline("");setReason("")}}>Cancel edit</Button>}<Button variant="outline" disabled={loading||saving||!name.trim()||!startDate||!endDate||!deadline||(!!editingId&&reason.trim().length<5)} onClick={()=>setConfirming(true)}><Save className="size-4"/>{editingId?"Save changes":"Create new period"}</Button></div>
     </div>
     {error&&<p role="alert" className="text-sm text-red-800">{error}</p>}{saved&&<p role="status" className="text-sm text-green-800">{saved}</p>}
     {confirming&&<WindowSurface title={editingId?"Confirm period change":"Confirm timesheet period"} compact resizable disabled={saving} onBack={()=>setConfirming(false)}><section className="w-full max-w-xl space-y-3 bg-white p-4 text-slate-950"><p className="text-sm">{editingId?"Update":"Create"} <strong>{name}</strong> for work dates {startDate} through {endDate}, with submissions due {new Date(deadline).toLocaleString()}?</p><p className="text-xs text-slate-600">Work dates cannot overlap another period. Reminders are sent {reminderDays} days before the deadline. Managers receive {managerGraceDays} additional days.</p>{editingId&&<p className="border-l-2 border-orange-500 bg-orange-50 px-3 py-2 text-sm">Reason: {reason}</p>}<div className="flex justify-end gap-2"><Button variant="outline" onClick={()=>setConfirming(false)}>Cancel</Button><Button disabled={saving} onClick={()=>void savePeriod()}>{saving?"Saving...":editingId?"Confirm changes":"Confirm period"}</Button></div></section></WindowSurface>}

@@ -61,7 +61,7 @@ export async function readAssistantRequest(request: Request, limit = 48_000): Pr
   return JSON.parse(Buffer.concat(chunks).toString("utf8"))
 }
 /** @returns Promise<void> after durable limits and one-use execution storage exist. */
-async function ensureAssistantStorage(): Promise<void> {
+export async function ensureAssistantStorage(): Promise<void> {
   const sql = neon(process.env.DATABASE_URL!)
   await ensureCompanyDirectory()
   await initialize(async () => {
