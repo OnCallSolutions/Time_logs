@@ -507,14 +507,14 @@ export function TimesheetApp({
    * @param parsed - Entries returned by the AI parser.
    * @returns A promise that resolves after entries are saved and local state updates.
    */
-  async function addParsed(parsed: ParsedEntry[]) {
+  async function addParsed(parsed: ParsedEntry[],periodId:string) {
     invalidateEntriesCache()
     pendingEntryWrites.current++;entryReadEpoch.current++
     try{
     const res = await fetch(apiPath("/api/entries"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ entries: parsed }),
+      body: JSON.stringify({ entries: parsed,periodId }),
     })
     const data = await res.json()
       if (!res.ok) throw new Error(`${data.error ?? "Failed to save entries."}${data.reference?` Reference: ${data.reference}`:""}`)
@@ -728,7 +728,7 @@ export function TimesheetApp({
       {canViewAdmin && technologyReports && <SecurityRiskWindow onClose={() => setTechnologyReports(false)} />}
 
       {workspaceWindow&&<WindowSurface title={workspaceWindow==="notes"?"Create timesheet entries":workspaceWindow==="overview"?"Workspace overview":"Workflow totals"} onBack={()=>setWorkspaceWindow(null)}><section className="flex min-h-0 w-full max-w-6xl flex-col bg-white"><div className="min-h-0 flex-1 overflow-auto p-4">
-      {workspaceWindow==="overview"?<RoleOverview role={role}/>:workspaceWindow==="notes"?<NoteInput onParsed={async parsed=>{await addParsed(parsed);setWorkspaceWindow(null);if(role!=="admin"||view!=="admin")openWorkspacePage(role==="manager"?"personal":"log")}}/>:<WorkflowOverview
+      {workspaceWindow==="overview"?<RoleOverview role={role}/>:workspaceWindow==="notes"?<NoteInput onParsed={async (parsed,periodId)=>{await addParsed(parsed,periodId);setWorkspaceWindow(null);if(role!=="admin"||view!=="admin")openWorkspacePage(role==="manager"?"personal":"log")}}/>:<WorkflowOverview
         approvedCount={approvedEntries.length}
         draftCount={draftEntries.length}
         pendingCount={pendingEntries.length}

@@ -10,11 +10,13 @@ vi.mock("@/lib/account-identities",()=>({listAccountIdentities:vi.fn(async()=>[]
 vi.mock("@/lib/collaboration",()=>({actorRoster:vi.fn(async()=>[])}))
 vi.mock("@/app/api/submission-managers/route",()=>({GET:vi.fn()}))
 vi.mock("@/lib/issues-store",()=>({listIssues:vi.fn(async()=>[])}))
+vi.mock("@/lib/db",()=>({listTimesheetPeriods:vi.fn()}))
 import { generateText } from "ai"
 import { listIssues } from "@/lib/issues-store"
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
-import { allowAssistantRequest,getAssistantConversation,readAssistantRequest,saveAssistantMessage,startAssistantRun,finishAssistantRun } from "@/lib/assistant-security"
+import { allowAssistantRequest,getAssistantConversation,readAssistantRequest,saveAssistantMessage,startAssistantRun,finishAssistantRun,signAssistantAction } from "@/lib/assistant-security"
+import { listTimesheetPeriods } from "@/lib/db"
 import { GET as readEntries } from "@/app/api/entries/route"
 import { GET as readMessages } from "@/app/api/messages/route"
 import { POST } from "./route"
@@ -61,4 +63,21 @@ it("loads persisted history and only submitted entries for the active approvals 
   expect(saveAssistantMessage).toHaveBeenNthCalledWith(2,"123e4567-e89b-42d3-a456-426614174000","manager@example.com","Approvals","assistant","One pending record.")
   expect(finishAssistantRun).toHaveBeenCalledWith("123e4567-e89b-42d3-a456-426614174001","manager@example.com",expect.objectContaining({status:"succeeded",responseChars:19,proposals:0}))
   expect(response.headers.get("cache-control")).toBe("no-store")
+})
+
+it("binds assistant-created time entries to the selected configured period",async()=>{
+  const period={id:"10000000-0000-4000-8000-000000000001",name:"October 2026",startDate:"2026-10-01",endDate:"2026-10-31"}
+  const action={kind:"create_entries",periodId:period.id,periodName:period.name,entries:[{contractor:"Manager",date:"2026-10-17",hours:2,project:"Project",description:"Work"}]}
+  vi.mocked(auth).mockResolvedValue({user:{email:"manager@example.com",name:"Manager"},appSessionId:"session"} as never)
+  vi.mocked(getEffectivePermissions).mockResolvedValue({role:"manager",permissions:{create_entries:true,submit_entries:false,delegate_permissions:false}} as never)
+  vi.mocked(listTimesheetPeriods).mockResolvedValue([period] as never)
+  vi.mocked(readAssistantRequest).mockResolvedValue({workspaceContext:"main",periodId:period.id,messages:[{role:"user",content:"Log two hours"}]})
+  vi.mocked(generateText).mockResolvedValue({output:{answer:"Ready to create.",actions:[action]}} as never)
+  vi.mocked(signAssistantAction).mockReturnValue("signed-token" as never)
+  const response=await POST(new Request("https://app.example/api/assistant",{method:"POST",headers:{origin:"https://app.example","content-type":"application/json"},body:"{}"}))
+  expect(response.status).toBe(200)
+  const data=await response.json()
+  expect(data.proposals).toEqual([{action,token:"signed-token"}])
+  const supplied=JSON.parse(vi.mocked(generateText).mock.calls[0][0].prompt as string)
+  expect(supplied.selectedTimesheetPeriod).toMatchObject(period)
 })

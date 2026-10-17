@@ -14,7 +14,7 @@ export const assistantEntrySchema = z.object({
 }).strict()
 export const assistantActionSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("navigate"), destination: z.enum(["log", "approvals", "report", "admin", "permissions", "accounts", "messages"]) }).strict(),
-  z.object({ kind: z.literal("create_entries"), entries: z.array(assistantEntrySchema).min(1).max(30) }).strict(),
+  z.object({ kind: z.literal("create_entries"), periodId:z.string().uuid(), periodName:z.string().trim().min(2).max(100), entries: z.array(assistantEntrySchema).min(1).max(30) }).strict(),
   z.object({ kind: z.literal("edit_entry"), id: z.string().uuid(), expectedRevision: z.string().min(1).max(100),
     fields: z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), hours: z.number().positive().max(24).optional(),
       project: z.string().trim().min(1).max(160).optional(), description: z.string().max(2000).optional() }).strict().refine(value=>Object.keys(value).length>0) }).strict(),
@@ -34,6 +34,7 @@ export const assistantInputSchema = z.object({
   workspaceContext: z.string().trim().min(1).max(100).regex(/^[a-zA-Z0-9][a-zA-Z0-9 _.-]*$/).default("main"),
   handoffContext: z.string().max(4000).optional(),
   messageContext: z.string().max(5000).optional(),
+  periodId:z.string().uuid().optional(),
 }).strict()
 
 /**

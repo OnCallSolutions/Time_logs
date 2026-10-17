@@ -12,8 +12,10 @@ it("rejects arbitrary code and extra action fields",()=>{
 })
 it("limits proposed entry batches and rejects invalid hours",()=>{
   const entry={contractor:"Ignored identity",date:"2026-10-16",hours:25,project:"P",description:""}
-  expect(assistantActionSchema.safeParse({kind:"create_entries",entries:[entry]}).success).toBe(false)
-  expect(assistantActionSchema.safeParse({kind:"create_entries",entries:Array.from({length:31},(_,index)=>({...entry,hours:1,description:String(index)}))}).success).toBe(false)
+  const period={periodId:"10000000-0000-4000-8000-000000000001",periodName:"October 2026"}
+  expect(assistantActionSchema.safeParse({kind:"create_entries",...period,entries:[entry]}).success).toBe(false)
+  expect(assistantActionSchema.safeParse({kind:"create_entries",...period,entries:Array.from({length:31},(_,index)=>({...entry,hours:1,description:String(index)}))}).success).toBe(false)
+  expect(assistantActionSchema.safeParse({kind:"create_entries",...period,entries:[{...entry,hours:1}]}).success).toBe(true)
 })
 it("uses live role rights to filter navigation and mutation proposals",()=>{
   const employee={role:"employee" as const,permissions:resolvePermissions("employee")}

@@ -16,6 +16,7 @@ import { GET as getEntries } from "@/app/api/entries/route"
 import { PATCH as updateMessage, DELETE as removeMessage } from "@/app/api/messages/route"
 import { PATCH as updateAdminRights, GET as readAdminDirectory } from "@/app/api/users/route"
 import { PATCH as updateDelegatedRights } from "@/app/api/delegation/route"
+import { listTimesheetPeriods } from "@/lib/db"
 
 /** @param request - Confirmation containing only an immutable signed token. @returns Promise<Response> with confirmed result or a safe retry instruction. */
 export async function POST(request: Request): Promise<Response> {
@@ -39,9 +40,11 @@ export async function POST(request: Request): Promise<Response> {
       return await updateEntry(new Request(request.url, { method: "PATCH", headers, body: JSON.stringify(body) }), { params: Promise.resolve({ id }) })
     }
     if (action.kind === "create_entries") {
+      const period=(await listTimesheetPeriods()).find(candidate=>candidate.id===action.periodId&&candidate.name===action.periodName)
+      if(!period||action.entries.some(entry=>entry.date<period.startDate||entry.date>period.endDate))return Response.json({error:"The proposed entries do not match the selected configured timesheet period. Ask for a fresh proposal."},{status:409})
       const identity = (await listAccountIdentities([email]))[0]
       const entries = action.entries.map(entry => ({ ...entry, contractor: identity?.officialName || session.user?.name || email }))
-      return await createEntries(new Request(request.url, { method: "POST", headers, body: JSON.stringify({ entries }) }))
+      return await createEntries(new Request(request.url, { method: "POST", headers, body: JSON.stringify({ entries,periodId:period.id }) }))
     }
     if(action.kind==="edit_entry"){
       const {kind,id,expectedRevision,fields}=action

@@ -8,9 +8,11 @@ vi.mock("@/lib/account-identities",()=>({listAccountIdentities:vi.fn(async()=>[]
 vi.mock("ai", () => ({ generateText: vi.fn(), Output: { object: vi.fn() } }))
 vi.mock("@/auth", () => ({ auth: vi.fn() }))
 vi.mock("@/lib/effective-permissions", () => ({ getEffectivePermissions: vi.fn() }))
+vi.mock("@/lib/db",()=>({listTimesheetPeriods:vi.fn()}))
 import { generateText } from "ai"
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
+import { listTimesheetPeriods } from "@/lib/db"
 import { resolvePermissions } from "@/lib/permissions"
 import { POST } from "./route"
 
@@ -18,21 +20,30 @@ beforeEach(() => {
   vi.resetAllMocks()
   vi.mocked(auth).mockResolvedValue({ user: { email: "own@example.com", name: "Own Person" } } as never)
   vi.mocked(getEffectivePermissions).mockResolvedValue({ role: "contractor", permissions: resolvePermissions("contractor") })
+  vi.mocked(listTimesheetPeriods).mockResolvedValue([{id:"10000000-0000-4000-8000-000000000001",name:"October 2026",startDate:"2026-10-01",endDate:"2026-10-31"}] as never)
 })
 
 it("preserves twelve distinct work units and binds every personal result to the session", async () => {
   const entries = Array.from({ length: 12 }, (_, index) => ({ contractor: "Untrusted Name", date: "2026-10-15", project: "Same Project", hours: 0.5, description: `Task ${index + 1}` }))
   vi.mocked(generateText).mockResolvedValue({ output: { entries } } as never)
-  const response = await POST(new Request("http://localhost/api/parse", { method: "POST", body: JSON.stringify({ notes: entries.map(entry => entry.description).join("\n") }) }))
+  const response = await POST(new Request("http://localhost/api/parse", { method: "POST", body: JSON.stringify({ notes: entries.map(entry => entry.description).join("\n"),periodId:"10000000-0000-4000-8000-000000000001" }) }))
   const result = await response.json()
   expect(result.entries).toHaveLength(12)
   expect(result.entries.every((entry: { contractor: string }) => entry.contractor === "Own Person")).toBe(true)
   expect(new Set(result.entries.map((entry: { description: string }) => entry.description)).size).toBe(12)
   expect(vi.mocked(generateText).mock.calls[0][0].system).toContain("Never merge, deduplicate, sum, or truncate")
+  expect(vi.mocked(generateText).mock.calls[0][0].system).toContain("from 2026-10-01 through 2026-10-31")
 })
 
 it("refuses to extract display-only manager sample IDs",async()=>{
   const response=await POST(new Request("http://localhost/api/parse",{method:"POST",body:JSON.stringify({notes:"Sample Contractor A (ID: SAMPLE-CTR-001): 2 hours"})}))
   expect(response.status).toBe(400)
   expect(generateText).not.toHaveBeenCalled()
+})
+
+it("rejects AI dates outside the selected configured period before they can be saved",async()=>{
+  vi.mocked(generateText).mockResolvedValue({output:{entries:[{contractor:"Own Person",date:"2026-11-01",hours:2,project:"Project",description:"Work"}]}} as never)
+  const response=await POST(new Request("http://localhost/api/parse",{method:"POST",body:JSON.stringify({notes:"2 hours on October 31",periodId:"10000000-0000-4000-8000-000000000001"})}))
+  expect(response.status).toBe(422)
+  expect(generateText).toHaveBeenCalledOnce()
 })

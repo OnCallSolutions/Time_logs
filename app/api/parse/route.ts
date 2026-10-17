@@ -10,6 +10,7 @@ import { z } from "zod"
 import { listAccountIdentities } from "@/lib/account-identities"
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
+import { listTimesheetPeriods } from "@/lib/db"
 
 export const maxDuration = 30
 
@@ -58,7 +59,8 @@ export async function POST(req: Request) {
     const email = session?.user?.email
     if (!email || !(await getEffectivePermissions(email)).permissions.create_entries)
       return Response.json({error:"Forbidden."},{status:403})
-    const { notes } = (await req.json()) as { notes?: string }
+    const input=z.object({notes:z.string().trim().min(1),periodId:z.string().uuid()}).strict().parse(await req.json())
+    const {notes,periodId}=input
 
     if (!notes || !notes.trim()) {
       return Response.json({ error: "No notes provided." }, { status: 400 })
@@ -66,6 +68,8 @@ export async function POST(req: Request) {
     if (/SAMPLE-(?:CTR|EMP|MGR)-\d{3}/i.test(notes)) {
       return Response.json({ error: "Display-only synthetic samples cannot be extracted or submitted." }, { status: 400 })
     }
+    const period=(await listTimesheetPeriods()).find(candidate=>candidate.id===periodId)
+    if(!period)return Response.json({error:"Select a configured timesheet period before extracting entries."},{status:400})
 
     const today = new Date().toISOString().slice(0, 10)
 
@@ -77,17 +81,20 @@ export async function POST(req: Request) {
         "Notes may be messy, informal, list multiple contractors, span multiple dates, or mix projects. " +
         "Split a single note into multiple entries whenever the contractor, date, or project differs. " +
         "Keep separately listed tasks or time blocks as separate entries even when the person, date, and project match. Never merge, deduplicate, sum, or truncate those entries. " +
+        `The selected timesheet period is ${period.name}, from ${period.startDate} through ${period.endDate}. Every extracted work date must fall within this period; do not move or invent dates to force a match. ` +
         `The current date is ${today}. Resolve all relative dates against it. ` +
         "Never invent contractors or hours that are not implied by the text. If hours are ambiguous, make a reasonable best estimate.",
       prompt: `Extract the time entries from these notes:\n\n"""\n${notes}\n"""`,
     })
 
+    if(output.entries.some(entry=>entry.date<period.startDate||entry.date>period.endDate))return Response.json({error:`Some work dates are outside ${period.name} (${period.startDate}–${period.endDate}). Choose the correct period or correct the dates.`},{status:422})
     const access=await getEffectivePermissions(email)
     if(!access.role||!access.permissions.create_entries)return Response.json({error:"Extraction access changed. Please sign in again."},{status:403})
     const ownOnly=access.role==="contractor"||access.role==="employee"
     const identity=(await listAccountIdentities([email]))[0]
-    return Response.json({ entries: output.entries.map(entry=>ownOnly?{...entry,contractor:identity?.officialName||session?.user?.name?.trim()||email}:entry) })
+    return Response.json({ entries: output.entries.map(entry=>ownOnly?{...entry,contractor:identity?.officialName||session?.user?.name?.trim()||email}:entry),periodId:period.id })
   } catch (err) {
+    if(err instanceof z.ZodError||err instanceof SyntaxError)return Response.json({error:"Enter notes and select a valid configured timesheet period."},{status:400})
     const message = err instanceof Error ? err.message : String(err)
     console.error("[parse] AI extraction failed")
     const isAuth = /unauthenticat|api key|gateway/i.test(message)

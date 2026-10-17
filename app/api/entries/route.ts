@@ -19,6 +19,7 @@ import {
   clearTimeEntries,
   createTimeEntries,
   listTimeEntries,
+  listTimesheetPeriods,
   recordAuditEvent,
 } from "@/lib/db"
 
@@ -33,8 +34,9 @@ const entrySchema = z.object({
 })
 
 const createSchema = z.object({
+  periodId:z.string().uuid(),
   entries: z.array(entrySchema).min(1),
-})
+}).strict()
 
 /**
  * Reads the signed-in user's email and role-derived data visibility.
@@ -125,6 +127,9 @@ export async function POST(req: Request) {
     if (!access.permissions.create_entries) return Response.json({error:"Forbidden."},{status:403})
 
     const body = createSchema.parse(await req.json())
+    const period=(await listTimesheetPeriods()).find(candidate=>candidate.id===body.periodId)
+    if(!period)return Response.json({error:"Select a configured timesheet period before saving entries."},{status:400})
+    if(body.entries.some(entry=>entry.date<period.startDate||entry.date>period.endDate))return Response.json({error:`Every work date must fall within ${period.name} (${period.startDate}–${period.endDate}). No entries were saved.`},{status:422})
     const identity=(await listAccountIdentities([access.email]))[0]
     const auditContext = getAuditContext(req)
     const entries = await createTimeEntries(access.email, body.entries.map(entry=>identity?{...entry,contractor:identity.officialName}:entry),identity?.contractorNumber,auditContext)
