@@ -18,6 +18,15 @@ it("keeps multiple same-project work units as separate entries",()=>{
   expect(screen.getByText("Testing")).toBeVisible()
 })
 
+it("chains wheel scrolling to the page when the timesheet table reaches its bottom",()=>{
+  const {container}=render(<section style={{overflowY:"auto"}}><EntriesLog entries={[{id:"scroll",contractor:"Person",project:"Project",date:"2026-10-10",hours:2,description:"Work",status:"draft"}]} onUpdate={vi.fn()} onStatusChange={vi.fn()} onDelete={vi.fn()} onClear={vi.fn()}/></section>)
+  const parent=container.querySelector("section")!,tableScroller=screen.getByLabelText("Scrollable time entries")
+  Object.defineProperties(parent,{scrollHeight:{configurable:true,value:900},clientHeight:{configurable:true,value:400},scrollTop:{configurable:true,writable:true,value:0}})
+  Object.defineProperties(tableScroller,{scrollHeight:{configurable:true,value:600},clientHeight:{configurable:true,value:300},scrollTop:{configurable:true,writable:true,value:300}})
+  fireEvent.wheel(tableScroller,{deltaY:120})
+  expect(parent.scrollTop).toBe(120)
+})
+
 it("exposes filtered CSV export only when the caller has the explicit export right",()=>{
   const onUpdate=vi.fn(),onStatusChange=vi.fn(),onDelete=vi.fn(),onClear=vi.fn()
   const props={entries:[entry],onUpdate,onStatusChange,onDelete,onClear}

@@ -250,6 +250,18 @@ describe("TimesheetApp admin directory", () => {
     expect(directory).not.toHaveTextContent("@example.com")
   })
 
+  it("returns directly from an admin command to its originating landing page",async()=>{
+    const user=userEvent.setup()
+    render(<TimesheetApp role="admin" userEmail="admin@example.com" userName="Admin User"/>)
+    const commands=await screen.findByRole("navigation",{name:"Admin dashboard commands"})
+    await user.click(within(commands).getByRole("button",{name:"Admin"}))
+    const admin=await screen.findByRole("dialog",{name:"Admin"})
+    expect(screen.queryByRole("dialog",{name:"Admin dashboard"})).not.toBeInTheDocument()
+    await user.click(within(admin).getByRole("button",{name:"Back"}))
+    expect(screen.queryByRole("dialog",{name:"Admin"})).not.toBeInTheDocument()
+    expect(screen.getByRole("region",{name:"People and access"})).toBeVisible()
+  })
+
   it("shows colorful audit categories in a full-screen activity window and reveals sensitive metadata on selection", async () => {
     const user = userEvent.setup()
     render(<TimesheetApp role="admin" userEmail="admin@example.com" userName="Admin User" />)

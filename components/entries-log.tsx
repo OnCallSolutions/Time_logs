@@ -45,6 +45,30 @@ function entryGroupLabel(entry:TimeEntry,groupBy:string):string {
   return ""
 }
 
+/** Passes wheel movement to scrollable ancestors when the table reaches an edge. */
+function chainTimesheetWheel(event:React.WheelEvent<HTMLDivElement>):void{
+  const target=event.currentTarget
+  const unit=event.deltaMode===WheelEvent.DOM_DELTA_LINE?40:event.deltaMode===WheelEvent.DOM_DELTA_PAGE?target.clientHeight:1
+  const delta=event.deltaY*unit
+  if(!delta)return
+  const atTop=target.scrollTop<=0,atBottom=target.scrollTop+target.clientHeight>=target.scrollHeight-1
+  if(delta<0&&!atTop||delta>0&&!atBottom)return
+  const ancestors:HTMLElement[]=[]
+  for(let parent=target.parentElement;parent;parent=parent.parentElement){
+    if(/auto|scroll/.test(getComputedStyle(parent).overflowY)&&parent.scrollHeight>parent.clientHeight)ancestors.push(parent)
+  }
+  const documentScroller=document.scrollingElement
+  if(documentScroller instanceof HTMLElement&&!ancestors.includes(documentScroller))ancestors.push(documentScroller)
+  if(!ancestors.some(parent=>delta>0?parent.scrollTop+parent.clientHeight<parent.scrollHeight:parent.scrollTop>0))return
+  event.preventDefault()
+  let remaining=delta
+  for(const parent of ancestors){
+    if(remaining>0){const amount=Math.min(remaining,parent.scrollHeight-parent.clientHeight-parent.scrollTop);if(amount>0){parent.scrollTop+=amount;remaining-=amount}}
+    else{const amount=Math.min(-remaining,parent.scrollTop);if(amount>0){parent.scrollTop-=amount;remaining+=amount}}
+    if(Math.abs(remaining)<1)break
+  }
+}
+
 /**
  * Applies the selected sort while keeping each configured group contiguous.
  * @param a - First entry to compare.
@@ -338,7 +362,7 @@ export function EntriesLog({
           {canRequestReview&&onRequestReview&&<Button size="sm" variant="outline" disabled={!requestable.some(entry=>selectedIdSet.has(entry.id))||requestable.filter(entry=>selectedIdSet.has(entry.id)).length>50} onClick={()=>onRequestReview(requestable.filter(entry=>selectedIdSet.has(entry.id)))}>Request reviewer help ({requestable.filter(entry=>selectedIdSet.has(entry.id)).length})</Button>}
         </div>}
         {visibleEntries.length === 0 && <p role="status" className="p-4 text-sm text-muted-foreground">{periodView&&periodsLoaded&&periods.length>0&&periodSelection==="current"&&!activePeriod?"No timesheet period is active today. Select an archived or upcoming period to retrieve entries.":periodView&&periodsLoaded&&periods.length===0?"No saved timesheets match the current filters.":"No matching entries."}</p>}
-        <div tabIndex={0} aria-label="Scrollable time entries" className="max-h-[calc(100dvh-14rem)] min-h-48 overflow-auto overscroll-contain">
+        <div tabIndex={0} aria-label="Scrollable time entries" onWheel={chainTimesheetWheel} className="max-h-[calc(100dvh-14rem)] min-h-48 overflow-auto overscroll-y-auto">
         <table className="w-full min-w-[1080px] border-collapse text-left">
           <thead className="sticky top-0 z-[1] bg-sky-100">
             <tr className="border-b border-sky-300 text-xs uppercase tracking-wide text-sky-950">
