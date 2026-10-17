@@ -4,6 +4,7 @@
  */
 import { expect,it } from "vitest"
 import { canReviewRole } from "./review-policy"
+import { resolvePermissions } from "./permissions"
 it("routes manager work only to account managers",()=>{
   expect(canReviewRole("manager","manager")).toBe(false)
   expect(canReviewRole("admin","manager")).toBe(false)
@@ -11,6 +12,7 @@ it("routes manager work only to account managers",()=>{
 })
 it("keeps account managers outside contractor operational review",()=>{
   expect(canReviewRole("account_manager","contractor")).toBe(false)
+  expect(canReviewRole("account_manager","contractor",resolvePermissions("account_manager"))).toBe(true)
   expect(canReviewRole("manager","contractor")).toBe(true)
   expect(canReviewRole("admin",null)).toBe(false)
 })

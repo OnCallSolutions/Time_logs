@@ -26,6 +26,14 @@ it("requires both explicit rights for manager-personal assistance",()=>{
   expect(directReviewAccess(entry,"helper@example.com",{role:"manager",permissions:resolvePermissions("manager",{view_manager_entries:true})},"manager")).toEqual({visible:true,reviewable:false})
   expect(directReviewAccess(entry,"helper@example.com",{role:"manager",permissions:resolvePermissions("manager",{view_manager_entries:true,review_manager_entries:true})},"manager").reviewable).toBe(true)
 })
+it("lets an account manager review only assigned submitted workforce timesheets",()=>{
+  const assigned={...entry,reviewManagerEmail:"accounts@example.com"}
+  const rights=resolvePermissions("account_manager")
+  expect(directReviewAccess(assigned,"accounts@example.com",{role:"account_manager",permissions:rights},"contractor")).toEqual({visible:true,reviewable:true})
+  expect(directReviewAccess(assigned,"accounts@example.com",{role:"account_manager",permissions:rights},"employee").reviewable).toBe(true)
+  expect(directReviewAccess(entry,"accounts@example.com",{role:"account_manager",permissions:rights},"contractor")).toEqual({visible:false,reviewable:false})
+  expect(directReviewAccess(assigned,"accounts@example.com",{role:"account_manager",permissions:resolvePermissions("account_manager",{review_entries:false})},"contractor")).toEqual({visible:false,reviewable:false})
+})
 it("never permits self-review despite every cross-manager right",()=>{
   expect(directReviewAccess(entry,"owner@example.com",{role:"manager",permissions:resolvePermissions("manager",{view_manager_entries:true,review_manager_entries:true,view_other_manager_entries:true,review_other_manager_entries:true})},"manager")).toEqual({visible:true,reviewable:false})
 })

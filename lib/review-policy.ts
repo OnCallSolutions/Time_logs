@@ -1,6 +1,7 @@
 /**
  * Defines independent-review routing for operational and manager timesheets.
  * Manager-owned work is reviewed only by authorized account managers.
+ * Account managers can operationally review workforce entries only when enabled.
  * Ownership always uses authenticated email, never the displayed person name.
  */
 import type { UserRole } from "./types"
@@ -14,5 +15,6 @@ import type { Permissions } from "./permissions"
  */
 export function canReviewRole(reviewer:UserRole|null,owner:UserRole|null,permissions?:Permissions):boolean {
   if(!owner)return false
-  return owner==="manager"?(reviewer==="account_manager"||((reviewer==="manager"||reviewer==="admin")&&!!permissions?.view_manager_entries&&!!permissions?.review_manager_entries)):reviewer!=="account_manager"
+  return owner==="manager"?(reviewer==="account_manager"||((reviewer==="manager"||reviewer==="admin")&&!!permissions?.view_manager_entries&&!!permissions?.review_manager_entries)):
+    reviewer!=="account_manager"||!!permissions?.review_entries
 }

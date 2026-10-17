@@ -717,7 +717,8 @@ export function TimesheetApp({
           <Button variant="outline" onClick={()=>openWorkspacePage("admin","timesheets")}><Layers3 className="size-4"/>Timesheets</Button>
         </> : <>
           {role!=="account_manager"&&<Button variant="outline" onClick={()=>openWorkspacePage(role==="manager"&&permissions.view_team?"log":"personal")}><Layers3 className="size-4"/>Timesheets</Button>}
-          {(canReviewEntries||canAIReview||role==="account_manager")&&<Button variant="outline" onClick={()=>openWorkspacePage(role==="account_manager"?"accounts":"approvals")}><CheckCircle2 className="size-4"/>{role==="account_manager"?"Final timesheets":"Approvals"}</Button>}
+          {(canReviewEntries||canAIReview)&&<Button variant="outline" onClick={()=>openWorkspacePage("approvals")}><CheckCircle2 className="size-4"/>Approvals</Button>}
+          {role==="account_manager"&&permissions.view_accounts&&<Button variant="outline" onClick={()=>openWorkspacePage("accounts")}><ShieldCheck className="size-4"/>Final timesheets</Button>}
           <Button variant="outline" onClick={()=>openWorkspacePage(canViewTeamReports?"report":"my-report")}><BarChart3 className="size-4"/>{canViewTeamReports?"Reports":"My report"}</Button>
           {canViewAdmin&&<Button variant="outline" onClick={()=>openWorkspacePage("admin","admin")}><ShieldCheck className="size-4"/>Admin</Button>}
           {permissions.view_personal_reports&&role==="contractor"&&<Button variant="outline" onClick={()=>openWorkspacePage("activity")}><Activity className="size-4"/>Account activity</Button>}

@@ -100,6 +100,16 @@ it("permits an explicitly authorized account manager to review manager work",asy
   const response=await PATCH(new Request("http://localhost/api/entries/entry",{method:"PATCH",body:JSON.stringify({status:"approved"})}),{params:Promise.resolve({id:"entry"})})
   expect(response.status).toBe(200)
 })
+it("lets the assigned account manager approve employee work under their authenticated identity",async()=>{
+  vi.mocked(auth).mockResolvedValue({user:{email:"accounts@example.com"}} as never)
+  vi.mocked(getEffectivePermissions).mockResolvedValue({role:"account_manager",permissions:resolvePermissions("account_manager")})
+  vi.mocked(getEffectiveUserRole).mockResolvedValue("employee")
+  vi.mocked(getTimeEntry).mockResolvedValue({id:"entry",ownerEmail:"employee@example.com",reviewManagerEmail:"accounts@example.com",status:"submitted",revision:"original"} as never)
+  vi.mocked(approveAndForward).mockResolvedValue({id:"entry",ownerEmail:"employee@example.com",status:"approved"} as never)
+  const response=await PATCH(new Request("http://localhost/api/entries/entry",{method:"PATCH",body:JSON.stringify({status:"approved",expectedRevision:"original"})}),{params:Promise.resolve({id:"entry"})})
+  expect(response.status).toBe(200)
+  expect(approveAndForward).toHaveBeenCalledWith("entry","accounts@example.com","original","employee",expect.anything())
+})
 it("blocks self-approval even for a reviewer with team access",async()=>{
   const response=await PATCH(new Request("http://localhost/api/entries/entry",{method:"PATCH",body:JSON.stringify({status:"approved"})}),{params:Promise.resolve({id:"entry"})})
   expect(response.status).toBe(403)

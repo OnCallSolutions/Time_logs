@@ -21,3 +21,8 @@ it("allows account managers to control periods by default but not managers",()=>
   expect(resolvePermissions("account_manager",{manage_timesheet_periods:false}).manage_timesheet_periods).toBe(false)
   expect(resolvePermissions("manager").manage_timesheet_periods).toBe(false)
 })
+it("enables account-manager operational review by default and lets admins revoke it",()=>{
+  expect(resolvePermissions("account_manager").review_entries).toBe(true)
+  expect(resolvePermissions("account_manager",{review_entries:false}).review_entries).toBe(false)
+  expect(resolvePermissions("account_manager")).toMatchObject({create_entries:false,edit_entries:false,delete_entries:false,submit_entries:false})
+})

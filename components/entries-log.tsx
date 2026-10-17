@@ -218,6 +218,7 @@ export function EntriesLog({
   const todayDate=new Date()
   const today=[todayDate.getFullYear(),String(todayDate.getMonth()+1).padStart(2,"0"),String(todayDate.getDate()).padStart(2,"0")].join("-")
   const activePeriod=periods.find(period=>period.startDate<=today&&period.endDate>=today)
+  const selectedPeriod=periodSelection==="current"?activePeriod:periods.find(period=>period.id===periodSelection)
   const periodEntries=!periodView?entries:!periodsLoaded?[]:periods.length===0?entries:periodSelection==="current"?(activePeriod?entries.filter(entry=>entry.date>=activePeriod.startDate&&entry.date<=activePeriod.endDate):[]):periodSelection==="archived"?entries.filter(entry=>periods.some(period=>period.endDate<today&&entry.date>=period.startDate&&entry.date<=period.endDate)):periodSelection==="all"?entries:periodSelection==="unassigned"?entries.filter(entry=>!periods.some(period=>entry.date>=period.startDate&&entry.date<=period.endDate)):entries.filter(entry=>{const period=periods.find(candidate=>candidate.id===periodSelection);return !!period&&entry.date>=period.startDate&&entry.date<=period.endDate})
   const isEntrySubmissionOpen=(entry:TimeEntry,own:boolean)=>{
     if(periods.length){
@@ -229,8 +230,14 @@ export function EntriesLog({
     }
     return !submissionDeadline||now<Date.parse(submissionDeadline)
   }
-  const displayedDeadline=periods.find(period=>period.endDate>=new Date().toISOString().slice(0,10))?.submissionDeadline??submissionDeadline
+  const displayedDeadline=periods.length?(selectedPeriod?.submissionDeadline??null):submissionDeadline
   const submissionClosed=!!displayedDeadline&&Date.parse(displayedDeadline)<=now
+  const deadlineLabel=displayedDeadline?new Intl.DateTimeFormat(undefined,{year:"numeric",month:"short",day:"numeric",hour:"numeric",minute:"2-digit",timeZoneName:"short"}).format(new Date(displayedDeadline)):null
+  const deadlineMessage=displayedDeadline
+    ? `${selectedPeriod?`${selectedPeriod.name} · `:""}Submit by ${deadlineLabel}${submissionClosed?" · deadline passed":""}.`
+    : periods.length&&periodView&&(periodSelection==="all"||periodSelection==="archived"||periodSelection==="unassigned")
+      ? "Select a specific timesheet period to view its submission deadline."
+      : deadlineLoaded?"No submission deadline is configured for this period.":"Checking submission deadline..."
   const visibleEntries = periodEntries.filter(entry =>
     (status === "all" || entry.status === status) &&
     (project === "all" || entry.project === project) &&
@@ -251,7 +258,7 @@ export function EntriesLog({
   if (entries.length === 0) {
     return (
       <div className="border-y border-border bg-card/50">
-      {canSubmit&&<p role="status" className={`border-b px-4 py-2 text-xs ${submissionClosed?"border-red-200 bg-red-50 text-red-900":"border-orange-200 bg-orange-50/70 text-orange-950"}`}>{displayedDeadline?(submissionClosed?`Submission deadline passed: ${new Date(displayedDeadline).toLocaleString()}.`:`Timesheet submissions close ${new Date(displayedDeadline).toLocaleString()}.`):`${deadlineLoaded?"No organization submission deadline is configured; submissions remain open.":"Checking submission deadline..."}`}</p>}
+      {(canSubmit||periodView)&&<p role="status" className={`border-b px-4 py-2 text-xs ${submissionClosed?"border-red-200 bg-red-50 text-red-900":"border-orange-200 bg-orange-50/70 text-orange-950"}`}>{deadlineMessage}</p>}
       <div className="flex min-h-56 flex-col items-center justify-center px-6 py-10 text-center">
         <div className="mb-6 w-full max-w-3xl text-left">
           <h2 className="text-sm font-semibold">{title}</h2>
@@ -326,7 +333,7 @@ export function EntriesLog({
         </label>
         <span role="status" className="text-xs text-indigo-900">{!periodsLoaded?"Loading period history…":periods.length===0?"No periods are configured; showing all saved timesheets.":periodSelection==="current"&&!activePeriod?"No period is active today. Select an archived or upcoming period.":periodSelection==="archived"?"Archived entries remain stored and can be retrieved by period.":`Showing ${periodEntries.length} entries for ${periodSelection==="current"?activePeriod?.name??"the current period":periodSelection==="all"?"all periods":periodSelection==="unassigned"?"dates outside configured periods":periods.find(period=>period.id===periodSelection)?.name??"the selected period"}.`}</span>
       </div>}
-      {canSubmit&&<p role="status" className={`border-b px-3 py-1 text-[11px] ${submissionClosed?"border-red-200 bg-red-50 text-red-900":"border-orange-200 bg-orange-50/70 text-orange-950"}`}>{displayedDeadline?(submissionClosed?`Submission deadline passed: ${new Date(displayedDeadline).toLocaleString()}. Contact an administrator if you need an exception.`:`Submissions close ${new Date(displayedDeadline).toLocaleString()}.`):`${deadlineLoaded?"No organization submission deadline is configured; submissions remain open.":"Checking submission deadline..."}`}</p>}
+      {(canSubmit||periodView)&&<p role="status" className={`border-b px-3 py-1 text-[11px] ${submissionClosed?"border-red-200 bg-red-50 text-red-900":"border-orange-200 bg-orange-50/70 text-orange-950"}`}>{deadlineMessage}</p>}
 
       <div className="border-b border-sky-200 bg-sky-50/50 p-2">
         <div className="grid gap-1.5 sm:grid-cols-2 xl:grid-cols-4">

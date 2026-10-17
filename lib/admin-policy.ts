@@ -44,6 +44,7 @@ export function accessChangeRequiresStepUp(
     "view_accounts",
     "review_accounts",
     "ai_accounts",
+    "review_entries",
     "view_manager_entries",
     "review_manager_entries",
     "view_other_manager_entries",

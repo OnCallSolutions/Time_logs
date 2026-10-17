@@ -9,7 +9,7 @@ export const permissionLabels = {
   edit_entries: "Edit eligible entries",
   delete_entries: "Delete eligible entries",
   submit_entries: "Submit and recall entries",
-  review_entries: "Approve and reject entries",
+  review_entries: "Approve and reject assigned workforce entries",
   view_team: "View team entries",
   view_reports: "View team reports",
   export_entries: "Export visible timesheets",
@@ -46,19 +46,18 @@ export function resolvePermissions(role: UserRole | null, overrides: PermissionO
   const elevated = role === "admin" || role === "manager"
   const personal = role === "employee" || role === "contractor"
   const defaults: Permissions = {create_entries:!!role,edit_entries:!!role,delete_entries:!!role,
-    submit_entries:personal||role==="manager"||role==="admin",review_entries:elevated,view_team:elevated,view_reports:elevated,export_entries:elevated||role==="account_manager",ai_review:elevated,
+    submit_entries:personal||role==="manager"||role==="admin",review_entries:elevated||role==="account_manager",view_team:elevated,view_reports:elevated,export_entries:elevated||role==="account_manager",ai_review:elevated,
     delegate_permissions:elevated,send_messages:elevated,send_to_accounts:elevated,view_accounts:role==="admin",review_accounts:role==="admin",ai_accounts:role==="admin",review_manager_entries:false,view_manager_entries:role==="account_manager",view_other_manager_entries:false,review_other_manager_entries:false,request_review_help:elevated,accept_review_requests:role==="manager",authorize_payouts:false,manage_timesheet_periods:role==="admin"||role==="account_manager",view_personal_reports:!!role}
   for (const key of Object.keys(permissionLabels) as Permission[]) {
     if (role && typeof overrides[key] === "boolean") defaults[key] = overrides[key]!
   }
-  // Business-account actors cannot mutate timesheets or approve the operational review stage.
-  // Financial authorization will use separate, server-enforced permissions when implemented.
+  // Business-account actors cannot create or edit timesheets. Operational review
+  // is separately permission-gated so admins can disable the manager-review lane.
   if (role === "account_manager") {
     defaults.create_entries = false
     defaults.edit_entries = false
     defaults.delete_entries = false
     defaults.submit_entries = false
-    defaults.review_entries = false
     defaults.ai_review = false
     defaults.delegate_permissions = false
   }

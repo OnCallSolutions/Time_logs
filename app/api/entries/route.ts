@@ -61,7 +61,7 @@ async function getAccess() {
     email,
     appSessionId:session?.appSessionId,
     role,
-    includeAll: role==="manager"||permissions.view_team||(role==="account_manager"&&permissions.view_manager_entries),
+    includeAll: role==="manager"||permissions.view_team||(role==="account_manager"&&(permissions.view_manager_entries||permissions.review_entries)),
     permissions,
   }
 }

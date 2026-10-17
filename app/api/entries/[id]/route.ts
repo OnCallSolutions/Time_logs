@@ -69,7 +69,7 @@ async function getAccess() {
   return {
     email,
     role,
-    includeAll: role==="manager"||permissions.view_team||(role==="account_manager"&&permissions.view_manager_entries),
+    includeAll: role==="manager"||permissions.view_team||(role==="account_manager"&&(permissions.view_manager_entries||permissions.review_entries)),
     canReview: permissions.review_entries||permissions.review_manager_entries,
     permissions,
   }

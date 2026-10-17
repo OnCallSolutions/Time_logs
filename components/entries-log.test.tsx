@@ -87,6 +87,19 @@ it("shows only the active period by default and retrieves archived entries on re
   expect(screen.getByText("Archived work")).toBeVisible()
 })
 
+it("shows the exact submit-by deadline for the selected period",async()=>{
+  const periods=[
+    {id:"active",name:"Current Cycle",startDate:"2026-01-01",endDate:"2099-12-31",submissionDeadline:"2099-12-31T17:30:00.000Z",managerGraceDays:3},
+    {id:"archive",name:"January 2000",startDate:"2000-01-01",endDate:"2000-01-31",submissionDeadline:"2000-02-05T17:00:00.000Z",managerGraceDays:3},
+  ]
+  vi.stubGlobal("fetch",vi.fn().mockResolvedValue(new Response(JSON.stringify({periods}),{status:200,headers:{"Content-Type":"application/json"}})))
+  render(<EntriesLog periodView entries={[{id:"old",contractor:"Person",project:"Archive",date:"2000-01-12",hours:3,description:"Archived work",status:"approved"}]} onUpdate={vi.fn()} onStatusChange={vi.fn()} onDelete={vi.fn()} onClear={vi.fn()}/> )
+  expect(await screen.findByText(/Current Cycle · Submit by/)).toBeVisible()
+  await userEvent.selectOptions(screen.getByRole("combobox",{name:"Timesheet period"}),"archive")
+  expect(screen.getByText(/January 2000 · Submit by/)).toBeVisible()
+  expect(screen.getByText(/deadline passed/i)).toBeVisible()
+})
+
 it("requires a confirmation window before deleting an entry",async()=>{
   const onDelete=vi.fn()
   const user=userEvent.setup()

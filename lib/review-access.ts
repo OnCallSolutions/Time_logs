@@ -27,7 +27,10 @@ export function directReviewAccess(entry: TimeEntry, email: string, access: Revi
   const otherManager = !!entry.reviewManagerEmail && entry.reviewManagerEmail.toLowerCase() !== email.toLowerCase()
   let visible = !!rights.view_team
   if (role === "manager") visible = entry.status === "submitted" && (ownerRole === "manager" ? rights.view_manager_entries : (rights.view_team && (!otherManager || rights.view_other_manager_entries)))
-  if (role === "account_manager") visible = entry.status === "submitted" && ownerRole === "manager" && rights.view_manager_entries
+  if (role === "account_manager") visible = entry.status === "submitted" && (
+    (ownerRole === "manager" && rights.view_manager_entries) ||
+    ((ownerRole === "employee" || ownerRole === "contractor") && rights.review_entries && entry.reviewManagerEmail?.toLowerCase() === email.toLowerCase())
+  )
   const decisionRight = ownerRole === "manager" ? rights.review_manager_entries : rights.review_entries
   const laneRight = role !== "manager" || ownerRole === "manager" || !otherManager || rights.review_other_manager_entries
   return { visible, reviewable: visible && entry.status === "submitted" && decisionRight && laneRight && canReviewRole(role, ownerRole, rights) }
