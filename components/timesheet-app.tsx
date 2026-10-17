@@ -766,22 +766,22 @@ export function TimesheetApp({
 
       {view === "log" || view === "personal" ? (
         <>
-        {isPersonalEntriesView&&<section aria-label={`${personalStatusLabel} timesheet workspace`} className="mb-4 w-full border-b border-orange-200 bg-gradient-to-r from-orange-50 via-sky-50 to-emerald-50 p-4 sm:p-5">
-          <header className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200/80 pb-3">
-            <div><p className="text-xs font-semibold uppercase text-orange-800">{role==="contractor"?"Contractor timesheets":role==="manager"?"Manager personal timesheets":"Employee timesheets"}</p><h2 className="mt-1 text-lg font-semibold text-slate-950">{personalStatusLabel}</h2><p className="mt-1 text-sm text-slate-600">A dedicated view of your {personalStatusLabel.toLowerCase()} with entry details, submission controls, search, filters, and history.</p></div>
-            <div className="flex flex-wrap gap-2">
-              {permissions.create_entries&&<Button onClick={()=>setWorkspaceWindow("notes")}><Pencil className="size-4"/>{role==="contractor"?"Log project time":"Log time notes"}</Button>}
-              <Button variant="outline" onClick={()=>setEntriesRefresh(value=>value+1)}><Activity className="size-4"/>Refresh entries</Button>
+        {isPersonalEntriesView&&<section aria-label={`${personalStatusLabel} timesheet workspace`} className="mb-1 w-full border-b border-orange-200 bg-gradient-to-r from-orange-50 via-sky-50 to-emerald-50 px-2 py-2 sm:px-3">
+          <header className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 border-b border-slate-200/80 pb-2">
+            <div className="flex min-w-0 flex-wrap items-baseline gap-x-2"><p className="text-[10px] font-semibold uppercase text-orange-800">{role==="contractor"?"Contractor timesheets":role==="manager"?"Manager personal timesheets":"Employee timesheets"}</p><h2 className="text-base font-semibold text-slate-950">{personalStatusLabel}</h2><p className="text-[11px] text-slate-600">Your entries, submissions, search and history.</p></div>
+            <div className="flex flex-wrap gap-1.5">
+              {permissions.create_entries&&<Button className="h-7 px-2.5" size="sm" onClick={()=>setWorkspaceWindow("notes")}><Pencil className="size-3.5"/>{role==="contractor"?"Log project time":"Log time"}</Button>}
+              <Button className="h-7 px-2.5" size="sm" variant="outline" onClick={()=>setEntriesRefresh(value=>value+1)}><Activity className="size-3.5"/>Refresh</Button>
             </div>
           </header>
-          <div className="grid gap-2 py-3 sm:grid-cols-2 xl:grid-cols-4">
-            <div className="border-l-4 border-orange-500 bg-white/80 px-3 py-2"><p className="text-xs text-slate-600">Entries in view</p><p className="mt-1 text-lg font-semibold tabular-nums">{visibleOwnEntries.length}</p></div>
-            <div className="border-l-4 border-blue-500 bg-white/80 px-3 py-2"><p className="text-xs text-slate-600">Hours in view</p><p className="mt-1 text-lg font-semibold tabular-nums">{visibleOwnEntries.reduce((sum,entry)=>sum+Number(entry.hours||0),0).toLocaleString(undefined,{maximumFractionDigits:2})}h</p></div>
-            <div className="border-l-4 border-emerald-500 bg-white/80 px-3 py-2"><p className="text-xs text-slate-600">Projects</p><p className="mt-1 text-lg font-semibold tabular-nums">{new Set(visibleOwnEntries.map(entry=>entry.project)).size}</p></div>
-            <div className="border-l-4 border-violet-500 bg-white/80 px-3 py-2"><p className="text-xs text-slate-600">Latest work date</p><p className="mt-1 text-sm font-semibold">{visibleOwnEntries.map(entry=>entry.date).sort().at(-1)??"No entries yet"}</p></div>
+          <div className="grid grid-cols-2 gap-1 py-1.5 sm:grid-cols-4">
+            <div className="flex items-center justify-between gap-2 border-l-2 border-orange-500 bg-white/65 px-2 py-1"><p className="text-[10px] text-slate-600">Entries</p><p className="text-sm font-semibold tabular-nums">{visibleOwnEntries.length}</p></div>
+            <div className="flex items-center justify-between gap-2 border-l-2 border-blue-500 bg-white/65 px-2 py-1"><p className="text-[10px] text-slate-600">Hours</p><p className="text-sm font-semibold tabular-nums">{visibleOwnEntries.reduce((sum,entry)=>sum+Number(entry.hours||0),0).toLocaleString(undefined,{maximumFractionDigits:2})}h</p></div>
+            <div className="flex items-center justify-between gap-2 border-l-2 border-emerald-500 bg-white/65 px-2 py-1"><p className="text-[10px] text-slate-600">Projects</p><p className="text-sm font-semibold tabular-nums">{new Set(visibleOwnEntries.map(entry=>entry.project)).size}</p></div>
+            <div className="flex items-center justify-between gap-2 border-l-2 border-violet-500 bg-white/65 px-2 py-1"><p className="text-[10px] text-slate-600">Latest work</p><p className="truncate text-xs font-semibold">{visibleOwnEntries.map(entry=>entry.date).sort().at(-1)??"No entries"}</p></div>
           </div>
-          <nav aria-label="My timesheet views" className="flex flex-wrap gap-2">
-            {personalStatuses.map(([status,label])=><Button key={status} size="sm" variant={personalStatus===status?"default":"outline"} aria-pressed={personalStatus===status} onClick={()=>setPersonalStatus(status)}>{label}<span className="tabular-nums">{status==="all"?ownEntries.length:ownEntries.filter(entry=>entry.status===status).length}</span><ChevronRight className="size-3.5"/></Button>)}
+          <nav aria-label="My timesheet views" className="flex flex-wrap gap-1">
+            {personalStatuses.map(([status,label])=><Button key={status} className="h-7 gap-1 px-2 text-xs" size="sm" variant={personalStatus===status?"default":"outline"} aria-pressed={personalStatus===status} onClick={()=>setPersonalStatus(status)}>{label}<span className="tabular-nums">{status==="all"?ownEntries.length:ownEntries.filter(entry=>entry.status===status).length}</span></Button>)}
           </nav>
         </section>}
         <EntriesLog
