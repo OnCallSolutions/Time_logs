@@ -6,6 +6,7 @@
 "use client"
 import { useEffect,useState } from "react"
 import { Pencil, Save } from "lucide-react"
+import { AddPerson } from "./add-person"
 export { MessagesPanel } from "@/components/messages-panel"
 import { Button } from "@/components/ui/button"
 import { WindowSurface } from "@/components/window-surface"
@@ -53,7 +54,7 @@ function useRoster(enabled:boolean) {
  * @param props.permissions - Authenticated delegator's current effective rights.
  * @returns JSX.Element containing employee selection and explicit Edit/Save controls.
  */
-export function EmployeeRightsPanel({permissions}:{permissions:Permissions}) {
+export function EmployeeRightsPanel({permissions,admin=false}:{permissions:Permissions;admin?:boolean}) {
   const {users,error:rosterError,updateRights}=useRoster(permissions.delegate_permissions)
   const [email,setEmail]=useState("")
   const [editing,setEditing]=useState(false)
@@ -75,6 +76,7 @@ export function EmployeeRightsPanel({permissions}:{permissions:Permissions}) {
   }
   return <section aria-label="Manage employees/contractors" className="space-y-4">
     <h2 className="text-base font-semibold">Manage employees/contractors</h2>
+    <AddPerson admin={admin}/>
     {(error||rosterError)&&<p role="alert" className="text-sm text-destructive">{error||rosterError}</p>}
 <div className="max-h-[60dvh] overflow-auto overscroll-contain"><table className="w-full min-w-[600px] text-left text-sm"><thead className="sticky top-0 bg-white"><tr className="border-b"><th className="p-2">Actor</th><th className="p-2">Role</th><th className="p-2">Access</th><th className="p-2">Rights</th><th className="p-2 text-right">Actions</th></tr></thead><tbody>{users.map(user=><tr key={user.email} className="border-b"><td className="p-2"><p>{user.displayName||user.email}</p>{user.displayName&&<p className="text-xs text-muted-foreground">{user.email}</p>}</td><td className="p-2 capitalize">{user.role}</td><td className="p-2 capitalize">{user.accessStatus}</td><td className="p-2">{Object.values(user.permissions).filter(Boolean).length} allowed</td><td className="p-2 text-right">{(user.role==="employee"||user.role==="contractor")&&user.accessStatus==="active"?<Button variant="outline" size="sm" aria-label={`Edit rights for ${user.email}`} onClick={()=>{setEmail(user.email);setDraft({...user.permissions});setBaseline({...user.permissions});setError(null);setEditing(true)}}><Pencil className="size-3"/>Edit rights</Button>:<span className="text-xs text-muted-foreground">Admin managed</span>}</td></tr>)}</tbody></table></div>
     {selected&&editing&&<WindowSurface title="Edit employee/contractor rights" onBack={()=>setEditing(false)} disabled={saving}><section className="flex min-h-0 w-full max-w-4xl flex-col bg-white"><header className="border-b p-4"><h2 className="font-semibold">Edit employee/contractor rights</h2><p className="text-sm text-muted-foreground">{selected.email}</p></header><div className="min-h-0 flex-1 overflow-auto p-4">{error&&<p role="alert" className="mb-3 text-sm text-destructive">{error}</p>}<fieldset className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{(Object.entries(permissionLabels) as [Permission,string][]).filter(([key])=>delegablePermissions.includes(key)).map(([key,label])=><label key={key} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!draft[key]} disabled={saving||(!permissions[key]&&!draft[key])} onChange={event=>setDraft({...draft,[key]:event.target.checked})}/>{label}</label>)}</fieldset></div><footer className="flex shrink-0 justify-end gap-2 border-t p-4"><Button variant="outline" disabled={saving} onClick={()=>setEditing(false)}>Cancel</Button><Button disabled={saving} onClick={save}><Save className="size-4"/>{saving?"Saving...":"Save rights"}</Button></footer></section></WindowSurface>}

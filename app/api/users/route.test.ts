@@ -4,6 +4,7 @@
  * every known permission. Authorization and database writes use isolated mocks.
  */
 import { beforeEach, expect, it, vi } from "vitest"
+vi.mock("@/lib/account-identities",()=>({listAccountIdentities:vi.fn(async()=>[])}))
 
 vi.mock("@/auth", () => ({ auth: vi.fn() }))
 vi.mock("@/lib/access", () => ({ getEffectiveUserRole: vi.fn(), getConfiguredAccessUsers: vi.fn() }))

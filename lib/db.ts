@@ -8,6 +8,7 @@
 import "server-only"
 import { LastAdministratorError } from "@/lib/admin-policy"
 import { createDatabaseInitializer } from "@/lib/database-initializer"
+import type {AuditContext} from "@/lib/audit"
 
 import { neon } from "@neondatabase/serverless"
 import type { PermissionOverrides } from "@/lib/permissions"
@@ -28,6 +29,7 @@ if (!databaseUrl) {
 const sql = neon(databaseUrl)
 
 type TimeEntryRow = {
+  contractor_number?: string | null
   id: string
   updated_at?: string | Date
   owner_email?: string
@@ -119,6 +121,7 @@ type ManagedAccessUserRow = {
 }
 
 export type AuditAction =
+  | "message_history_recovered"
   | "entry_review_requested"
   | "account_timesheets_returned"
   | "account_eligibility_authorized"
@@ -191,6 +194,7 @@ function toTimeEntry(row: TimeEntryRow): TimeEntry {
     reviewManagerEmail: row.review_manager_email ?? null,
     payoutEligible: !!row.payout_eligible_at,
     contractor: row.contractor,
+    contractorNumber: row.contractor_number??undefined,
     date:
       row.work_date instanceof Date
         ? row.work_date.toISOString().slice(0, 10)
@@ -297,6 +301,7 @@ export function ensureTimeEntriesTable() {
     await sql`
       ALTER TABLE time_entries
       ADD COLUMN IF NOT EXISTS owner_email text,
+      ADD COLUMN IF NOT EXISTS contractor_number text,
       ADD COLUMN IF NOT EXISTS review_manager_email text,
       ADD COLUMN IF NOT EXISTS payout_eligible_at timestamptz,
       ADD COLUMN IF NOT EXISTS payout_eligible_by text
@@ -467,7 +472,7 @@ export async function getUserProfile(ownerEmail: string): Promise<UserProfile> {
   const rows = await sql`
     SELECT display_name, image_data_url
     FROM user_profiles
-    WHERE owner_email = ${ownerEmail}
+    WHERE lower(owner_email) = lower(${ownerEmail})
   `
   const row = (rows as UserProfileRow[])[0]
 
@@ -830,6 +835,7 @@ export async function listTimeEntries(ownerEmail: string, includeAll = false) {
     SELECT
       id,
       owner_email,
+      contractor_number,
       review_manager_email,
       payout_eligible_at,
       contractor,
@@ -843,7 +849,7 @@ export async function listTimeEntries(ownerEmail: string, includeAll = false) {
       review_note,
       updated_at::text AS updated_at
     FROM time_entries
-    WHERE ${includeAll} OR owner_email = ${ownerEmail}
+    WHERE ${includeAll} OR lower(owner_email) = lower(${ownerEmail})
     ORDER BY work_date DESC, created_at DESC
   `
 
@@ -859,11 +865,13 @@ export async function listTimeEntries(ownerEmail: string, includeAll = false) {
  *
  * @param ownerEmail - Email that should own the created entries.
  * @param entries - Parsed time entries to insert.
+ * @param contractorNumber - Server-resolved official number, never client-issued.
  * @returns Newly created time entries with database ids.
  */
 export async function createTimeEntries(
   ownerEmail: string,
   entries: ParsedEntry[],
+  contractorNumber?: string,
 ) {
   await ensureTimeEntriesTable()
 
@@ -881,7 +889,8 @@ export async function createTimeEntries(
         hours,
         project,
         description,
-        owner_email
+        owner_email,
+        contractor_number
       )
       VALUES (
         ${entry.contractor},
@@ -889,11 +898,13 @@ export async function createTimeEntries(
         ${entry.hours},
         ${entry.project || "General"},
         ${entry.description || ""},
-        ${ownerEmail}
+        ${ownerEmail},
+        ${contractorNumber??null}
       )
       RETURNING
         id,
         owner_email,
+        contractor_number,
       review_manager_email,
       payout_eligible_at,
         contractor,
@@ -936,6 +947,7 @@ export async function getTimeEntry(
     SELECT
       id,
       owner_email,
+      contractor_number,
       review_manager_email,
       payout_eligible_at,
       contractor,
@@ -950,7 +962,7 @@ export async function getTimeEntry(
       updated_at::text AS updated_at
     FROM time_entries
     WHERE id = ${id}
-      AND (${includeAll} OR owner_email = ${ownerEmail})
+      AND (${includeAll} OR lower(owner_email) = lower(${ownerEmail}))
   `
 
   const row = (rows as TimeEntryRow[])[0]
@@ -1019,7 +1031,7 @@ export async function updateTimeEntry(
       END,
       updated_at = now()
     WHERE id = ${id}
-      AND (${includeAll} OR owner_email = ${ownerEmail})
+      AND (${includeAll} OR lower(owner_email) = lower(${ownerEmail}))
       AND (${expectedRevision??null}::timestamptz IS NULL OR updated_at=${expectedRevision??null}::timestamptz)
       AND payout_eligible_at IS NULL
       AND (${patch.status ?? null} NOT IN ('approved', 'rejected') OR ${patch.status ?? null} IS NULL
@@ -1030,6 +1042,7 @@ export async function updateTimeEntry(
     RETURNING
       id,
       owner_email,
+      contractor_number,
       review_manager_email,
       payout_eligible_at,
       contractor,
@@ -1046,6 +1059,30 @@ export async function updateTimeEntry(
 
   const row = (rows as TimeEntryRow[])[0]
   return row ? toTimeEntry(row) : null
+}
+
+/**
+ * Rejects submitted evidence and writes its audit event in the same SQL statement.
+ * @param id - Authorized source timesheet identifier.
+ * @param actor - Independent authenticated reviewer, never the source owner.
+ * @param revision - Exact evidence revision loaded or explicitly confirmed by the UI.
+ * @param note - Required validated human rejection reason.
+ * @param context - Request audit metadata, never message plaintext or credentials.
+ * @returns Promise<TimeEntry|null> after both changes succeed, or null for stale evidence.
+ */
+export async function rejectSubmittedEntry(id:string,actor:string,revision:string,note:string,context:AuditContext):Promise<TimeEntry|null>{
+  await ensureTimeEntriesTable();await ensureAuditEventsTable()
+  const rows=await sql`WITH changed AS (
+    UPDATE time_entries SET status='rejected',review_note=${note},reviewed_by=${actor.toLowerCase()},reviewed_at=now(),updated_at=now()
+    WHERE id=${id}::uuid AND status='submitted' AND updated_at=${revision}::timestamptz
+      AND lower(owner_email)<>${actor.toLowerCase()} AND payout_eligible_at IS NULL RETURNING *
+  ), audited AS (
+    INSERT INTO audit_events(actor_email,action,target_type,target_id,metadata,ip_address,user_agent)
+    SELECT ${actor.toLowerCase()},'entry_rejected','time_entry',id::text,jsonb_build_object('fromStatus','submitted','toStatus','rejected'),${context.ipAddress},${context.userAgent}
+    FROM changed RETURNING target_id
+  ) SELECT id,owner_email,contractor_number,review_manager_email,payout_eligible_at,contractor,work_date,hours,project,description,status,reviewed_by,reviewed_at,review_note,updated_at::text AS updated_at
+    FROM changed WHERE EXISTS(SELECT 1 FROM audited)`
+  return rows.length?toTimeEntry(rows[0] as TimeEntryRow):null
 }
 
 /**

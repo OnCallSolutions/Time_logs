@@ -4,6 +4,15 @@ AI-assisted contractor time logging, manager review, and internal staff administ
 
 **AI prepares the work; people review and confirm decisions.** The application is served at `/tanovo-time`.
 
+See [Session Security](Documents/SESSION_SECURITY.md) for the approved 30-minute
+idle/8-hour maximum policy and [Review Reliability](Documents/REVIEW_STATUS_RELIABILITY.md)
+for confirmed status changes and the admin Operations grouping.
+
+Current identity/messaging work is described in
+[Official Identities](Documents/OFFICIAL_IDENTITIES.md) and
+[Message History and Recovery](Documents/MESSAGE_HISTORY_RECOVERY.md), including
+opt-in server-only recovery variables and legacy-history limitations.
+
 For current manager visibility rules, encrypted high-priority reviewer-help requests,
 automatic business-account forwarding, returns and payout eligibility, see
 [Reviewer Assistance](Documents/REVIEWER_ASSISTANCE.md). This describes the current
@@ -281,3 +290,5 @@ secret should be passed to AI.
 - For unavailable AI analysis, verify AI Gateway authentication. Manual review remains available.
 
 Contributions should include suitable regression tests and maintain multi-line Doxygen-style file/function documentation with parameters and return types. Follow [agent guidance](Documents/AGENTS.md) and installed Next.js guides when changing framework behavior.
+
+See [Company identifiers and assistant](Documents/COMPANY_IDENTIFIERS_AND_ASSISTANT.md) for the account reference scheme, external company employee IDs, tenant deployment boundary, assistant permissions, and security model.

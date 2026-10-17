@@ -25,7 +25,7 @@ it("keeps a draft while automatic connection is in progress",async()=>{
 it("never asks for a messaging password even in settings",async()=>{
   vi.mocked(useMessageEncryption).mockReturnValue({own:null,keys:[],plaintext:{},error:null,busy:false,loaded:true,unlocked:true,unlock:vi.fn(),encrypt:vi.fn(),lock:vi.fn(),retry:vi.fn()})
   render(<MessagesPanel canSend={false} inbox={inbox}/>);await userEvent.click(screen.getByRole("button",{name:"Message settings"}))
-  expect(screen.getByText("End-to-end encryption connected")).toBeVisible()
+  expect(screen.getByText("Messages connected")).toBeVisible()
   expect(screen.queryByLabelText(/passphrase|password/i)).not.toBeInTheDocument()
   expect(screen.queryByRole("button",{name:/set up encryption|unlock messages/i})).not.toBeInTheDocument()
 })

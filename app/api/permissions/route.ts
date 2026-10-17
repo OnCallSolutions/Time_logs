@@ -13,5 +13,5 @@ export async function GET(): Promise<Response> {
   const email = (await auth())?.user?.email
   if (!email) return Response.json({error:"Unauthorized."},{status:401})
   const access = await getEffectivePermissions(email)
-  return Response.json(access,{status:access.role ? 200 : 403,headers:{"Cache-Control":"no-store"}})
+  return Response.json(access,{status:access.role ? 200 : 403,headers:{"Cache-Control":"private, no-store, max-age=0","Vary":"Cookie"}})
 }

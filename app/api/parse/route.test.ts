@@ -4,6 +4,7 @@
  * The model prompt explicitly forbids aggregation of independent work units.
  */
 import { beforeEach, expect, it, vi } from "vitest"
+vi.mock("@/lib/account-identities",()=>({listAccountIdentities:vi.fn(async()=>[])}))
 vi.mock("ai", () => ({ generateText: vi.fn(), Output: { object: vi.fn() } }))
 vi.mock("@/auth", () => ({ auth: vi.fn() }))
 vi.mock("@/lib/effective-permissions", () => ({ getEffectivePermissions: vi.fn() }))

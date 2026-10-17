@@ -114,7 +114,8 @@ async function clearAuthCookies() {
  * @returns A promise that resolves after the sign-out flow is started.
  */
 export async function signOutAction() {
-  await signOut({ redirect: false })
-  await clearAuthCookies()
+  try{await signOut({ redirect: false })}
+  catch{console.error("[auth] Server logout could not be confirmed; clearing browser session cookies.")}
+  finally{await clearAuthCookies()}
   redirect("/")
 }

@@ -35,7 +35,7 @@ export function NoteInput({
   const [notes, setNotes] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [sampleCount, setSampleCount] = useState("6")
+  const [sampleCount, setSampleCount] = useState("random")
   /**
    * Loads synthetic examples scoped by the authenticated server identity.
    * @returns Promise<void> after replacing notes or displaying a safe error.
@@ -97,6 +97,7 @@ export function NoteInput({
         </div>
         <div className="flex flex-wrap items-center gap-2">
         <select aria-label="Sample entry count per person" value={sampleCount} disabled={loading} onChange={event=>setSampleCount(event.target.value)} className="rounded-md border border-input bg-white px-2 py-2 text-sm">
+          <option value="random">Random (3-18 entries / person)</option>
           <option value="3">3 entries / person</option>
           <option value="6">6 entries / person</option>
           <option value="12">12 entries / person</option>

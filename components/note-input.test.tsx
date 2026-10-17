@@ -13,7 +13,7 @@ it("loads sample identity from the server without supplying another person's nam
   vi.stubGlobal("fetch",request);render(<NoteInput onParsed={()=>{}}/>)
   await userEvent.click(screen.getByRole("button",{name:"Try a sample"}))
   expect(screen.getByRole("textbox",{name:"Time worked notes"})).toHaveValue("Own Person: 2 hours on Sample Project")
-  expect(request).toHaveBeenCalledWith(expect.stringContaining("/api/samples?count=6"),{cache:"no-store"})
+  expect(request).toHaveBeenCalledWith(expect.stringContaining("/api/samples?count=random"),{cache:"no-store"})
 })
 it("does not expose extraction for account-manager sample preview",()=>{
   render(<NoteInput previewOnly onParsed={()=>{}}/>)

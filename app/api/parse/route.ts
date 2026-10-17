@@ -7,6 +7,7 @@
  */
 import { generateText, Output } from "ai"
 import { z } from "zod"
+import { listAccountIdentities } from "@/lib/account-identities"
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 
@@ -81,7 +82,8 @@ export async function POST(req: Request) {
     const access=await getEffectivePermissions(email)
     if(!access.role||!access.permissions.create_entries)return Response.json({error:"Extraction access changed. Please sign in again."},{status:403})
     const ownOnly=access.role==="contractor"||access.role==="employee"
-    return Response.json({ entries: output.entries.map(entry=>ownOnly?{...entry,contractor:session?.user?.name?.trim()||email}:entry) })
+    const identity=(await listAccountIdentities([email]))[0]
+    return Response.json({ entries: output.entries.map(entry=>ownOnly?{...entry,contractor:identity?.officialName||session?.user?.name?.trim()||email}:entry) })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     console.error("[parse] AI extraction failed")

@@ -15,7 +15,8 @@ it("keeps encryption controls out of the everyday inbox",async()=>{
   expect(screen.queryByText("End-to-end encryption connected")).not.toBeInTheDocument()
   await userEvent.click(screen.getByRole("button",{name:"Message settings"}))
   expect(screen.getByRole("dialog",{name:"Message settings"})).toBeVisible()
-  expect(screen.getByText("End-to-end encryption connected")).toBeVisible()
+  expect(screen.getByText("Messages connected")).toBeVisible()
+  expect(screen.queryByRole("button",{name:"Device identities"})).not.toBeInTheDocument()
 })
 it("filters message text and announcements without exposing mismatched conversations",async()=>{
   requests();render(<MessagesPanel canSend inbox={inbox()}/>);const user=userEvent.setup()

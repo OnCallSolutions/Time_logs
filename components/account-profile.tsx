@@ -17,6 +17,7 @@ type Profile = {
   displayName: string
   imageDataUrl: string | null
 }
+type CompanyIdentity={shortReference:string;companyCode:string;employeeId:string|null}
 
 /**
  * Renders the profile avatar, account label, and edit menu.
@@ -49,6 +50,7 @@ export function AccountProfile({
   const [menuOpen, setMenuOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
+  const [companyIdentity,setCompanyIdentity]=useState<CompanyIdentity|null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -83,6 +85,7 @@ export function AccountProfile({
     }
 
     loadProfile()
+    readClientData<{identity:CompanyIdentity|null}>(apiPath("/api/people"),email,15000).then(data=>{if(active)setCompanyIdentity(data.identity)}).catch(()=>{})
 
     return () => {
       active = false
@@ -178,6 +181,7 @@ export function AccountProfile({
         <p className="truncate text-xs text-muted-foreground">
           {displayName ? `${displayName} · ${role}` : role}
         </p>
+        {companyIdentity&&<p title={companyIdentity.employeeId??undefined} className="max-w-64 truncate text-[11px] text-muted-foreground">{companyIdentity.companyCode} · {companyIdentity.shortReference}{companyIdentity.employeeId?` · Employee ID ${companyIdentity.employeeId}`:""}</p>}
       </div>
       <button
         type="button"
@@ -246,12 +250,13 @@ export function AccountProfile({
           </div>
 
           <label className="mt-3 block text-xs font-medium text-muted-foreground">
-            Display name
+            Personal nickname
             <input
               value={draftName}
               onChange={(event) => setDraftName(event.target.value)}
               className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
-              maxLength={80}
+              minLength={2}
+              maxLength={40}
             />
           </label>
 

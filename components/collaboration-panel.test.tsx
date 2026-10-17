@@ -29,7 +29,7 @@ it("opens message composition in a full-screen window", async () => {
   mockRequests()
   render(<MessagesPanel canSend />)
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
-  await waitFor(() => expect(screen.getByText("manager@example.com → All employees")).toBeInTheDocument())
+  await waitFor(() => expect(screen.getByText("manager@example.com → Announcement")).toBeInTheDocument())
   await userEvent.click(screen.getByText("New message"))
   expect(screen.getByRole("dialog",{name:"New message"})).toHaveAttribute("data-window-expanded","true")
 })

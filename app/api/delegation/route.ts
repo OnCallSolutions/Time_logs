@@ -10,6 +10,8 @@ import { actorRoster,employeeRoster } from "@/lib/collaboration"
 import { permissionLabels, delegablePermissions, type Permission } from "@/lib/permissions"
 import { getAuditContext } from "@/lib/audit"
 import { z } from "zod"
+import { emailSchema } from "@/lib/identity-policy"
+import { listAccountIdentities } from "@/lib/account-identities"
 /**
  * Returns all actor identities to authorized delegators without expanding edits.
  * Managers still modify only active employee workflow rights through PATCH.
@@ -20,7 +22,8 @@ export async function GET(): Promise<Response> {
   const access = await getEffectivePermissions(email)
   if (!email || !(access.role === "admin" || access.role === "manager") ||
       (!access.permissions.delegate_permissions && !access.permissions.send_messages)) return Response.json({error:"Forbidden."},{status:403})
-  const users = await Promise.all((await actorRoster()).map(async user=>({...user,permissions:(await getEffectivePermissions(user.email)).permissions})))
+  const roster=await actorRoster(), identities=await listAccountIdentities(roster.map(user=>user.email))
+  const users = await Promise.all(roster.map(async user=>({...user,displayName:identities.find(identity=>identity.email===user.email.toLowerCase())?.officialName??"Company account",companyReference:identities.find(identity=>identity.email===user.email.toLowerCase())?.shortReference,permissions:(await getEffectivePermissions(user.email)).permissions})))
   return Response.json({users},{headers:{"Cache-Control":"no-store"}})
 }
 /**
@@ -33,7 +36,7 @@ export async function PATCH(req:Request): Promise<Response> {
     const email = (await auth())?.user?.email
     const access = await getEffectivePermissions(email)
     if (!email || !(access.role === "manager" || access.role === "admin") || !access.permissions.delegate_permissions) return Response.json({error:"Forbidden."},{status:403})
-    const body = z.object({email:z.string().email(),permissions:z.record(z.string(),z.boolean())}).parse(await req.json())
+    const body = z.object({email:emailSchema,permissions:z.record(z.string(),z.boolean())}).parse(await req.json())
     const target = (await employeeRoster()).find(user=>user.email.toLowerCase() === body.email.toLowerCase())
     if (!target) return Response.json({error:"Select an active employee."},{status:400})
     for(const [key,value] of Object.entries(body.permissions)) {

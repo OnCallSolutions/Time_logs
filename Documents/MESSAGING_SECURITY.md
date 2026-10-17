@@ -1,5 +1,10 @@
 # Messaging and Encryption
 
+See [MESSAGE_HISTORY_RECOVERY.md](MESSAGE_HISTORY_RECOVERY.md) for current signed
+history transfers and optional organization-managed recovery. When organization
+recovery is enabled, the organization is a trusted recovery endpoint and can
+technically recover message content; do not claim organization-blind encryption.
+
 ## Automatic Device Identity
 
 Normal messaging has no encryption password, recovery phrase, or unlock form.

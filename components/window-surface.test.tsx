@@ -30,6 +30,7 @@ it("defaults to full screen and restores the previous window and draft with Back
   const user = userEvent.setup()
   await user.click(screen.getByRole("button", { name: "Open activity" }))
   const parent = screen.getByRole("dialog", { name: "Activity" })
+  expect(parent).toHaveFocus()
   expect(parent).toHaveAttribute("data-window-expanded", "true")
   await user.click(screen.getByRole("button", { name: "Restore window" }))
   expect(parent).toHaveAttribute("data-window-expanded", "false")

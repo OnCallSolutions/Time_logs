@@ -1,5 +1,10 @@
 # Automatic Encrypted Messaging
 
+Current history sync and optional organization-recovery behavior is documented in
+[MESSAGE_HISTORY_RECOVERY.md](MESSAGE_HISTORY_RECOVERY.md). It supersedes the older
+future-message-only limitation below. Recovery still requires surviving device keys
+or an existing organization envelope; it cannot reconstruct missing keys.
+
 Normal messaging has no encryption password, recovery form, or unlock action.
 After Microsoft sign-in, the application generates nonextractable device keys,
 stores them in browser IndexedDB, and registers public keys automatically. This

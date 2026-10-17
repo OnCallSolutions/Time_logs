@@ -9,6 +9,7 @@ import { getConfiguredAccessUsers, getEffectiveUserRole } from "@/lib/access"
 import { listKnownUsers, listManagedAccessUsers } from "@/lib/db"
 import { MESSAGE_EDIT_MINUTES } from "@/lib/message-policy"
 import type { EncryptedMessage } from "@/lib/message-crypto"
+import { listAccountIdentities } from "@/lib/account-identities"
 const sql = neon(process.env.DATABASE_URL!)
 let messageSchema:Promise<void>|undefined
 /**
@@ -23,14 +24,15 @@ export async function employeeRoster() {
  * Assigned roles stay visible for blocked accounts, but their rights remain denied.
  * @returns Promise containing public directory identity, role, and access summaries.
  */
-export async function actorRoster() {
-  const [known,managed] = await Promise.all([listKnownUsers(),listManagedAccessUsers()])
+export async function actorRoster():Promise<{email:string;role:string;accessStatus:string;displayName:string;contractorNumber?:string|null}[]> {
+  const [known,managed,identities] = await Promise.all([listKnownUsers(),listManagedAccessUsers(),listAccountIdentities()])
   const configured=getConfiguredAccessUsers()
   const emails = new Set([...known,...managed,...configured].map(user=>user.email.toLowerCase()))
   const users = await Promise.all([...emails].map(async email=>{
     const effective=await getEffectiveUserRole(email)
     const assignment=managed.find(user=>user.email.toLowerCase()===email)
-    return {email,role:effective??assignment?.role??configured.find(user=>user.email.toLowerCase()===email)?.role??"none",accessStatus:effective?"active":assignment?.accessStatus==="active"?"denied":assignment?.accessStatus??"observed",displayName:known.find(user=>user.email.toLowerCase()===email)?.displayName??""}
+    const identity=identities.find(user=>user.email===email)
+    return {email,role:effective??assignment?.role??configured.find(user=>user.email.toLowerCase()===email)?.role??"none",accessStatus:effective?"active":assignment?.accessStatus==="active"?"denied":assignment?.accessStatus??"observed",displayName:identity?.officialName??"",contractorNumber:identity?.contractorNumber??null}
   }))
   const rank:Record<string,number>={admin:4,manager:3,account_manager:3,employee:2,contractor:1,none:0}
   return users.sort((a,b)=>(rank[b.role]??0)-(rank[a.role]??0)||a.email.localeCompare(b.email))
@@ -63,6 +65,17 @@ export function ensureMessages():Promise<void>{
   return messageSchema??=initializeMessages().catch(error=>{messageSchema=undefined;throw error})
 }
 /**
+ * Finds original verification authors across the caller's full encrypted history.
+ * @param email - Authenticated participant; public keys do not grant message access.
+ * @returns Promise<string[]> containing historical signing identities only.
+ */
+export async function messageAuthors(email:string):Promise<string[]>{
+  await ensureMessages()
+  const rows=await sql`SELECT DISTINCT encrypted_payload->>'author' AS email FROM app_messages
+    WHERE encrypted_payload IS NOT NULL AND (sender_email=${email.toLowerCase()} OR recipient_email=${email.toLowerCase()} OR encrypted_payload->'keys' ? ${email.toLowerCase()})`
+  return rows.flatMap(row=>typeof row.email==="string"?[row.email]:[])
+}
+/**
  * Lists private received/sent messages and permitted employee broadcasts.
  * @param email - Current authenticated identity.
  * @param receivesBroadcast - Whether the current role receives employee broadcasts.
@@ -74,15 +87,15 @@ export async function listMessages(email:string,receivesBroadcast:boolean) {
   await sql`INSERT INTO app_message_receipts (message_id,recipient_email)
     SELECT id,${identity} FROM app_messages WHERE sender_email <> ${identity} AND deleted_at IS NULL
       AND (recipient_email = ${identity} OR (recipient_email IS NULL AND (encrypted_payload->'keys' ? ${identity} OR (${receivesBroadcast} AND encrypted_payload IS NULL))))
-    ORDER BY created_at DESC LIMIT 100 ON CONFLICT DO NOTHING`
-  return sql`SELECT m.id,m.sender_email,m.recipient_email,m.body,m.created_at,m.edited_at,m.deleted_at,m.encrypted_payload,m.priority,
+    ORDER BY created_at DESC,id DESC LIMIT 100 ON CONFLICT DO NOTHING`
+  return sql`SELECT m.id,m.sender_email,m.recipient_email,m.body,to_char(m.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS created_at,m.edited_at,m.deleted_at,m.encrypted_payload,m.priority,
     r.delivered_at,r.read_at,
     (SELECT COUNT(*)::int FROM app_message_receipts WHERE message_id=m.id) AS delivered_count,
     (SELECT COUNT(*)::int FROM app_message_receipts WHERE message_id=m.id AND read_at IS NOT NULL) AS read_count
     FROM app_messages m LEFT JOIN app_message_receipts r ON r.message_id=m.id
       AND r.recipient_email=CASE WHEN m.sender_email=${identity} AND m.recipient_email IS NOT NULL THEN m.recipient_email ELSE ${identity} END
     WHERE m.recipient_email = ${identity} OR m.sender_email = ${identity}
-      OR (m.recipient_email IS NULL AND (m.encrypted_payload->'keys' ? ${identity} OR (${receivesBroadcast} AND m.encrypted_payload IS NULL))) ORDER BY m.created_at DESC LIMIT 100`
+      OR (m.recipient_email IS NULL AND (m.encrypted_payload->'keys' ? ${identity} OR (${receivesBroadcast} AND m.encrypted_payload IS NULL))) ORDER BY m.created_at DESC,m.id DESC LIMIT 100`
 }
 
 /**
@@ -132,8 +145,12 @@ export async function changeMessage(email: string, admin: boolean, id: string, b
  */
 export async function sendMessage(sender:string,recipient:string|null,body:string,encrypted?:EncryptedMessage) {
   await ensureMessages()
-  const rows = await sql`INSERT INTO app_messages (sender_email,recipient_email,body,encrypted_payload)
-    VALUES (${sender.toLowerCase()},${recipient?.toLowerCase() ?? null},${encrypted?"[Encrypted message]":body},${encrypted?JSON.stringify(encrypted):null}::jsonb) RETURNING id`
+  const rows = await sql`INSERT INTO app_messages (id,sender_email,recipient_email,body,encrypted_payload)
+    VALUES (COALESCE(${encrypted?.token??null}::uuid,gen_random_uuid()),${sender.toLowerCase()},${recipient?.toLowerCase() ?? null},${encrypted?"[Encrypted message]":body},${encrypted?JSON.stringify(encrypted):null}::jsonb)
+    ON CONFLICT(id) DO UPDATE SET id=app_messages.id
+      WHERE app_messages.sender_email=EXCLUDED.sender_email AND app_messages.encrypted_payload=EXCLUDED.encrypted_payload
+    RETURNING id`
+  if(!rows.length)throw new Error("Message retry identity conflict.")
   return rows[0].id as string
 }
 

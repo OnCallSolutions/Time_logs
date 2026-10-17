@@ -22,6 +22,8 @@ import {
 import type { AccessStatus, UserRole } from "@/lib/types"
 import { permissionLabels, type PermissionOverrides } from "@/lib/permissions"
 import { LastAdministratorError } from "@/lib/admin-policy"
+import { listAccountIdentities } from "@/lib/account-identities"
+import { emailSchema } from "@/lib/identity-policy"
 
 export const runtime = "nodejs"
 
@@ -46,6 +48,10 @@ type DirectoryUser = {
   updatedAt: string | null
   /** Persisted profile display name, when available. */
   displayName: string
+  /** Short company-scoped account reference, separate from the immutable UUID. */
+  companyReference?: string | null
+  /** Optional external employee number assigned by the company. */
+  employeeId?: string | null
   /** Persisted profile image data URL, when available. */
   imageDataUrl: string | null
   /** Total number of entries owned by this user. */
@@ -64,7 +70,7 @@ type DirectoryUser = {
 
 const accessUpdateSchema = z.object({
   permissions: z.partialRecord(z.enum(Object.keys(permissionLabels) as [keyof typeof permissionLabels, ...(keyof typeof permissionLabels)[]]), z.boolean()).optional(),
-  email: z.string().trim().email(),
+  email: emailSchema,
   role: z.enum(["admin", "manager", "account_manager", "employee", "contractor"]),
   accessStatus: z.enum(["active", "denied", "blocked"]).default("active"),
   note: z.string().trim().max(500).default(""),
@@ -208,7 +214,11 @@ export async function GET() {
       })
     }
 
+    const identities=await listAccountIdentities()
     for(const user of directory.values()){
+      const identity=identities.find(item=>item.email===user.email)
+      user.displayName=identity?.officialName??""
+      Object.assign(user,{contractorNumber:identity?.contractorNumber??null,companyReference:identity?.shortReference??null,employeeId:identity?.employeeId??null})
       if(user.accessStatus==="active"&&!await getEffectiveUserRole(user.email))user.accessStatus="denied"
     }
     return Response.json({
@@ -276,6 +286,7 @@ async function saveManagedAccess(req: Request) {
     }
 
     const existing = await getManagedAccessUser(email)
+    if(!existing&&(body.role==="employee"||body.role==="contractor")&&!await getEffectiveUserRole(email))return Response.json({error:"Create the official identity using Add contractor/employee before changing account rights."},{status:400})
     const user = await upsertManagedAccessUser({
       environmentAdmins,
       email,

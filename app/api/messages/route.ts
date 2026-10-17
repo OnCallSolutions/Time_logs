@@ -12,16 +12,26 @@ import { MESSAGE_EDIT_MINUTES } from "@/lib/message-policy"
 import { recordAuditEvent } from "@/lib/db"
 import { getAuditContext } from "@/lib/audit"
 import { z } from "zod"
+import { listAccountIdentities } from "@/lib/account-identities"
+import { historyPage,historyByIds } from "@/lib/message-history-store"
 /**
  * Loads recent messages visible to the signed-in active account.
  * @returns Promise<Response> containing the authorized inbox.
  */
-export async function GET(): Promise<Response> {
+export async function GET(request?:Request): Promise<Response> {
   const email = (await auth())?.user?.email
   const access = await getEffectivePermissions(email)
   if (!email || !access.role) return Response.json({error:"Forbidden."},{status:403})
   try {
-    return Response.json({messages:await listMessages(email,access.role === "employee" || access.role === "contractor"),email:email.toLowerCase(),role:access.role,editMinutes:MESSAGE_EDIT_MINUTES},{headers:{"Cache-Control":"no-store"}})
+    const params=request?new URL(request.url).searchParams:null
+    const cursor=params?.get("before")
+    const ids=params?.get("ids")?z.array(z.string().uuid()).min(1).max(100).parse(JSON.parse(params.get("ids")!)):null
+    const before=cursor?z.object({date:z.string().datetime({offset:true}),id:z.string().uuid()}).parse(JSON.parse(cursor)):null
+    const messages=ids?await historyByIds(email,ids,access.role === "employee" || access.role === "contractor"):before?await historyPage(email,before,access.role === "employee" || access.role === "contractor"):await listMessages(email,access.role === "employee" || access.role === "contractor")
+    const identities=await listAccountIdentities(messages.flatMap(message=>[message.sender_email,message.recipient_email,message.encrypted_payload?.author].filter((value):value is string=>typeof value==="string")))
+    const official=new Map(identities.map(person=>[person.email,person.officialName]))
+    const last=messages.at(-1)
+    return Response.json({messages:messages.map(message=>({...message,sender_name:message.sender_email.toLowerCase()===email.toLowerCase()?"You":official.get(String(message.sender_email))??"Company account",recipient_name:official.get(String(message.recipient_email))??(message.recipient_email?"Company account":"All recipients"),author_name:official.get(String(message.encrypted_payload?.author))??"Company account"})),next:messages.length===(before?50:100)&&last?{date:String(last.created_at),id:last.id}:null,email:email.toLowerCase(),role:access.role,editMinutes:MESSAGE_EDIT_MINUTES},{headers:{"Cache-Control":"no-store"}})
   } catch { return Response.json({error:"Inbox unavailable."},{status:500}) }
 }
 

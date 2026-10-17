@@ -144,11 +144,12 @@ export async function encryptMessage(text:string,identity:MessageIdentity,author
  * @param identity - Unlocked recipient identity.
  * @param email - Recipient email identifying its wrapped content-key envelope.
  * @param author - Published author signing identity.
+ * @param verifiedHistoryWrapped - Optional content key from a separately verified own-device transfer.
  * @returns Promise<string> containing authenticated plaintext; rejects on failure.
  */
-export async function decryptMessage(payload:EncryptedMessage,identity:MessageIdentity,email:string,author:PublicMessageKey):Promise<string> {
+export async function decryptMessage(payload:EncryptedMessage,identity:MessageIdentity,email:string,author:PublicMessageKey,verifiedHistoryWrapped?:string):Promise<string> {
   const envelope=payload.keys[email.toLowerCase()]
-  const wrapped=payload.version===2?envelope?.devices?.[identity.fingerprint]:envelope?.fingerprint===identity.fingerprint?envelope.wrapped:undefined
+  const wrapped=verifiedHistoryWrapped??(payload.version===2?envelope?.devices?.[identity.fingerprint]:envelope?.fingerprint===identity.fingerprint?envelope.wrapped:undefined)
   if(!wrapped)throw new Error("This identity cannot decrypt this message.")
   if(payload.version===2&&payload.authorFingerprint!==author.fingerprint)throw new Error("Author identity mismatch.")
   const verifyKey=await crypto.subtle.importKey("spki",decode(author.signingKey),{name:"ECDSA",namedCurve:"P-256"},false,["verify"])

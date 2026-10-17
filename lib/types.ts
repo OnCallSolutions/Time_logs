@@ -20,11 +20,18 @@ export type EntryStatus = "draft" | "submitted" | "approved" | "rejected"
  * the user, and approval fields track the manager review lifecycle.
  */
 export type TimeEntry = {
+  /** Official company-issued number; not an authentication credential. */
+  contractorNumber?: string
+  shortReference?: string
+  companyCode?: string
+  employeeId?: string | null
   id: string
   /** Database evidence revision used to reject stale review decisions. */
   revision?: string
   /** Server-derived eligibility for the current caller's review lane. */
   reviewEligible?: boolean
+  /** Server-derived approval capability, including business-account forwarding rights. */
+  approvalEligible?: boolean
   /** Server-assigned record owner; never inferred from the display contractor name. */
   ownerEmail?: string
   /** Assigned operational manager; unassigned legacy submissions remain in the shared queue. */
@@ -51,7 +58,7 @@ export type TimeEntry = {
  */
 export type ParsedEntry = Omit<
   TimeEntry,
-  "id" | "revision" | "reviewEligible" | "ownerEmail" | "reviewManagerEmail" | "payoutEligible" | "status" | "reviewedBy" | "reviewedAt" | "reviewNote"
+  "id" | "contractorNumber" | "shortReference" | "companyCode" | "employeeId" | "revision" | "reviewEligible" | "approvalEligible" | "ownerEmail" | "reviewManagerEmail" | "payoutEligible" | "status" | "reviewedBy" | "reviewedAt" | "reviewNote"
 >
 
 /**

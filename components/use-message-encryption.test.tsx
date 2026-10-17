@@ -34,7 +34,7 @@ it("fails closed when remembered public identity differs",async()=>{
 it("forgets local trust on explicit lock and avoids redundant directory reads",async()=>{
   const {result,rerender}=renderHook(()=>useMessageEncryption("own@example.com",messages))
   await waitFor(()=>expect(result.current.unlocked).toBe(true));rerender()
-  expect(fetch).toHaveBeenCalledTimes(1)
+  expect(vi.mocked(fetch).mock.calls.filter(call=>String(call[0]).endsWith("/api/messages/keys"))).toHaveLength(1)
   await act(()=>result.current.lock())
   expect(result.current.unlocked).toBe(false);expect(forgetDeviceIdentity).toHaveBeenCalledWith("own@example.com")
 })

@@ -8,7 +8,8 @@
  * translates the user's role into visible navigation choices so the UI matches
  * the permissions enforced by the API routes.
  */
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
+import { AssistantPanel } from "@/components/assistant-panel"
 import { WorkspaceSnapshot } from "@/components/workspace-snapshot"
 import { ReviewerHelpDialog } from "@/components/reviewer-help-dialog"
 import { Brand } from "@/components/brand"
@@ -40,6 +41,7 @@ import {
   Pencil,
   Save,
   Send,
+  Sparkles,
   ShieldCheck,
   UserPlus,
   Users,
@@ -47,6 +49,7 @@ import {
   XCircle,
 } from "lucide-react"
 import { AccountProfile } from "@/components/account-profile"
+import { AddPerson } from "./add-person"
 import { NoteInput } from "@/components/note-input"
 import { EntriesLog } from "@/components/entries-log"
 import { ManagerReport } from "@/components/manager-report"
@@ -93,6 +96,10 @@ type AdminDirectoryUser = {
   updatedAt: string | null
   /** Persisted profile display name, when available. */
   displayName: string
+  /** Short company-scoped reference separate from the immutable account ID. */
+  companyReference?: string | null
+  /** Optional company-issued employee identifier. */
+  employeeId?: string | null
   /** Persisted profile image data URL, when available. */
   imageDataUrl: string | null
   /** Total entries owned by the user. */
@@ -189,14 +196,20 @@ export function TimesheetApp({
   const messageInbox=useMessageInbox(permissionsLoaded&&!accessDenied)
   const messageEncryption=useMessageEncryption(accessDenied?"":messageInbox.email,messageInbox.messages)
   const [entries, setEntries] = useState<TimeEntry[]>([])
+  const entryReadEpoch=useRef(0),pendingEntryWrites=useRef(0)
   const [view, setView] = useState<View>(role === "admin" ? "admin" : role === "manager" ? "approvals" : "log")
   const [messagesOpen,setMessagesOpen]=useState(false)
+  const [assistantOpen,setAssistantOpen]=useState(false)
+  const [assistantMessageContext,setAssistantMessageContext]=useState("")
+  const [assistantCompose,setAssistantCompose]=useState<{recipient:string;body:string;confirmed:boolean}|null>(null)
+  const permissionRequest=useRef(0)
   useEffect(()=>{
     if(role==="account_manager"&&permissions.view_accounts)setView("accounts")
   },[role,permissions.view_accounts])
   const [entriesRefresh,setEntriesRefresh]=useState(0)
   const [loadingEntries, setLoadingEntries] = useState(true)
   const [syncError, setSyncError] = useState<string | null>(null)
+  const [savedStatus,setSavedStatus]=useState("")
   const [personalStatus, setPersonalStatus] = useState<EntryStatus | "all">("all")
   const [suggestedReview,setSuggestedReview] = useState<{entry:TimeEntry;decision:"approved"|"rejected";reason:string}|null>(null)
   const [reviewerHelp,setReviewerHelp]=useState<TimeEntry[]|null>(null)
@@ -213,14 +226,16 @@ export function TimesheetApp({
      * @returns Promise<void> after live authorization state is applied.
      */
     async function refreshPermissions(): Promise<void> {
+      const requestId=++permissionRequest.current
       try {
         const response = await fetch(apiPath("/api/permissions"),{cache:"no-store",signal:controller.signal})
         const data = await response.json()
+        if(requestId!==permissionRequest.current)return
         if (!response.ok || !data.role) {
           setPermissionsLoaded(true); setAccessDenied(true); setPermissions(resolvePermissions(null)); setEntries([]); return
         }
         setPermissionsLoaded(true); setAccessDenied(false); setRole(data.role); setPermissions(data.permissions)
-      } catch { if (!controller.signal.aborted) { setAccessDenied(true); setEntries([]); setPermissions(resolvePermissions(null)) } }
+      } catch { if (!controller.signal.aborted&&requestId===permissionRequest.current) { setAccessDenied(true); setEntries([]); setPermissions(resolvePermissions(null)) } }
     }
     void refreshPermissions()
     const timer = window.setInterval(refreshPermissions,15000)
@@ -234,6 +249,8 @@ export function TimesheetApp({
   useEffect(() => {
     if (accessDenied) return
     let active = true
+    let fetching=false
+    const controller=new AbortController()
 
     /**
      * Loads saved entries visible to the signed-in user's role.
@@ -245,11 +262,14 @@ export function TimesheetApp({
      * @returns A promise that resolves after entries are loaded or an error is stored.
      */
     async function loadEntries() {
+      if(fetching||pendingEntryWrites.current)return
+      fetching=true
+      const epoch=entryReadEpoch.current
       try {
-        const res = await fetch(apiPath("/api/entries"), { cache: "no-store" })
+        const res = await fetch(apiPath("/api/entries"), { cache: "no-store",signal:controller.signal })
         const data = await res.json()
         if (!res.ok) throw new Error(data.error ?? "Failed to load entries.")
-        if (active) setEntries(data.entries ?? [])
+        if (active&&epoch===entryReadEpoch.current&&!pendingEntryWrites.current) setEntries(previous=>JSON.stringify(previous)===JSON.stringify(data.entries??[])?previous:data.entries??[])
       } catch (err) {
         if (active) {
           setSyncError(
@@ -257,14 +277,19 @@ export function TimesheetApp({
           )
         }
       } finally {
+        fetching=false
         if (active) setLoadingEntries(false)
       }
     }
 
     loadEntries()
+    const refresh=()=>{if(document.visibilityState==="visible")void loadEntries()}
+    const timer=window.setInterval(refresh,15000)
+    window.addEventListener("focus",refresh)
 
     return () => {
       active = false
+      controller.abort();window.clearInterval(timer);window.removeEventListener("focus",refresh)
     }
   }, [role,permissions.view_team,permissions.view_manager_entries,permissions.review_manager_entries,permissions.view_other_manager_entries,permissions.review_other_manager_entries,permissions.accept_review_requests,entriesRefresh,messageInbox.messages,accessDenied])
 
@@ -306,15 +331,18 @@ export function TimesheetApp({
    * @returns A promise that resolves after entries are saved and local state updates.
    */
   async function addParsed(parsed: ParsedEntry[]) {
+    pendingEntryWrites.current++;entryReadEpoch.current++
+    try{
     const res = await fetch(apiPath("/api/entries"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ entries: parsed }),
     })
     const data = await res.json()
-    if (!res.ok) throw new Error(data.error ?? "Failed to save entries.")
+      if (!res.ok) throw new Error(`${data.error ?? "Failed to save entries."}${data.reference?` Reference: ${data.reference}`:""}`)
     setEntries((prev) => [...(data.entries ?? []), ...prev])
     setSyncError(null)
+    }finally{pendingEntryWrites.current--;entryReadEpoch.current++}
   }
 
   /**
@@ -326,6 +354,7 @@ export function TimesheetApp({
    * @returns Promise<void> after server confirmation; rejects on failure.
    */
   async function updateEntry(id: string, patch: Partial<TimeEntry>, expectedRevision?: string): Promise<void> {
+    pendingEntryWrites.current++;entryReadEpoch.current++
     try {
       const response = await fetch(apiPath(`/api/entries/${id}`), {
         method: "PATCH",
@@ -334,16 +363,17 @@ export function TimesheetApp({
         body: JSON.stringify({ ...patch, expectedRevision: expectedRevision ?? entries.find(entry => entry.id === id)?.revision }),
       })
       const data = await response.json()
-      if (!response.ok) throw new Error(data.error ?? "Failed to update entry.")
+      if (!response.ok) throw new Error(`${data.error??"Failed to update entry."}${data.reference?` Reference: ${data.reference}`:""}`)
       setEntries(previous => role==="manager"&&data.entry.ownerEmail?.toLowerCase()!==userEmail?.toLowerCase()&&data.entry.status!=="submitted" ? previous.filter(entry=>entry.id!==id) : previous.map(entry => entry.id === id ? { ...entry, ...data.entry } : entry))
       setSyncError(null)
+      if(patch.status)setSavedStatus(patch.status==="approved"?"Approved and sent to business accounts.":patch.status==="rejected"?"Returned to the submitter for correction.":patch.status==="submitted"?"Submitted for independent review.":"Recalled to draft.")
     } catch (cause) {
       const error = cause instanceof Error && ["TimeoutError", "AbortError"].includes(cause.name)
         ? new Error("Request timed out. Refresh entries before retrying; the server may have saved the update.")
         : cause instanceof Error ? cause : new Error("Failed to update entry.")
       setSyncError(error.message)
       throw error
-    }
+    }finally{pendingEntryWrites.current--;entryReadEpoch.current++}
   }
 
   /**
@@ -369,6 +399,7 @@ export function TimesheetApp({
    * @returns Nothing; local state and API sync happen as side effects.
    */
   function deleteEntry(id: string) {
+    pendingEntryWrites.current++;entryReadEpoch.current++
     const previous = entries
     setEntries((prev) => prev.filter((e) => e.id !== id))
 
@@ -384,6 +415,7 @@ export function TimesheetApp({
           err instanceof Error ? err.message : "Failed to delete entry.",
         )
       })
+      .finally(()=>{pendingEntryWrites.current--;entryReadEpoch.current++})
   }
 
   /**
@@ -396,6 +428,7 @@ export function TimesheetApp({
    * @returns Nothing; local state and API sync happen as side effects.
    */
   function clearEntries() {
+    pendingEntryWrites.current++;entryReadEpoch.current++
     const previous = entries
     setEntries([])
 
@@ -415,6 +448,7 @@ export function TimesheetApp({
           err instanceof Error ? err.message : "Failed to clear entries.",
         )
       })
+      .finally(()=>{pendingEntryWrites.current--;entryReadEpoch.current++})
   }
 
   const totalHours = entries.reduce((s, e) => s + (Number(e.hours) || 0), 0)
@@ -423,9 +457,10 @@ export function TimesheetApp({
   const rejectedEntries = entries.filter((entry) => entry.status === "rejected")
   const draftEntries = entries.filter((entry) => entry.status === "draft")
 
+  const accountsContent=<BusinessAccounts key={`${role}:${permissions.send_to_accounts}:${permissions.view_accounts}:${permissions.review_accounts}:${permissions.ai_accounts}`} canSend={false} canReview={permissions.view_accounts&&permissions.review_accounts&&(role==="account_manager"||role==="admin")} canAI={permissions.view_accounts&&permissions.ai_accounts&&(role==="account_manager"||role==="admin")} canAuthorize={permissions.authorize_payouts}/>
   const tabs: { key: View; label: string; icon: typeof ListChecks }[] = [
     ...(role==="manager"?[{key:"personal" as const,label:"My managerial time",icon:Clock3}]:[]),
-    ...(!accessDenied&&((permissions.view_accounts&&(role==="account_manager"||role==="admin")))?[{key:"accounts" as const,label:"Business accounts",icon:BarChart3}]:[]),
+    ...(!accessDenied&&permissions.view_accounts&&role==="account_manager"?[{key:"accounts" as const,label:"Business accounts",icon:BarChart3}]:[]),
     {
       key: "log",
       label: permissions.view_team ? "Team entries" : "My entries",
@@ -445,11 +480,13 @@ export function TimesheetApp({
 
   return (
     <main className="app-workspace tech-surface flex min-h-svh w-full min-w-0 flex-col gap-4 bg-background px-3 pb-8 pt-4 sm:px-5 md:pt-5">
-      {!accessDenied&&messagesOpen&&<WindowSurface title="Messages" onBack={()=>setMessagesOpen(false)}><section className="min-h-0 w-full overflow-auto bg-background p-3 sm:p-5"><MessagesPanel inbox={messageInbox} encryption={messageEncryption} canSend={permissions.send_messages&&(role==="admin"||role==="manager")}/></section></WindowSurface>}
+      {!accessDenied&&messagesOpen&&<WindowSurface title="Messages" onBack={()=>setMessagesOpen(false)}><section className="min-h-0 w-full overflow-auto bg-background p-3 sm:p-5"><MessagesPanel inbox={messageInbox} encryption={messageEncryption} canSend={permissions.send_messages&&(role==="admin"||role==="manager")} initialDraft={assistantCompose} onDraftConsumed={()=>setAssistantCompose(null)} onExplainMessage={text=>{setAssistantMessageContext(text);setAssistantOpen(true)}}/></section></WindowSurface>}
+      {!accessDenied&&assistantOpen&&<WindowSurface title="Tanovo assistant" onBack={()=>setAssistantOpen(false)}><section className="min-h-0 w-full overflow-auto bg-background p-3 sm:p-5"><AssistantPanel onNavigate={destination=>{if(destination==="messages")setMessagesOpen(true);else setView(destination as View);setCommandGroup(null)}} onRefresh={()=>{setEntriesRefresh(value=>value+1);messageInbox.refresh()}} messageContext={assistantMessageContext} onContextUsed={()=>setAssistantMessageContext("")} onCompose={draft=>{setAssistantCompose(draft);setMessagesOpen(true)}}/></section></WindowSurface>}
       <header className="workspace-header flex flex-col gap-3 border-b border-border pb-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <Brand />
           <div className="flex min-w-0 items-center justify-end gap-3">
+            {!accessDenied&&<Button variant="outline" size="icon-lg" aria-label="Open Tanovo assistant" title="Tanovo assistant" onClick={()=>setAssistantOpen(true)}><Sparkles className="size-5"/></Button>}
             {!accessDenied&&<WorkspaceUtilities unread={messageInbox.unread} onMessages={()=>setMessagesOpen(true)}/>}
             <AccountProfile
               email={userEmail}
@@ -468,13 +505,13 @@ export function TimesheetApp({
       {!accessDenied && <WorkspaceSnapshot entries={entries} email={userEmail ?? ""} role={role} loading={loadingEntries} canReview={canReviewEntries || canAIReview} />}
       {!accessDenied && <nav aria-label="Command groups" className="flex flex-wrap gap-2 border-b pb-3">
         <Button variant="outline" help="Time capture, personal entries, drafts, and submission controls." aria-haspopup="dialog" onClick={()=>setCommandGroup("time")}><Layers3 className="size-4"/>Timesheets<ChevronRight className="size-4"/></Button>
-        {(canReviewEntries || canAIReview || ((role==="admin"||role==="account_manager")&&permissions.view_accounts)) && <Button variant="outline" help="Review submissions, prepare AI advice, and hand approved evidence to accounts." aria-haspopup="dialog" onClick={()=>setCommandGroup("review")}><CheckCircle2 className="size-4"/>Reviews<ChevronRight className="size-4"/></Button>}
+        {(canReviewEntries || canAIReview || ((role==="admin"||role==="account_manager")&&permissions.view_accounts)) && <Button variant="outline" help="Review submissions, prepare AI advice, and hand approved evidence to accounts." aria-haspopup="dialog" onClick={()=>setCommandGroup("review")}><CheckCircle2 className="size-4"/>{role==="admin"?"Operations":"Reviews"}<ChevronRight className="size-4"/></Button>}
         <Button variant="outline" help="Workspace information, workflow totals, and authorized reports." aria-haspopup="dialog" onClick={()=>setCommandGroup("insights")}><BarChart3 className="size-4"/>Insights<ChevronRight className="size-4"/></Button>
         {(canViewAdmin || (role==="manager" && permissions.delegate_permissions)) && <Button variant="outline" help="Authorized people, rights, coverage, and security controls." aria-haspopup="dialog" onClick={()=>setCommandGroup("access")}><ShieldCheck className="size-4"/>Access &amp; security<ChevronRight className="size-4"/></Button>}
       </nav>}
-      {!accessDenied && commandGroup && <WindowSurface title={{time:"Timesheets",review:"Reviews",insights:"Insights",access:"Access & security"}[commandGroup]} onBack={()=>setCommandGroup(null)}>
+      {!accessDenied && commandGroup && <WindowSurface title={{time:"Timesheets",review:role==="admin"?"Operations":"Reviews",insights:"Insights",access:"Access & security"}[commandGroup]} onBack={()=>setCommandGroup(null)}>
         <section className="min-h-0 w-full overflow-auto bg-white p-4 sm:p-6">
-          <p className="mb-2 text-xs text-muted-foreground">Workspace / {{time:"Timesheets",review:"Reviews",insights:"Insights",access:"Access & security"}[commandGroup]}</p>
+          <p className="mb-2 text-xs text-muted-foreground">Workspace / {{time:"Timesheets",review:role==="admin"?"Operations":"Reviews",insights:"Insights",access:"Access & security"}[commandGroup]}</p>
           {commandGroup==="time" && <div className="space-y-5">
             <h2 className="text-lg font-semibold">Time capture and submissions</h2>
             <div className="flex flex-wrap gap-2">
@@ -486,7 +523,7 @@ export function TimesheetApp({
             {(role==="contractor" || role==="employee" || role==="manager") && <EmployeeWorkspace contractor={role==="contractor"} entries={entries.filter(entry=>entry.ownerEmail?.toLowerCase()===userEmail?.toLowerCase())} selected={personalStatus} onSelect={status=>{setPersonalStatus(status);setView(role==="manager"?"personal":"log");setCommandGroup(null)}}/>}
           </div>}
           {commandGroup==="review" && <div className="space-y-5">
-            <h2 className="text-lg font-semibold">Review and handoff</h2>
+            <h2 className="text-lg font-semibold">{role==="admin"?"Operations":"Review and handoff"}</h2>
             {(canReviewEntries || canAIReview || canViewTeamReports) && <ManagerWorkspace canReview={canReviewEntries} canReports={canViewTeamReports} canAI={canAIReview} pending={pendingEntries.length} entries={pendingEntries} onApprovals={()=>{setView("approvals");setCommandGroup(null)}} onReports={()=>{setView("report");setCommandGroup(null)}} onRecommendation={(entry,decision,reason)=>setSuggestedReview({entry,decision,reason})}/>}
             {(permissions.view_accounts && (role==="account_manager"||role==="admin")) && <Button variant="outline" onClick={()=>{setView("accounts");setCommandGroup(null)}}><BarChart3 className="size-4"/>Business accounts</Button>}
           </div>}
@@ -524,8 +561,9 @@ export function TimesheetApp({
         setSuggestedReview(null)
       }} />}
       {accessDenied && <p role="alert">Access is unavailable. Contact your administrator.</p>}
-      {!accessDenied&&view==="approvals"&&(role==="manager"||role==="admin"||role==="account_manager")&&(canReviewEntries||permissions.ai_review)&&<ApprovalSelection entries={pendingEntries} email={userEmail??""} canReview={canReviewEntries} canAI={canAIReview} onUpdated={entry=>setEntries(previous=>role==="manager"&&entry.ownerEmail?.toLowerCase()!==userEmail?.toLowerCase()&&entry.status!=="submitted"?previous.filter(current=>current.id!==entry.id):previous.map(current=>current.id===entry.id?entry:current))}/>}
+      {!accessDenied&&view==="approvals"&&(role==="manager"||role==="admin"||role==="account_manager")&&(canReviewEntries||permissions.ai_review)&&<ApprovalSelection entries={pendingEntries} email={userEmail??""} canReview={canReviewEntries} canAI={canAIReview} onUpdated={entry=>{entryReadEpoch.current++;setEntries(previous=>role==="manager"&&entry.ownerEmail?.toLowerCase()!==userEmail?.toLowerCase()&&entry.status!=="submitted"?previous.filter(current=>current.id!==entry.id):previous.map(current=>current.id===entry.id?entry:current))}}/>}
 
+      {savedStatus&&!syncError&&<p role="status" className="border-y border-green-200 bg-green-50 px-4 py-2 text-sm text-green-900">{savedStatus}</p>}
       {(loadingEntries || syncError) && (
         <div
           className={`rounded-lg border px-4 py-3 text-sm ${
@@ -647,7 +685,7 @@ export function TimesheetApp({
           <ManagerReport entries={entries} />
         )
       ) : view === "accounts" ? (
-        <BusinessAccounts key={`${role}:${permissions.send_to_accounts}:${permissions.view_accounts}:${permissions.review_accounts}:${permissions.ai_accounts}`} canSend={false} canReview={permissions.view_accounts&&permissions.review_accounts&&(role==="account_manager"||role==="admin")} canAI={permissions.view_accounts&&permissions.ai_accounts&&(role==="account_manager"||role==="admin")} canAuthorize={permissions.authorize_payouts}/>
+        role==="admin"?<WindowSurface title="Business accounts" onBack={()=>{setView("admin");setCommandGroup("review")}}><section className="min-h-0 w-full overflow-auto bg-white p-4">{accountsContent}</section></WindowSurface>:accountsContent
       ) : view === "messages" ? (
         <MessagesPanel inbox={messageInbox} canSend={permissions.send_messages && (role === "admin" || role === "manager")} />
       ) : view === "permissions" ? (
@@ -1074,14 +1112,7 @@ function AdminPanel({ role, rightsOnly = false,openRequest = 0 }: { role: UserRo
           <div>
             <h3 className="text-sm font-semibold">Employee access</h3>
           </div>
-          <Button
-            type="button"
-            className="w-fit bg-primary text-white hover:bg-primary/90"
-            onClick={openAddUserEditor}
-          >
-            <UserPlus className="size-4" aria-hidden="true" />
-            Add employee
-          </Button>
+          <AddPerson admin/>
           {managementError && (
             <p className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
               {managementError}
@@ -1133,6 +1164,7 @@ function AdminPanel({ role, rightsOnly = false,openRequest = 0 }: { role: UserRo
                     {user.displayName && (
                       <p className="text-xs text-slate-500">{user.email}</p>
                     )}
+                    {(user.companyReference||user.employeeId)&&<p className="text-xs text-slate-500">{user.companyReference}{user.employeeId?` · Employee ID ${user.employeeId}`:""}</p>}
                   </td>
                   <td className="px-4 py-2">
                     <span

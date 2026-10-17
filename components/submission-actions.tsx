@@ -42,7 +42,7 @@ export function SubmissionActions({ entries, destination = "manager", onStatusCh
   useEffect(()=>{
     if(!open||destination!=="manager")return
     const abort=new AbortController()
-    fetch(apiPath("/api/submission-managers"),{cache:"no-store",signal:abort.signal}).then(async response=>{const data=await response.json();if(!response.ok)throw new Error(data.error);setManagers(data.managers??[])}).catch(cause=>{if(!abort.signal.aborted)setError(cause instanceof Error?cause.message:"Manager choices unavailable.")})
+    fetch(apiPath("/api/submission-managers"),{cache:"no-store",signal:abort.signal}).then(async response=>{const data=await response.json();if(!response.ok)throw new Error(data.error);const available=data.managers??[];setManagers(available);if(!available.length)setError("No active manager currently has both team-view and approval rights. Ask an admin to assign a reviewer before submitting.")}).catch(cause=>{if(!abort.signal.aborted)setError(cause instanceof Error?cause.message:"Manager choices unavailable.")})
     return()=>abort.abort()
   },[open,destination])
   const analyzing = busy && mode === "ai" && advice.length === 0

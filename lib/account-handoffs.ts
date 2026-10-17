@@ -122,7 +122,7 @@ export async function approveAndForward(id:string,actor:string,revision:string,c
     INSERT INTO audit_events(actor_email,action,target_type,target_id,metadata,ip_address,user_agent)
     SELECT ${actor.toLowerCase()},'entry_approved','time_entry',entry_id::text,jsonb_build_object('handoffId',id,'forwardedToBusinessAccounts',true),${context.ipAddress},${context.userAgent}
     FROM forwarded RETURNING target_id
-  ) SELECT id,owner_email AS "ownerEmail",contractor,work_date::text AS date,hours::float8 AS hours,project,description,status,
+  ) SELECT id,owner_email AS "ownerEmail",contractor_number AS "contractorNumber",contractor,work_date::text AS date,hours::float8 AS hours,project,description,status,
     reviewed_by AS "reviewedBy",reviewed_at::text AS "reviewedAt",review_note AS "reviewNote",review_manager_email AS "reviewManagerEmail",updated_at::text AS revision,false AS "reviewEligible",false AS "payoutEligible"
     FROM changed WHERE EXISTS(SELECT 1 FROM audited)`
   return rows.length?rows[0] as unknown as TimeEntry:null

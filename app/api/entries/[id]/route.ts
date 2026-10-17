@@ -12,6 +12,7 @@ import { getEffectiveUserRole } from "@/lib/access"
 import { canReviewRole } from "@/lib/review-policy"
 import { createReviewAccess } from "@/lib/review-access"
 import { approveAndForward } from "@/lib/account-handoffs"
+import { listAccountIdentities } from "@/lib/account-identities"
 import {
   auditActionForStatus,
   changedFieldMetadata,
@@ -22,6 +23,7 @@ import {
   getTimeEntry,
   recordAuditEvent,
   updateTimeEntry,
+  rejectSubmittedEntry,
 } from "@/lib/db"
 import type { EntryStatus, TimeEntry } from "@/lib/types"
 
@@ -196,6 +198,11 @@ export async function PATCH(
 
     const scope = await createReviewAccess(access.email, access)(current)
     if(!scope.visible)return Response.json({error:"Entry not found."},{status:404})
+    if(access.role!=="admin"&&current.ownerEmail?.toLowerCase()!==access.email.toLowerCase()&&!scope.reviewable)return Response.json({error:"View-only access does not permit changing this timesheet. Request review assistance or ask an administrator."},{status:403})
+    if(patch.contractor!==undefined&&current.ownerEmail){
+      const identity=(await listAccountIdentities([current.ownerEmail]))[0]
+      if(identity&&patch.contractor!==identity.officialName)return Response.json({error:"Official names are managed through company identity, not timesheet editing."},{status:400})
+    }
     if(current.payoutEligible)return Response.json({error:"Business accounts has authorized eligibility; this evidence is locked."},{status:409})
     if(access.role==="manager"&&current.ownerEmail?.toLowerCase()!==access.email.toLowerCase()&&hasEntryFieldPatch(patch)&&!scope.reviewable)return Response.json({error:"Review assistance rights are required to change this evidence."},{status:403})
     if(patch.reviewManagerEmail!==undefined){
@@ -205,7 +212,8 @@ export async function PATCH(
     }
     if(patch.status==="submitted"&&(access.role==="contractor"||access.role==="employee")){
       const manager=patch.reviewManagerEmail??current.reviewManagerEmail
-      if(!manager||await getEffectiveUserRole(manager)!=="manager")return Response.json({error:"Choose an active reviewing manager before submitting."},{status:400})
+      const reviewer=manager?await getEffectivePermissions(manager):null
+      if(!reviewer||reviewer.role!=="manager"||!reviewer.permissions.review_entries||!reviewer.permissions.view_team)return Response.json({error:"Choose an active manager with review and team-view rights before submitting."},{status:400})
     }
 
     if (patch.status === "approved" || patch.status === "rejected") {
@@ -251,13 +259,20 @@ export async function PATCH(
       if(!forwarded)return Response.json({error:"Evidence changed. Refresh before approving."},{status:409})
       return Response.json({entry:forwarded})
     }
+    const revision=patch.expectedRevision??current.revision
+    if(!revision)return Response.json({error:"Refresh this timesheet before saving a status or editing it."},{status:409})
+    if(patch.status==="rejected"){
+      const rejected=await rejectSubmittedEntry(id,access.email,revision,patch.reviewNote!.trim(),getAuditContext(req))
+      if(!rejected)return Response.json({error:"Evidence changed or was already reviewed. Refresh before rejecting."},{status:409})
+      return Response.json({entry:rejected})
+    }
     const entry = await updateTimeEntry(
       access.email,
       id,
       patch,
       access.includeAll,
       access.canReview ? access.email : undefined,
-      patch.expectedRevision,
+      revision,
     )
 
     if (!entry) {
@@ -282,10 +297,13 @@ export async function PATCH(
 
     return Response.json({ entry })
   } catch (err) {
-    console.error("[entries] update failed")
+    if(err instanceof z.ZodError||err instanceof SyntaxError)return Response.json({error:"Invalid entry update. Check the selected fields and rejection reason."},{status:400})
+    const reference=crypto.randomUUID()
+    const databaseCode=err&&typeof err==="object"&&"code" in err&&typeof err.code==="string"&&/^[A-Z0-9]{5}$/.test(err.code)?err.code:"unavailable"
+    console.error("[entries] update failed",{reference,databaseCode})
     return Response.json(
-      { error: "Failed to update entry." },
-      { status: 400 },
+      { error: "The update could not be confirmed. Refresh before retrying; the server may have saved it.",reference },
+      { status: 503 },
     )
   }
 }

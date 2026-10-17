@@ -3,6 +3,8 @@
  * Private-recipient visibility remains enforced by the SQL accessor.
  */
 import {beforeEach,expect,it,vi} from "vitest"
+vi.mock("@/lib/account-identities",()=>({listAccountIdentities:vi.fn(async()=>[])}))
+vi.mock("@/lib/message-history-store",()=>({historyPage:vi.fn(async()=>[])}))
 vi.mock("@/auth",()=>({auth:vi.fn()}))
 vi.mock("@/lib/effective-permissions",()=>({getEffectivePermissions:vi.fn()}))
 vi.mock("@/lib/collaboration",()=>({actorRoster:vi.fn(),listMessages:vi.fn(),sendMessage:vi.fn(),readMessages:vi.fn(),changeMessage:vi.fn(),editableMessage:vi.fn()}))
@@ -12,12 +14,20 @@ import {auth} from "@/auth"
 import {getEffectivePermissions} from "@/lib/effective-permissions"
 import {listMessages,sendMessage,actorRoster,readMessages,changeMessage,editableMessage} from "@/lib/collaboration"
 import {resolvePermissions} from "@/lib/permissions"
+import {listAccountIdentities} from "@/lib/account-identities"
 import {GET,POST,PATCH,DELETE} from "./route"
 import * as envelopes from "@/lib/message-envelope"
 beforeEach(()=>{vi.resetAllMocks();vi.mocked(auth).mockResolvedValue({user:{email:"employee@example.com"}} as never);vi.mocked(getEffectivePermissions).mockResolvedValue({role:"employee",permissions:resolvePermissions("employee")});vi.mocked(listMessages).mockResolvedValue([])})
 it("loads only the authenticated employee inbox and eligible broadcasts",async()=>{
   expect((await GET()).status).toBe(200)
   expect(listMessages).toHaveBeenCalledWith("employee@example.com",true)
+})
+it("uses approved names for company messages instead of personal profile nicknames",async()=>{
+  vi.mocked(listMessages).mockResolvedValue([{id:"known",sender_email:"manager@example.com",recipient_email:"employee@example.com",body:"Hello",created_at:"2026-10-15T12:00:00Z"}] as never)
+  vi.mocked(listAccountIdentities).mockResolvedValue([{email:"manager@example.com",officialName:"Official Manager",contractorNumber:"TN-one"},{email:"employee@example.com",officialName:"Official Employee",contractorNumber:"TN-two"}])
+  const data=await (await GET()).json()
+  expect(data.messages[0]).toMatchObject({sender_name:"Official Manager",recipient_name:"Official Employee"})
+  expect(JSON.stringify(data)).not.toContain("nickname")
 })
 it("denies employee broadcast sending",async()=>{
   expect((await POST(new Request("http://localhost/tanovo-time/api/messages",{method:"POST",body:JSON.stringify({recipient:null,body:"Announcement"})}))).status).toBe(403)

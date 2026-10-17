@@ -3,16 +3,17 @@
  * Own-record decisions must never reach database mutation or audit helpers.
  */
 import { beforeEach,expect,it,vi } from "vitest"
+vi.mock("@/lib/account-identities",()=>({listAccountIdentities:vi.fn(async()=>[])}))
 vi.mock("@/auth",()=>({auth:vi.fn()}))
 vi.mock("@/lib/effective-permissions",()=>({getEffectivePermissions:vi.fn()}))
 vi.mock("@/lib/access",()=>({getEffectiveUserRole:vi.fn()}))
-vi.mock("@/lib/db",()=>({getTimeEntry:vi.fn(),updateTimeEntry:vi.fn(),deleteTimeEntry:vi.fn(),recordAuditEvent:vi.fn()}))
+vi.mock("@/lib/db",()=>({getTimeEntry:vi.fn(),updateTimeEntry:vi.fn(),rejectSubmittedEntry:vi.fn(),deleteTimeEntry:vi.fn(),recordAuditEvent:vi.fn()}))
 vi.mock("@/lib/review-requests",()=>({listReviewRequests:vi.fn(async()=>[])}))
 vi.mock("@/lib/account-handoffs",()=>({approveAndForward:vi.fn()}))
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { getEffectiveUserRole } from "@/lib/access"
-import { getTimeEntry,updateTimeEntry,deleteTimeEntry } from "@/lib/db"
+import { getTimeEntry,updateTimeEntry,deleteTimeEntry,rejectSubmittedEntry } from "@/lib/db"
 import { resolvePermissions } from "@/lib/permissions"
 import { PATCH,DELETE } from "./route"
 import { approveAndForward } from "@/lib/account-handoffs"
@@ -82,11 +83,12 @@ it.each(["approved","rejected"] as const)("persists an independent contractor de
   vi.mocked(getEffectiveUserRole).mockResolvedValue("contractor")
   vi.mocked(getTimeEntry).mockResolvedValue({id:"entry",ownerEmail:"contractor@example.com",status:"submitted",revision} as never)
   vi.mocked(updateTimeEntry).mockResolvedValue({id:"entry",status,reviewNote:"Checked evidence",revision:"next"} as never)
+  vi.mocked(rejectSubmittedEntry).mockResolvedValue({id:"entry",status,reviewNote:"Checked evidence",revision:"next"} as never)
   const response=await PATCH(new Request("http://localhost/api/entries/entry",{method:"PATCH",body:JSON.stringify({status,reviewNote:"Checked evidence",expectedRevision:revision})}),{params:Promise.resolve({id:"entry"})})
   expect(response.status).toBe(200)
   expect((await response.json()).entry.status).toBe(status)
   if(status==="approved")expect(approveAndForward).toHaveBeenCalledWith("entry","manager@example.com",revision,"contractor",expect.anything())
-  else expect(updateTimeEntry).toHaveBeenCalledWith("manager@example.com","entry",expect.objectContaining({status,reviewNote:"Checked evidence"}),true,"manager@example.com",revision)
+  else expect(rejectSubmittedEntry).toHaveBeenCalledWith("entry","manager@example.com",revision,"Checked evidence",expect.anything())
 })
 
 it("requires a reason before independent rejection reaches persistence",async()=>{
@@ -95,4 +97,19 @@ it("requires a reason before independent rejection reaches persistence",async()=
   const response=await PATCH(new Request("http://localhost/api/entries/entry",{method:"PATCH",body:JSON.stringify({status:"rejected"})}),{params:Promise.resolve({id:"entry"})})
   expect(response.status).toBe(400)
   expect(updateTimeEntry).not.toHaveBeenCalled()
+})
+it("prevents view-only cross-manager access from recalling another person's submission",async()=>{
+  vi.mocked(getEffectiveUserRole).mockResolvedValue("contractor")
+  vi.mocked(getEffectivePermissions).mockResolvedValue({role:"manager",permissions:resolvePermissions("manager",{view_other_manager_entries:true})})
+  vi.mocked(getTimeEntry).mockResolvedValue({id:"entry",ownerEmail:"contractor@example.com",reviewManagerEmail:"different@example.com",status:"submitted",revision:"original"} as never)
+  const response=await PATCH(new Request("http://localhost/api/entries/entry",{method:"PATCH",body:JSON.stringify({status:"draft"})}),{params:Promise.resolve({id:"entry"})})
+  expect(response.status).toBe(403);expect(updateTimeEntry).not.toHaveBeenCalled()
+})
+it("returns a conflict instead of success when rejection evidence is stale",async()=>{
+  vi.mocked(getEffectiveUserRole).mockResolvedValue("contractor")
+  vi.mocked(getTimeEntry).mockResolvedValue({id:"entry",ownerEmail:"contractor@example.com",status:"submitted",revision:"current"} as never)
+  vi.mocked(rejectSubmittedEntry).mockResolvedValue(null)
+  const response=await PATCH(new Request("http://localhost/api/entries/entry",{method:"PATCH",body:JSON.stringify({status:"rejected",reviewNote:"Reason",expectedRevision:"stale"})}),{params:Promise.resolve({id:"entry"})})
+  expect(response.status).toBe(409)
+  expect(rejectSubmittedEntry).toHaveBeenCalledWith("entry","manager@example.com","stale","Reason",expect.anything())
 })

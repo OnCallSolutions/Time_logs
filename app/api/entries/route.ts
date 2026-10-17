@@ -11,6 +11,7 @@ import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { getEffectiveUserRole } from "@/lib/access"
 import { canReviewRole } from "@/lib/review-policy"
 import { createReviewAccess } from "@/lib/review-access"
+import { listAccountIdentities } from "@/lib/account-identities"
 import { getAuditContext } from "@/lib/audit"
 import {
   clearTimeEntries,
@@ -80,9 +81,13 @@ export async function GET() {
     const eligible=[]
     for(const entry of entries){
       const scope = await resolve(entry)
-      if(scope.visible)eligible.push({...entry,reviewEligible:scope.reviewable})
+      if(scope.visible)eligible.push({...entry,reviewEligible:scope.reviewable,approvalEligible:scope.reviewable&&(access.role==="account_manager"||access.permissions.send_to_accounts)})
     }
-    return Response.json({ entries:eligible },{headers:{"Cache-Control":"no-store"}})
+    const identities=await listAccountIdentities(eligible.flatMap(entry=>entry.ownerEmail?[entry.ownerEmail]:[]))
+    return Response.json({ entries:eligible.map(entry=>{
+      const identity=identities.find(person=>person.email===entry.ownerEmail?.toLowerCase())
+      return identity?{...entry,contractor:identity.officialName,contractorNumber:identity.contractorNumber,shortReference:identity.shortReference,companyCode:identity.companyCode,employeeId:identity.employeeId}:entry
+    }) },{headers:{"Cache-Control":"no-store"}})
   } catch (err) {
     console.error("[entries] list failed")
     return Response.json(
@@ -111,7 +116,8 @@ export async function POST(req: Request) {
     if (!access.permissions.create_entries) return Response.json({error:"Forbidden."},{status:403})
 
     const body = createSchema.parse(await req.json())
-    const entries = await createTimeEntries(access.email, body.entries)
+    const identity=(await listAccountIdentities([access.email]))[0]
+    const entries = await createTimeEntries(access.email, body.entries.map(entry=>identity?{...entry,contractor:identity.officialName}:entry),identity?.contractorNumber)
     const auditContext = getAuditContext(req)
 
     await Promise.all(
@@ -133,11 +139,11 @@ export async function POST(req: Request) {
 
     return Response.json({ entries }, { status: 201 })
   } catch (err) {
-    console.error("[entries] create failed")
-    return Response.json(
-      { error: "Failed to save entries." },
-      { status: 400 },
-    )
+    if(err instanceof z.ZodError||err instanceof SyntaxError)return Response.json({error:"Invalid time entries. Check dates, hours and project names."},{status:400})
+    const reference=crypto.randomUUID()
+    const databaseCode=err&&typeof err==="object"&&"code" in err&&typeof err.code==="string"&&/^[A-Z0-9]{5}$/.test(err.code)?err.code:"unavailable"
+    console.error("[entries] create outcome unconfirmed",{reference,databaseCode})
+    return Response.json({error:"The submission could not be confirmed. Refresh entries before retrying; some rows may already have saved.",reference},{status:503})
   }
 }
 

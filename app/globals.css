@@ -315,3 +315,13 @@
   max-height: none;
   border-radius: 0;
 }
+
+/* A session check must also shield portals, not just the workspace root. */
+body[data-session-checking='true'] > :not([data-session-guard='true']) {
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+body[data-session-checking='true'] > [data-session-guard='true'] {
+  visibility: visible !important;
+  z-index: 200;
+}

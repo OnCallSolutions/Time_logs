@@ -6,6 +6,7 @@
 import "server-only"
 import { neon } from "@neondatabase/serverless"
 import type { KeyBackup, PublicMessageKey } from "@/lib/message-crypto"
+import { organizationRecoveryKeys } from "./message-organization-recovery"
 const sql=neon(process.env.DATABASE_URL!)
 let keySchema:Promise<void>|undefined
 /** @returns Promise<void> once idempotent encrypted-key storage exists. */
@@ -25,10 +26,12 @@ export async function ownMessageKey(email:string):Promise<(PublicMessageKey&{bac
 }
 /** @param emails - Authorized participant identities. @returns Public keys only, never recovery backups. */
 export async function publicMessageKeys(emails:string[]):Promise<PublicMessageKey[]>{
-  await ensureKeys();return await sql`
+  await ensureKeys();const rows=await sql`
     SELECT email,public_key AS "publicKey",signing_key AS "signingKey",fingerprint,NULL::text AS "deviceId" FROM app_message_keys WHERE email=ANY(${emails.map(email=>email.toLowerCase())}::text[])
     UNION ALL
     SELECT email,public_key AS "publicKey",signing_key AS "signingKey",fingerprint,device_id::text AS "deviceId" FROM app_message_devices WHERE email=ANY(${emails.map(email=>email.toLowerCase())}::text[])` as PublicMessageKey[]
+  // Recovery does not enroll a never-connected recipient on its own.
+  return [...rows,...organizationRecoveryKeys(emails.filter(email=>rows.some(key=>key.email===email.toLowerCase())))]
 }
 /**
  * Registers an immutable browser device without accepting any private material.

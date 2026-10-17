@@ -14,17 +14,20 @@ vi.mock("@/components/account-profile",()=>({AccountProfile:()=>null}))
 vi.mock("@/components/sign-out-button",()=>({SignOutButton:()=>null}))
 vi.mock("@/components/note-input",()=>({NoteInput:()=> <p>Note extraction</p>}))
 vi.mock("@/components/manager-report",()=>({ManagerReport:()=> <h2>Team report fixture</h2>}))
+vi.mock("@/components/business-accounts",()=>({BusinessAccounts:()=> <h2>Business queue fixture</h2>}))
 const entries = [
   {id:"submitted",contractor:"Employee A",date:"2026-10-07",hours:8,project:"Delivery",description:"Project work",status:"submitted"},
   {id:"rejected",contractor:"Employee B",date:"2026-10-07",hours:4,project:"Review",description:"Corrections",status:"rejected"},
 ]
+let servedEntries=entries
 beforeEach(()=>{
   testRole = "employee"; overrides = {}
+  servedEntries=entries
   vi.stubGlobal("fetch",vi.fn(async (url:string,init?:RequestInit)=> {
     if(url.endsWith("/api/permissions")) return Response.json({role:testRole,permissions:resolvePermissions(testRole,overrides)})
     if(url.endsWith("/api/review")) return Response.json({recommendations:[{entryId:"submitted",decision:"approved",reason:"No obvious inconsistency"}]})
     if(init?.method === "PATCH") return Response.json({entry:{...entries[0],status:"approved"}})
-    if(url.endsWith("/api/entries")) return Response.json({entries})
+    if(url.endsWith("/api/entries")) return Response.json({entries:servedEntries})
     if(url.endsWith("/api/users")) return Response.json({users:[]})
     return Response.json({events:[]})
   }))
@@ -86,4 +89,23 @@ it("adds approval controls when an employee receives a delegated review right",a
   fireEvent(window,new Event("focus"))
   await screen.findByRole("button",{name:/^approvals/i})
   expect(screen.queryByRole("button",{name:"Admin"})).not.toBeInTheDocument()
+})
+it("groups admin business accounts under Operations and Back returns to that group",async()=>{
+  testRole="admin"
+  render(<TimesheetApp role="admin" userEmail="admin@example.com" />)
+  await screen.findByRole("button",{name:"User directory"})
+  expect(screen.queryByRole("button",{name:"Business accounts"})).not.toBeInTheDocument()
+  expect(screen.getByRole("button",{name:"Manage employees/contractors"})).toBeVisible()
+  await userEvent.click(screen.getByRole("button",{name:"Operations"}))
+  await userEvent.click(within(screen.getByRole("dialog",{name:"Operations"})).getByRole("button",{name:"Business accounts"}))
+  expect(await screen.findByRole("heading",{name:"Business queue fixture"})).toBeVisible()
+  await userEvent.click(within(screen.getByRole("dialog",{name:"Business accounts"})).getByRole("button",{name:"Back"}))
+  expect(screen.getByRole("dialog",{name:"Operations"})).toBeVisible()
+})
+it("refreshes the submitter's status and rejection reason when their browser regains focus",async()=>{
+  render(<TimesheetApp role="employee" userEmail="employee@example.com" />)
+  await screen.findByText("Employee A")
+  servedEntries=entries.map(entry=>entry.id==="submitted"?{...entry,status:"rejected",reviewNote:"Correct the submitted hours"}:entry)
+  fireEvent(window,new Event("focus"))
+  expect(await screen.findByText("Correct the submitted hours")).toBeVisible()
 })
