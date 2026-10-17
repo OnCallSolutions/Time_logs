@@ -69,8 +69,10 @@ export function ManagerReport({ entries }: { entries: TimeEntry[] }) {
   const [contractor, setContractor] = useState("all")
   const [project, setProject] = useState("all")
   const [status, setStatus] = useState<"all" | EntryStatus>("all")
+  const [dateFrom,setDateFrom]=useState("")
+  const [dateThrough,setDateThrough]=useState("")
   const [viewBy, setViewBy] = useState<"summary" | "entries">("summary")
-  const [groupBy, setGroupBy] = useState<"contractor" | "project" | "date" | "status">("contractor")
+  const [groupBy, setGroupBy] = useState<"contractor" | "project" | "date" | "month" | "status">("contractor")
   const [sortBy, setSortBy] = useState("hours_desc")
 
   const contractors = useMemo(
@@ -89,9 +91,10 @@ export function ManagerReport({ entries }: { entries: TimeEntry[] }) {
           (contractor === "all" || e.contractor === contractor) &&
             (project === "all" || e.project === project) &&
             (status === "all" || e.status === status) &&
+            (!dateFrom||e.date>=dateFrom) && (!dateThrough||e.date<=dateThrough) &&
             (!query.trim() || [e.contractor,e.project,e.description,e.reviewNote,e.date,e.status].some(value=>value?.toLowerCase().includes(query.trim().toLowerCase()))),
       ),
-    [entries, contractor, project, status, query],
+    [entries, contractor, project, status, dateFrom, dateThrough, query],
   )
 
   const totalHours = filtered.reduce((s, e) => s + (Number(e.hours) || 0), 0)
@@ -103,8 +106,10 @@ export function ManagerReport({ entries }: { entries: TimeEntry[] }) {
         ? entry.project
         : groupBy === "date"
           ? entry.date
-          : entry.status
-  const groupTitle = groupBy === "date" ? "day" : groupBy
+          : groupBy === "month"
+            ? entry.date.slice(0,7)
+            : entry.status
+  const groupTitle = groupBy === "date" ? "day" : groupBy === "month" ? "month" : groupBy
   const byGroup = useMemo(() => {
     const map = new Map<string, { hours: number; projects: Set<string>; contractors: Set<string>; count: number; firstDate: string; lastDate: string }>()
     for (const e of filtered) {
@@ -218,13 +223,15 @@ export function ManagerReport({ entries }: { entries: TimeEntry[] }) {
     }, new Map<string, TimeEntry[]>()).entries(),
   )
   const groupLabelForDisplay = (label: string) =>
-    groupBy === "date" ? fmtDate(label) : groupBy === "status" ? label[0]?.toUpperCase() + label.slice(1) : label
-  const hasFilters = query.trim() !== "" || contractor !== "all" || project !== "all" || status !== "all"
+    groupBy === "date" ? fmtDate(label) : groupBy === "month" ? new Date(`${label}-01T00:00:00`).toLocaleDateString(undefined,{month:"long",year:"numeric"}) : groupBy === "status" ? label[0]?.toUpperCase() + label.slice(1) : label
+  const hasFilters = query.trim() !== "" || contractor !== "all" || project !== "all" || status !== "all" || dateFrom!=="" || dateThrough!==""
   const resetFilters = () => {
     setQuery("")
     setContractor("all")
     setProject("all")
     setStatus("all")
+    setDateFrom("")
+    setDateThrough("")
   }
 
   return (
@@ -249,6 +256,8 @@ export function ManagerReport({ entries }: { entries: TimeEntry[] }) {
           <select id="report-status" aria-label="Status filter" className={selectCls} value={status} onChange={(event) => setStatus(event.target.value as "all" | EntryStatus)}>
             {statusOptions.map((option) => <option key={option.value} value={option.value}>{option.label} status</option>)}
           </select>
+          <label className="flex items-center gap-1.5 text-xs text-slate-600" htmlFor="report-date-from">From<input id="report-date-from" aria-label="From date" type="date" value={dateFrom} max={dateThrough||undefined} onChange={event=>setDateFrom(event.target.value)} className={selectCls}/></label>
+          <label className="flex items-center gap-1.5 text-xs text-slate-600" htmlFor="report-date-through">Through<input id="report-date-through" aria-label="Through date" type="date" value={dateThrough} min={dateFrom||undefined} onChange={event=>setDateThrough(event.target.value)} className={selectCls}/></label>
           <Button variant="outline" size="icon-sm" title="Clear filters" aria-label="Clear filters" disabled={!hasFilters} onClick={resetFilters} className="border-slate-300 bg-white"><FilterX className="size-4" /></Button>
           <Button variant="outline" size="sm" onClick={exportCsv} className="border-orange-300 bg-orange-50 text-orange-900 hover:bg-orange-100">
             <Download className="size-3.5" aria-hidden="true" /> Export
@@ -263,7 +272,7 @@ export function ManagerReport({ entries }: { entries: TimeEntry[] }) {
             </div>
             <label className="ml-1 flex items-center gap-1.5 text-xs text-slate-600" htmlFor="report-group">Group
               <select id="report-group" aria-label="Group by" className={selectCls} value={groupBy} onChange={(event) => setGroupBy(event.target.value as typeof groupBy)}>
-                <option value="contractor">Contractor</option><option value="project">Project</option><option value="date">Date</option><option value="status">Status</option>
+                <option value="contractor">Contractor</option><option value="project">Project</option><option value="date">Date</option><option value="month">Month</option><option value="status">Status</option>
               </select>
             </label>
             <label className="flex items-center gap-1.5 text-xs text-slate-600" htmlFor="report-sort">Sort

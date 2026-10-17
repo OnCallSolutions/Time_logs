@@ -132,6 +132,8 @@ function mockTimesheetFetch() {
     if (url === "/tanovo-time/api/permissions") return jsonResponse({role:"admin",permissions:resolvePermissions("admin")})
     fetchCalls.push({ url, method, body })
 
+    if (url === "/tanovo-time/api/assistant/conversations" && method === "POST") return jsonResponse({ messages: [] })
+
     if (url === "/tanovo-time/api/entries") {
       return jsonResponse({ entries: [] })
     }
@@ -249,6 +251,9 @@ describe("TimesheetApp admin directory", () => {
 
     const activity = await screen.findByRole("dialog", { name: "All app activity" })
     expect(activity).toHaveAttribute("data-window-expanded", "true")
+    expect(within(activity).getByRole("searchbox",{name:"Search audit logs"})).toBeVisible()
+    expect(within(activity).getByRole("combobox",{name:"Group audit logs by"})).toBeVisible()
+    expect(within(activity).getByRole("combobox",{name:"Audit timesheet period filter"})).toBeVisible()
     expect(within(activity).getByText("Distinct actors")).toBeVisible()
     expect(within(activity).getByText("entry approved")).toHaveClass("bg-emerald-50")
     expect(within(activity).getByText("time entry")).toHaveClass("bg-blue-50")
@@ -311,14 +316,13 @@ describe("TimesheetApp admin directory", () => {
     await user.click(screen.getByRole("button", { name: "Back" }))
     await user.click(within(screen.getByRole("dialog", { name: "Admin" })).getByRole("button", { name: "Back" }))
 
-    const assistant = screen.getByRole("region", { name: "DevOnCall assistant" })
-    expect(assistant).toBeInTheDocument()
-    expect(within(assistant).getByRole("heading", { name: "DevOnCall" })).toBeVisible()
-    const mainAssistant = screen.getByRole("region", { name: "DevOnCall assistant" })
-    const composer = within(mainAssistant).getByLabelText("Ask DevOnCall")
+    expect(screen.queryByRole("region", { name: "DevOnCall assistant" })).not.toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Go to DevOnCall assistant" }))
+    const mainAssistant = await screen.findByRole("region", { name: "DevOnCall assistant" })
+    expect(within(mainAssistant).getByRole("heading", { name: "DevOnCall" })).toBeVisible()
+    const composer = within(mainAssistant).getByLabelText("Ask DevOnCall")
     await waitFor(() => expect(composer).toHaveFocus())
-    expect(within(mainAssistant).getByText("Tanovo Time · Workspace questions and actions")).toBeVisible()
+    expect(within(mainAssistant).getByText("Tanovo Time · Workspace assistant")).toBeVisible()
     expect(screen.getAllByRole("region", { name: "DevOnCall assistant" })).toHaveLength(1)
   })
 

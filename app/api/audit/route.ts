@@ -7,7 +7,7 @@
  */
 import { auth } from "@/auth"
 import { getEffectiveUserRole } from "@/lib/access"
-import { listAuditEvents } from "@/lib/db"
+import { listAuditEventPage } from "@/lib/db"
 
 export const runtime = "nodejs"
 
@@ -33,9 +33,15 @@ export async function GET(req: Request) {
 
     const url = new URL(req.url)
     const limit = Number(url.searchParams.get("limit") ?? "100")
-    const events = await listAuditEvents(Number.isFinite(limit) ? limit : 100)
-
-    return Response.json({ events })
+    const beforeAt=url.searchParams.get("beforeAt")??undefined
+    const beforeId=url.searchParams.get("beforeId")??undefined
+    if(Boolean(beforeAt)!==Boolean(beforeId)||beforeAt&&(!Number.isFinite(Date.parse(beforeAt))||!beforeId||! /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(beforeId)))return Response.json({error:"Invalid audit cursor."},{status:400})
+    if(beforeAt){
+      const page=await listAuditEventPage({limit:Number.isFinite(limit)?limit:250,beforeAt,beforeId})
+      return Response.json(page,{headers:{"Cache-Control":"no-store"}})
+    }
+    const page=await listAuditEventPage({limit:Number.isFinite(limit)?limit:250})
+    return Response.json(page,{headers:{"Cache-Control":"no-store"}})
   } catch (err) {
     console.error("[audit] list failed")
     return Response.json(

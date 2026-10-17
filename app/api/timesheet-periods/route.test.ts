@@ -13,7 +13,7 @@ const payload={name:"October 2026",startDate:"2026-10-01",endDate:"2026-10-31",s
 beforeEach(()=>{
   vi.resetAllMocks()
   vi.mocked(auth).mockResolvedValue({user:{email:"admin@example.com"}} as never)
-  vi.mocked(getEffectivePermissions).mockResolvedValue({role:"admin",permissions:{}} as never)
+  vi.mocked(getEffectivePermissions).mockResolvedValue({role:"admin",permissions:{manage_timesheet_periods:true}} as never)
   vi.mocked(listTimesheetPeriods).mockResolvedValue([])
   vi.mocked(createTimesheetPeriod).mockResolvedValue({id:"period",...payload,submissionDeadline:payload.submissionDeadline,createdBy:"admin@example.com",createdAt:"2026-10-17T00:00:00.000Z"})
 })
@@ -21,8 +21,20 @@ it("lets signed-in actors view configured periods",async()=>{
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"contractor",permissions:{}} as never)
   expect((await GET()).status).toBe(200)
 })
-it("requires administrator rights to create a period",async()=>{
+it("requires explicit period-management rights to create a period",async()=>{
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"manager",permissions:{}} as never)
+  const response=await POST(new Request("http://localhost/api/timesheet-periods",{method:"POST",body:JSON.stringify(payload)}))
+  expect(response.status).toBe(403)
+  expect(createTimesheetPeriod).not.toHaveBeenCalled()
+})
+it("allows account managers with the period-management right to create periods",async()=>{
+  vi.mocked(getEffectivePermissions).mockResolvedValue({role:"account_manager",permissions:{manage_timesheet_periods:true}} as never)
+  const response=await POST(new Request("http://localhost/api/timesheet-periods",{method:"POST",body:JSON.stringify(payload)}))
+  expect(response.status).toBe(201)
+  expect(createTimesheetPeriod).toHaveBeenCalledWith(payload,"admin@example.com",expect.anything())
+})
+it("does not allow account managers whose period-management right was revoked",async()=>{
+  vi.mocked(getEffectivePermissions).mockResolvedValue({role:"account_manager",permissions:{manage_timesheet_periods:false}} as never)
   const response=await POST(new Request("http://localhost/api/timesheet-periods",{method:"POST",body:JSON.stringify(payload)}))
   expect(response.status).toBe(403)
   expect(createTimesheetPeriod).not.toHaveBeenCalled()

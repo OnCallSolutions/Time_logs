@@ -2,7 +2,7 @@
  * Covers the report's filtering, grouping, sorting, and view-mode controls.
  * These behaviors keep summary totals and detailed rows aligned for reviewers.
  */
-import { render, screen, within } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { expect, it } from "vitest"
 import type { TimeEntry } from "@/lib/types"
@@ -94,4 +94,14 @@ it("shows grouped compact detail rows and applies the chosen sort", async () => 
   expect(rows[2]).toHaveTextContent("Alex Morgan")
   expect(rows[3]).toHaveTextContent("Website")
   expect(within(report).getByText("Added accessibility tests")).toBeVisible()
+})
+
+it("filters by a date range and groups summary totals by month",async()=>{
+  const user=userEvent.setup()
+  setup()
+  fireEvent.change(screen.getByLabelText("From date"),{target:{value:"2026-10-15"}})
+  expect(screen.getByRole("region",{name:"Report controls"})).toHaveTextContent("2 entries")
+  await user.selectOptions(screen.getByRole("combobox",{name:"Group by"}),"month")
+  expect(screen.getByRole("region",{name:"Hours by month"})).toHaveTextContent("October 2026")
+  expect(screen.getByRole("region",{name:"Hours by month"})).toHaveTextContent("6h")
 })

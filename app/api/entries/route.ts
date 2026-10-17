@@ -123,25 +123,8 @@ export async function POST(req: Request) {
 
     const body = createSchema.parse(await req.json())
     const identity=(await listAccountIdentities([access.email]))[0]
-    const entries = await createTimeEntries(access.email, body.entries.map(entry=>identity?{...entry,contractor:identity.officialName}:entry),identity?.contractorNumber)
     const auditContext = getAuditContext(req)
-
-    await Promise.all(
-      entries.map((entry) =>
-        recordAuditEvent({
-          actorEmail: access.email,
-          action: "entry_created",
-          targetType: "time_entry",
-          targetId: entry.id,
-          metadata: {
-            status: entry.status,
-            hours: entry.hours,
-            date: entry.date,
-          },
-          ...auditContext,
-        }),
-      ),
-    )
+    const entries = await createTimeEntries(access.email, body.entries.map(entry=>identity?{...entry,contractor:identity.officialName}:entry),identity?.contractorNumber,auditContext)
 
     return Response.json({ entries }, { status: 201 })
   } catch (err) {

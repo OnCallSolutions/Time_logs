@@ -17,8 +17,18 @@ it("checks a restored workspace before making its controls visible",async()=>{
   vi.stubGlobal("fetch",vi.fn(()=>new Promise<Response>(resolve=>{complete=resolve})))
   render(<SessionBoundary><button>Approve private entry</button></SessionBoundary>)
   expect(screen.queryByRole("button",{name:"Approve private entry"})).not.toBeInTheDocument()
+  expect(screen.queryByRole("dialog",{name:"Session verification"})).not.toBeInTheDocument()
   complete(Response.json(deadlines()))
   expect(await screen.findByRole("button",{name:"Approve private entry"})).toBeVisible()
+  expect(screen.queryByRole("dialog",{name:"Session verification"})).not.toBeInTheDocument()
+})
+it("shows the privacy shield only when session verification takes longer than the flicker delay",async()=>{
+  vi.stubGlobal("fetch",vi.fn(()=>new Promise<Response>(()=>{})))
+  render(<SessionBoundary><p>Private work</p></SessionBoundary>)
+  expect(screen.queryByRole("dialog",{name:"Session verification"})).not.toBeInTheDocument()
+  expect(screen.getByText("Private work").closest("[hidden]")).not.toBeNull()
+  expect(await screen.findByRole("dialog",{name:"Session verification"})).toBeVisible()
+  expect(screen.getByRole("status")).toHaveTextContent("Checking your session...")
 })
 it("does not touch activity on restore and explicitly renews from the warning",async()=>{
   const request=vi.fn(async(_url:unknown,init?:RequestInit)=>Response.json(deadlines(init?.method==="POST"?1800:60)))

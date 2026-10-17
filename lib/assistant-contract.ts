@@ -31,6 +31,8 @@ export const assistantResponseSchema = z.object({ answer: z.string().min(1).max(
 export type AssistantProposal = { action: AssistantAction; token: string }
 export const assistantInputSchema = z.object({
   messages: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().min(1).max(6000) }).strict()).min(1).max(12),
+  workspaceContext: z.string().trim().min(1).max(100).regex(/^[a-zA-Z0-9][a-zA-Z0-9 _.-]*$/).default("main"),
+  handoffContext: z.string().max(4000).optional(),
   messageContext: z.string().max(5000).optional(),
 }).strict()
 

@@ -7,9 +7,10 @@ import {expect,it} from "vitest"
 import {MessageReceipt} from "./message-receipt"
 import type {AppMessage} from "@/lib/message-policy"
 const message:AppMessage={id:"test",sender_email:"sender@example.com",recipient_email:"other@example.com",body:"Test",created_at:"2026-10-15T12:00:00Z"}
-it("uses one grey tick while awaiting delivery",()=>{
+it("uses one grey tick and displays only Sent before delivery",()=>{
   render(<MessageReceipt message={message}/> )
-  expect(screen.getByLabelText("Sent, awaiting delivery").querySelector("svg")).toHaveClass("text-gray-500","lucide-check")
+  expect(screen.getByLabelText("Sent").querySelector("svg")).toHaveClass("text-gray-500","lucide-check")
+  expect(screen.queryByText(/awaiting delivery/i)).not.toBeInTheDocument()
 })
 it("uses grey double ticks for delivered unread messages",()=>{
   render(<MessageReceipt message={{...message,delivered_at:message.created_at}}/> )

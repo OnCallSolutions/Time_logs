@@ -341,13 +341,31 @@
   *, *::before, *::after { scroll-behavior: auto !important; }
 }
 
-/* Expanded windows fill the viewport; only their content areas scroll. */
-.window-surface[data-window-expanded='true'] > .window-content > section {
+/* Window content is bounded in both modes so nested forms and tables can scroll. */
+.window-surface > .window-content {
+  min-width: 0;
+  min-height: 0;
+  overscroll-behavior: contain;
+}
+
+.window-surface[data-window-expanded='false'] > .window-content {
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.window-surface[data-window-expanded='false'] > .window-content > :is(section, form),
+.window-surface[data-window-expanded='true'] > .window-content > :is(section, form) {
   width: 100%;
   max-width: none;
   height: 100%;
+  min-height: 0;
   max-height: none;
   border-radius: 0;
+}
+
+/* Expanded windows fill the viewport; the first-level form/section owns scrolling. */
+.window-surface[data-window-expanded='true'] > .window-content {
+  overflow: hidden;
 }
 
 .window-surface[data-window-expanded='true'] {

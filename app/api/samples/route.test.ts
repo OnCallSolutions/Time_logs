@@ -28,6 +28,15 @@ it("uses only the contractor's authenticated name",async()=>{
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"contractor",permissions:resolvePermissions("contractor")})
   const value=await (await GET()).json();expect(value.count).toBeGreaterThanOrEqual(3);expect(value.count).toBeLessThanOrEqual(18);expect(value.notes.split("\n")).toHaveLength(value.count);expect(value.notes.match(/Own Person/g)).toHaveLength(value.count);expect(value.notes).toContain("SAMPLE-USER-001");expect(value.previewOnly).toBe(false)
 })
+it("varies synthetic project names even in the smallest sample batch",async()=>{
+  vi.mocked(auth).mockResolvedValue({user:{email:"own@example.com",name:"Own Person"}} as never)
+  vi.mocked(getEffectivePermissions).mockResolvedValue({role:"contractor",permissions:resolvePermissions("contractor")})
+  const response=await GET(new Request("http://localhost/api/samples?count=3"))
+  const value=await response.json()
+  const projects=[...value.notes.matchAll(/hours on ([^,]+),/g)].map((match:RegExpMatchArray)=>match[1])
+  expect(projects).toEqual(["Sample Project Alpha","Sample Project Beta","Sample Integration"])
+  expect(new Set(projects).size).toBe(3)
+})
 it.each(["manager","account_manager"] as const)("uses generic named and identified display-only samples for %s",async role=>{
   vi.mocked(auth).mockResolvedValue({user:{email:`${role}@example.com`,name:"Real Manager Name"}} as never)
   vi.mocked(getEffectivePermissions).mockResolvedValue({role,permissions:resolvePermissions(role,role==="account_manager"?{view_accounts:true}:undefined)})

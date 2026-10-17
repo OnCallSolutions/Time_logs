@@ -4,10 +4,11 @@
  * These tests use isolated DOM fixtures rather than authenticated accounts.
  */
 import { useState } from "react"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { expect, it } from "vitest"
 import { WindowSurface } from "./window-surface"
+import { WindowAssistantProvider } from "./window-assistant-context"
 
 /**
  * Builds a parent window with an editable draft and a nested security window.
@@ -32,8 +33,15 @@ it("defaults to full screen and restores the previous window and draft with Back
   const parent = screen.getByRole("dialog", { name: "Activity" })
   expect(parent).toHaveFocus()
   expect(parent).toHaveAttribute("data-window-expanded", "true")
+  expect(parent).toHaveAttribute("data-window-resizable", "true")
   await user.click(screen.getByRole("button", { name: "Restore window" }))
   expect(parent).toHaveAttribute("data-window-expanded", "false")
+  const resizeEdge = parent.querySelector<HTMLElement>("[data-resize-edge='se']")
+  expect(resizeEdge).not.toBeNull()
+  fireEvent.pointerDown(resizeEdge!, { pointerId: 1, clientX: 100, clientY: 100 })
+  fireEvent.pointerMove(resizeEdge!, { pointerId: 1, clientX: 140, clientY: 130 })
+  expect(parent.querySelector(".window-content")?.parentElement).toHaveStyle({ width: "280px", height: "240px" })
+  fireEvent.pointerUp(resizeEdge!, { pointerId: 1 })
   await user.click(screen.getByRole("button", { name: "Open security" }))
   expect(parent).not.toBeVisible()
   expect(parent.inert).toBe(true)
@@ -56,4 +64,15 @@ it("Escape returns from the nested window without dismissing its parent", async 
   await user.keyboard("{Escape}")
   expect(screen.getByRole("dialog", { name: "Activity" })).toBeVisible()
   expect(screen.queryByRole("dialog", { name: "Security" })).not.toBeInTheDocument()
+})
+
+it("keeps window AI hidden until its bottom-right assistant button is opened",async()=>{
+  render(<WindowAssistantProvider renderAssistant={(workspace,onClose)=><section aria-label="Window AI">AI for {workspace}<button onClick={onClose}>Close contextual AI</button></section>}>
+    <WindowSurface title="Reports" onBack={()=>{}}><section>Report workspace</section></WindowSurface>
+  </WindowAssistantProvider>)
+  expect(screen.queryByRole("region",{name:"Window AI"})).not.toBeInTheDocument()
+  await userEvent.click(screen.getByRole("button",{name:"Open Reports AI assistant"}))
+  expect(screen.getByRole("region",{name:"Window AI"})).toHaveTextContent("AI for Reports")
+  await userEvent.click(screen.getByRole("button",{name:"Close contextual AI"}))
+  expect(screen.queryByRole("region",{name:"Window AI"})).not.toBeInTheDocument()
 })

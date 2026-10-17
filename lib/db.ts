@@ -151,6 +151,10 @@ export type AuditAction =
   | "profile_updated"
   | "user_access_created"
   | "user_access_updated"
+  | "authentication_succeeded"
+  | "authentication_failed"
+  | "authentication_signed_out"
+  | "client_error_reported"
 
 export type AuditEvent = {
   id: string
@@ -762,6 +766,53 @@ export async function listAuditEvents(limit = 100) {
   return (rows as AuditEventRow[]).map(toAuditEvent)
 }
 
+/** Loads one keyset-paginated audit page so administrators can traverse full history. */
+export async function listAuditEventPage(options:{limit?:number;beforeAt?:string;beforeId?:string}={}){
+  await ensureAuditEventsTable()
+  const safeLimit=Math.min(Math.max(options.limit??250,1),250)
+  const rows=await sql`
+    SELECT id,actor_email,action,target_type,target_id,metadata,ip_address,user_agent,request_method,request_path,request_id,occurred_at
+    FROM audit_events
+    WHERE (${options.beforeAt??null}::timestamptz IS NULL OR (occurred_at,id)<(${options.beforeAt??null}::timestamptz,${options.beforeId??null}::uuid))
+    ORDER BY occurred_at DESC,id DESC
+    LIMIT ${safeLimit+1}
+  ` as AuditEventRow[]
+  const hasMore=rows.length>safeLimit
+  const pageRows=rows.slice(0,safeLimit)
+  const events=pageRows.map(toAuditEvent)
+  const last=events.at(-1)
+  return {events,nextCursor:hasMore&&last?{occurredAt:last.occurredAt,id:last.id}:null}
+}
+
+/** Returns a bounded, privacy-filtered audit timeline for one authenticated patron. */
+export async function listPatronAccountActivity(email: string, limit = 100) {
+  await ensureAuditEventsTable()
+  await ensureTimeEntriesTable()
+  const safeLimit = Math.min(Math.max(limit, 1), 100)
+  const rows = await sql`
+    SELECT event.id,event.action,event.target_type,event.target_id,event.occurred_at::text AS occurred_at
+    FROM audit_events event
+    WHERE lower(event.actor_email) <> lower(${email})
+      AND (
+        (event.target_type IN ('managed_user_access','account_lifecycle') AND lower(event.target_id)=lower(${email}))
+        OR (event.target_type='temporary_assignment' AND lower(event.metadata->>'email')=lower(${email}))
+        OR (event.target_type='time_entry' AND EXISTS (
+          SELECT 1 FROM time_entries entry
+          WHERE entry.id::text=event.target_id AND lower(entry.owner_email)=lower(${email})
+        ))
+      )
+    ORDER BY event.occurred_at DESC
+    LIMIT ${safeLimit}
+  `
+  return (rows as Array<{id:string;action:string;target_type:string;target_id:string|null;occurred_at:string}>).map(row=>({
+    id:row.id,
+    action:row.action,
+    targetType:row.target_type,
+    targetId:row.target_id,
+    occurredAt:row.occurred_at,
+  }))
+}
+
 /**
  * Loads one admin-managed access assignment by email.
  *
@@ -1054,8 +1105,10 @@ export async function createTimeEntries(
   ownerEmail: string,
   entries: ParsedEntry[],
   contractorNumber?: string,
+  context?: AuditContext,
 ) {
   await ensureTimeEntriesTable()
+  if(context)await ensureAuditEventsTable()
 
   if (entries.length === 0) {
     return []
@@ -1066,7 +1119,32 @@ export async function createTimeEntries(
   // Keep each HTTP transaction bounded while reducing per-row network overhead.
   for (let offset = 0; offset < entries.length; offset += 50) {
     const batch = entries.slice(offset, offset + 50)
-    const results = await sql.transaction(batch.map(entry => sql`
+    const results = await sql.transaction(batch.map(entry => context ? sql`
+      WITH created AS (
+      INSERT INTO time_entries (
+        contractor, work_date, hours, project, description, owner_email, contractor_number
+      )
+      VALUES (
+        ${entry.contractor}, ${entry.date}, ${entry.hours}, ${entry.project || "General"},
+        ${entry.description || ""}, ${ownerEmail}, ${contractorNumber ?? null}
+      )
+      RETURNING id, owner_email, contractor_number, review_manager_email,
+        payout_eligible_at, contractor, work_date, hours, project, description,
+        status, reviewed_by, reviewed_at, review_note, updated_at::text AS updated_at
+      ), audited AS (
+        INSERT INTO audit_events (
+          actor_email, action, target_type, target_id, metadata, ip_address,
+          user_agent, request_method, request_path, request_id
+        )
+        SELECT ${ownerEmail.toLowerCase()}, 'entry_created', 'time_entry', id::text,
+          jsonb_build_object('status',status,'hours',hours,'date',work_date),
+          ${context.ipAddress}, ${context.userAgent}, ${context.requestMethod},
+          ${context.requestPath}, ${context.requestId}
+        FROM created
+        RETURNING target_id
+      )
+      SELECT * FROM created WHERE EXISTS(SELECT 1 FROM audited)
+    ` : sql`
       INSERT INTO time_entries (
         contractor, work_date, hours, project, description, owner_email, contractor_number
       )

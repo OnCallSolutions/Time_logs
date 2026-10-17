@@ -21,6 +21,7 @@ import {SESSION_WARNING_SECONDS,type AppSessionState} from "@/lib/session-policy
  */
 export function SessionBoundary({children,onExpired,accountEmail}:{children:ReactNode;onExpired?:()=>void;accountEmail?:string|null}){
   const [state,setState]=useState<AppSessionState|null>(null),[covered,setCovered]=useState(true),[error,setError]=useState("")
+  const [showChecking,setShowChecking]=useState(false)
   const [remaining,setRemaining]=useState(Infinity),[busy,setBusy]=useState(false),[expired,setExpired]=useState(false)
   const [warningDismissed,setWarningDismissed]=useState(false)
   const clockOffset=useRef(0),pending=useRef(false),dirty=useRef(false),lastTouch=useRef(0),mounted=useRef(true)
@@ -31,6 +32,11 @@ export function SessionBoundary({children,onExpired,accountEmail}:{children:Reac
     else delete document.body.dataset.sessionChecking
     return()=>{delete document.body.dataset.sessionChecking}
   },[covered])
+  useEffect(()=>{
+    if(!covered||error){setShowChecking(false);return}
+    const timer=window.setTimeout(()=>setShowChecking(true),200)
+    return()=>window.clearTimeout(timer)
+  },[covered,error])
   const expire=useCallback(()=>{if(ended.current)return;ended.current=true;setExpired(true);invalidateClientData();if(onExpired)onExpired();else window.location.replace(`${basePath}?session=expired`)},[onExpired])
   /**
    * Checks authenticated server deadlines or submits a throttled activity signal.
@@ -73,7 +79,7 @@ export function SessionBoundary({children,onExpired,accountEmail}:{children:Reac
   const hard=state&&Date.parse(state.absoluteExpiresAt)<=Date.parse(state.expiresAt)+1000
   return <>
     <div hidden={covered} inert={covered}>{children}</div>
-    {covered&&<WindowSurface title="Session verification" sessionGuard disabled onBack={()=>{}}><section className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-white p-6"><p role={error?"alert":"status"}>{error||"Checking your session..."}</p>{error&&<Button disabled={busy} onClick={()=>void check()}>Retry session check</Button>}</section></WindowSurface>}
+    {covered&&(error||showChecking)&&<WindowSurface title="Session verification" sessionGuard disabled onBack={()=>{}}><section className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-white p-6"><p role={error?"alert":"status"}>{error||"Checking your session..."}</p>{error&&<Button disabled={busy} onClick={()=>void check()}>Retry session check</Button>}</section></WindowSurface>}
     {!covered&&!warningDismissed&&remaining<=SESSION_WARNING_SECONDS*1000&&<WindowSurface title="Session ending soon" disabled={busy} onBack={()=>hard?setWarningDismissed(true):void check(true)}><section className="flex w-full flex-col bg-white"><header className="border-b p-4"><h2 className="font-semibold">{hard?"Please sign in again soon":"Still working?"}</h2></header><div className="space-y-3 p-4"><p>Your session ends in {Math.ceil(remaining/1000)} seconds.</p><p className="text-sm text-muted-foreground">{hard?"The eight-hour security limit cannot be extended. Save your work, then sign out and sign in again.":"Stay signed in to keep working. Background activity does not extend your session."}</p></div><footer className="flex flex-wrap justify-end gap-3 border-t p-4"><SignOutButton/>{hard?<Button disabled={busy} onClick={()=>setWarningDismissed(true)}>Return to work</Button>:<Button disabled={busy} onClick={()=>void check(true)}>{busy?"Checking...":"Stay signed in"}</Button>}</footer></section></WindowSurface>}
   </>
 }

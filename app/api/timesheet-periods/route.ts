@@ -1,4 +1,4 @@
-/** Lists configured timesheet periods and lets admins create non-overlapping periods. */
+/** Lists configured timesheet periods and lets authorized admins/account managers create them. */
 import { z } from "zod"
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
@@ -32,7 +32,7 @@ export async function POST(req: Request) {
     const email = (await auth())?.user?.email
     const access = await getEffectivePermissions(email)
     if (!email) return Response.json({ error: "Unauthorized." }, { status: 401 })
-    if (access.role !== "admin") return Response.json({ error: "Only administrators can configure timesheet periods." }, { status: 403 })
+    if (!access.permissions.manage_timesheet_periods) return Response.json({ error: "You are not authorized to configure timesheet periods." }, { status: 403 })
     const input = periodSchema.parse(await req.json())
     if (input.startDate > input.endDate) return Response.json({ error: "The period start must be on or before its end." }, { status: 400 })
     if (Date.parse(input.submissionDeadline) <= Date.now()) return Response.json({ error: "Choose a future submission deadline." }, { status: 400 })

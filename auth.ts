@@ -13,6 +13,10 @@ import { normalizeEmail } from "@/lib/identity-policy"
 import {createAppSession,readAppSession,revokeAppSession} from "@/lib/app-sessions"
 import {SESSION_MAX_SECONDS} from "@/lib/session-policy"
 
+async function writeAuthAudit(event:{actorEmail:string;action:"authentication_succeeded"|"authentication_failed"|"authentication_signed_out";targetType:string;metadata:Record<string,unknown>}):Promise<void>{
+  try{const {recordAuditEvent}=await import("@/lib/db");await recordAuditEvent(event)}catch{console.error("[auth] Authentication audit event could not be recorded.")}
+}
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
   debug: false,
   logger: {
@@ -20,8 +24,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
      * Records authentication failures without provider payloads or credentials.
      * @returns void after a fixed diagnostic message is written.
      */
-    error() {
+    error(error) {
       console.error("[auth] Authentication failed; verify server configuration.")
+      const errorType=typeof error?.name==="string"?error.name.slice(0,80):"unknown"
+      void writeAuthAudit({actorEmail:"system@tanovo-time.local",action:"authentication_failed",targetType:"authentication",metadata:{provider:"microsoft-entra-id",errorType,outcome:"failed"}})
     },
   },
   trustHost: true,
@@ -29,8 +35,18 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   session:{strategy:"jwt",maxAge:SESSION_MAX_SECONDS},
   jwt:{maxAge:SESSION_MAX_SECONDS},
   events:{
+    /** Records provider sign-ins without storing tokens or claims. */
+    async signIn({user,account}) {
+      if(user.email)await writeAuthAudit({actorEmail:normalizeEmail(user.email),action:"authentication_succeeded",targetType:"authentication",metadata:{provider:account?.provider??"unknown",outcome:"success"}})
+    },
     /** @param event - Signed token supplied by Auth.js on logout. @returns Promise<void> after revoking that session. */
-    async signOut(event){if("token" in event&&typeof event.token?.appSessionId==="string")await revokeAppSession(event.token.appSessionId)},
+    async signOut(event){
+      if("token" in event&&typeof event.token?.appSessionId==="string"){
+        const email=typeof event.token.email==="string"?normalizeEmail(event.token.email):"system@tanovo-time.local"
+        await writeAuthAudit({actorEmail:email,action:"authentication_signed_out",targetType:"authentication",metadata:{outcome:"signed_out"}})
+        await revokeAppSession(event.token.appSessionId)
+      }
+    },
   },
   providers: [
     MicrosoftEntraID({

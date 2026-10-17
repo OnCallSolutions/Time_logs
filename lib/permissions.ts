@@ -27,6 +27,8 @@ export const permissionLabels = {
   request_review_help: "Grant temporary review access to selected timesheets",
   accept_review_requests: "Accept scoped review requests from authorized managers",
   authorize_payouts: "Authorize timesheet payout eligibility (no payment transfer)",
+  manage_timesheet_periods: "Configure timesheet periods and submission windows",
+  view_personal_reports: "View reports for own timesheets",
 } as const
 export type Permission = keyof typeof permissionLabels
 export type PermissionOverrides = Partial<Record<Permission, boolean>>
@@ -45,7 +47,7 @@ export function resolvePermissions(role: UserRole | null, overrides: PermissionO
   const personal = role === "employee" || role === "contractor"
   const defaults: Permissions = {create_entries:!!role,edit_entries:!!role,delete_entries:!!role,
     submit_entries:personal||role==="manager"||role==="admin",review_entries:elevated,view_team:elevated,view_reports:elevated,export_entries:elevated||role==="account_manager",ai_review:elevated,
-    delegate_permissions:elevated,send_messages:elevated,send_to_accounts:elevated,view_accounts:role==="admin",review_accounts:role==="admin",ai_accounts:role==="admin",review_manager_entries:false,view_manager_entries:role==="account_manager",view_other_manager_entries:false,review_other_manager_entries:false,request_review_help:elevated,accept_review_requests:role==="manager",authorize_payouts:false}
+    delegate_permissions:elevated,send_messages:elevated,send_to_accounts:elevated,view_accounts:role==="admin",review_accounts:role==="admin",ai_accounts:role==="admin",review_manager_entries:false,view_manager_entries:role==="account_manager",view_other_manager_entries:false,review_other_manager_entries:false,request_review_help:elevated,accept_review_requests:role==="manager",authorize_payouts:false,manage_timesheet_periods:role==="admin"||role==="account_manager",view_personal_reports:!!role}
   for (const key of Object.keys(permissionLabels) as Permission[]) {
     if (role && typeof overrides[key] === "boolean") defaults[key] = overrides[key]!
   }

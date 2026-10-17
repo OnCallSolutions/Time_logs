@@ -14,5 +14,10 @@ it("does not grant rights to denied accounts",()=>{
 })
 it("gives admins the full timesheet controls while preserving payout authorization as a separate right",()=>{
   const permissions=resolvePermissions("admin")
-  expect(permissions).toMatchObject({create_entries:true,edit_entries:true,delete_entries:true,submit_entries:true,review_entries:true,view_team:true,view_reports:true,export_entries:true,view_accounts:true,review_accounts:true,ai_accounts:true,authorize_payouts:false})
+  expect(permissions).toMatchObject({create_entries:true,edit_entries:true,delete_entries:true,submit_entries:true,review_entries:true,view_team:true,view_reports:true,export_entries:true,view_accounts:true,review_accounts:true,ai_accounts:true,authorize_payouts:false,manage_timesheet_periods:true})
+})
+it("allows account managers to control periods by default but not managers",()=>{
+  expect(resolvePermissions("account_manager").manage_timesheet_periods).toBe(true)
+  expect(resolvePermissions("account_manager",{manage_timesheet_periods:false}).manage_timesheet_periods).toBe(false)
+  expect(resolvePermissions("manager").manage_timesheet_periods).toBe(false)
 })

@@ -2,10 +2,11 @@
  * Checks project grouping without collapsing distinct work records.
  * Both entries retain independent editing and submission controls.
  */
-import { render,screen,within,waitFor,act,fireEvent } from "@testing-library/react"
+import { render,screen,within,waitFor,act,fireEvent,cleanup } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { expect,it,vi } from "vitest"
+import { afterEach,expect,it,vi } from "vitest"
 import { EntriesLog } from "./entries-log"
+afterEach(()=>{cleanup();vi.unstubAllGlobals()})
 it("keeps multiple same-project work units as separate entries",()=>{
   const row={id:"one",contractor:"Person",project:"Project A",date:"2026-10-10",hours:2,description:"Documentation",status:"draft" as const}
   render(<EntriesLog entries={[row,{...row,id:"two",hours:3,description:"Testing"}]} onUpdate={vi.fn()} onStatusChange={vi.fn()} onDelete={vi.fn()} onClear={vi.fn()}/>)
@@ -53,6 +54,27 @@ it("filters timesheets by text, status, project and date, with selectable sort a
   expect(screen.getByText("Build release")).toBeVisible()
   await user.selectOptions(screen.getByRole("combobox",{name:"Filter entry status"}),"submitted")
   expect(screen.getByText("Showing 1 / 3")).toBeVisible()
+})
+
+it("shows only the active period by default and retrieves archived entries on request",async()=>{
+  const now=new Date(),today=[now.getFullYear(),String(now.getMonth()+1).padStart(2,"0"),String(now.getDate()).padStart(2,"0")].join("-")
+  const periods=[
+    {id:"active",name:"Current Cycle",startDate:today,endDate:today,submissionDeadline:"2099-12-31T23:59:00.000Z",managerGraceDays:3},
+    {id:"archive",name:"January 2000",startDate:"2000-01-01",endDate:"2000-01-31",submissionDeadline:"2000-02-05T00:00:00.000Z",managerGraceDays:3},
+  ]
+  vi.stubGlobal("fetch",vi.fn().mockResolvedValue(new Response(JSON.stringify({periods}),{status:200,headers:{"Content-Type":"application/json"}})))
+  const rows=[
+    {id:"current",contractor:"Person",project:"Now",date:today,hours:2,description:"Current work",status:"draft" as const},
+    {id:"old",contractor:"Person",project:"Archive",date:"2000-01-12",hours:3,description:"Archived work",status:"approved" as const},
+  ]
+  render(<EntriesLog periodView entries={rows} onUpdate={vi.fn()} onStatusChange={vi.fn()} onDelete={vi.fn()} onClear={vi.fn()}/> )
+  expect(await screen.findByText("Current work")).toBeVisible()
+  expect(screen.queryByText("Archived work")).not.toBeInTheDocument()
+  await userEvent.selectOptions(screen.getByRole("combobox",{name:"Timesheet period"}),"archived")
+  expect(await screen.findByText("Archived work")).toBeVisible()
+  expect(screen.queryByText("Current work")).not.toBeInTheDocument()
+  await userEvent.selectOptions(screen.getByRole("combobox",{name:"Timesheet period"}),"archive")
+  expect(screen.getByText("Archived work")).toBeVisible()
 })
 
 it("requires a confirmation window before deleting an entry",async()=>{
