@@ -135,6 +135,8 @@ export type AuditAction =
   | "message_sent"
   | "message_edited"
   | "message_deleted"
+  | "message_deleted_for_me"
+  | "message_unsent_for_everyone"
   | "message_encryption_initialized"
   | "entry_created"
   | "entries_cleared"
@@ -143,6 +145,8 @@ export type AuditAction =
   | "entry_recalled"
   | "entry_approved"
   | "entry_rejected"
+  | "submission_deadline_updated"
+  | "timesheet_period_created"
   | "entry_deleted"
   | "profile_updated"
   | "user_access_created"
@@ -157,8 +161,13 @@ export type AuditEvent = {
   metadata: Record<string, unknown>
   ipAddress: string | null
   userAgent: string | null
+  requestMethod: string | null
+  requestPath: string | null
+  requestId: string | null
   occurredAt: string
 }
+
+export type TimesheetPeriod = { id:string; name:string; startDate:string; endDate:string; submissionDeadline:string; managerGraceDays:number; reminderDays:number; createdBy:string; createdAt:string }
 
 type AuditEventRow = {
   id: string
@@ -169,6 +178,9 @@ type AuditEventRow = {
   metadata: Record<string, unknown> | null
   ip_address: string | null
   user_agent: string | null
+  request_method: string | null
+  request_path: string | null
+  request_id: string | null
   occurred_at: string | Date
 }
 
@@ -176,6 +188,8 @@ const schemaReady = createDatabaseInitializer()
 const profileSchemaReady = createDatabaseInitializer()
 const auditSchemaReady = createDatabaseInitializer()
 const accessSchemaReady = createDatabaseInitializer()
+const workflowSettingsSchemaReady = createDatabaseInitializer()
+const timesheetPeriodsSchemaReady = createDatabaseInitializer()
 
 /**
  * Maps a database row into the client-facing time entry shape.
@@ -233,6 +247,9 @@ function toAuditEvent(row: AuditEventRow): AuditEvent {
     metadata: row.metadata ?? {},
     ipAddress: row.ip_address,
     userAgent: row.user_agent,
+    requestMethod: row.request_method,
+    requestPath: row.request_path,
+    requestId: row.request_id,
     occurredAt:
       row.occurred_at instanceof Date
         ? row.occurred_at.toISOString()
@@ -342,6 +359,10 @@ export function ensureTimeEntriesTable() {
       ON time_entries (owner_email, created_at DESC)
     `
     await sql`
+      CREATE INDEX IF NOT EXISTS time_entries_owner_work_date_created_idx
+      ON time_entries (lower(owner_email), work_date DESC, created_at DESC)
+    `
+    await sql`
       CREATE INDEX IF NOT EXISTS time_entries_status_work_date_idx
       ON time_entries (status, work_date DESC)
     `
@@ -392,9 +413,15 @@ export function ensureAuditEventsTable() {
         metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
         ip_address text,
         user_agent text,
+        request_method text,
+        request_path text,
+        request_id text,
         occurred_at timestamptz NOT NULL DEFAULT now()
       )
     `
+    await sql`ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS request_method text`
+    await sql`ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS request_path text`
+    await sql`ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS request_id text`
     await sql`
       CREATE INDEX IF NOT EXISTS audit_events_occurred_at_idx
       ON audit_events (occurred_at DESC)
@@ -408,6 +435,98 @@ export function ensureAuditEventsTable() {
       ON audit_events (target_type, target_id)
     `
   })
+}
+
+/** Creates the singleton organization workflow settings table on first use. */
+export function ensureWorkflowSettingsTable() {
+  return workflowSettingsSchemaReady(async () => {
+    await sql`CREATE TABLE IF NOT EXISTS organization_workflow_settings (
+      id text PRIMARY KEY CHECK (id = 'organization'),
+      timesheet_submission_deadline timestamptz,
+      updated_by text,
+      updated_at timestamptz NOT NULL DEFAULT now()
+    )`
+  })
+}
+
+/** Creates the organization timesheet-period schedule. */
+export function ensureTimesheetPeriodsTable() {
+  return timesheetPeriodsSchemaReady(async () => {
+    await sql`CREATE TABLE IF NOT EXISTS timesheet_periods (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      name text NOT NULL CHECK (length(name) BETWEEN 2 AND 100),
+      start_date date NOT NULL,
+      end_date date NOT NULL,
+      submission_deadline timestamptz NOT NULL,
+      manager_grace_days integer NOT NULL DEFAULT 0 CHECK(manager_grace_days BETWEEN 0 AND 30),
+      reminder_days integer NOT NULL DEFAULT 3 CHECK(reminder_days BETWEEN 1 AND 30),
+      created_by text NOT NULL,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      CHECK(start_date <= end_date)
+    )`
+    await sql`CREATE INDEX IF NOT EXISTS timesheet_periods_dates_idx ON timesheet_periods(start_date,end_date)`
+  })
+}
+
+/** @returns Scheduled periods ordered by work start date, capped for a compact admin view. */
+export async function listTimesheetPeriods():Promise<TimesheetPeriod[]> {
+  await ensureTimesheetPeriodsTable()
+  const rows=await sql`SELECT id,name,start_date::text AS start_date,end_date::text AS end_date,
+    submission_deadline::text AS submission_deadline,manager_grace_days,reminder_days,created_by,created_at::text AS created_at
+    FROM timesheet_periods ORDER BY start_date DESC LIMIT 100`
+  return rows.map(row=>({id:String(row.id),name:String(row.name),startDate:String(row.start_date),endDate:String(row.end_date),submissionDeadline:new Date(String(row.submission_deadline)).toISOString(),managerGraceDays:Number(row.manager_grace_days),reminderDays:Number(row.reminder_days),createdBy:String(row.created_by),createdAt:new Date(String(row.created_at)).toISOString()}))
+}
+
+/** Creates a non-overlapping period and immutable audit row in one statement. */
+export async function createTimesheetPeriod(input:{name:string;startDate:string;endDate:string;submissionDeadline:string;managerGraceDays:number;reminderDays:number},actor:string,context:AuditContext):Promise<TimesheetPeriod|null>{
+  await ensureTimesheetPeriodsTable();await ensureAuditEventsTable()
+  const rows=await sql`WITH lock AS (SELECT pg_advisory_xact_lock(hashtext('tanovo-timesheet-periods'))), saved AS (
+    INSERT INTO timesheet_periods(name,start_date,end_date,submission_deadline,manager_grace_days,reminder_days,created_by)
+    SELECT ${input.name},${input.startDate}::date,${input.endDate}::date,${input.submissionDeadline}::timestamptz,${input.managerGraceDays},${input.reminderDays},${actor.toLowerCase()}
+    FROM lock WHERE NOT EXISTS(SELECT 1 FROM timesheet_periods WHERE start_date <= ${input.endDate}::date AND end_date >= ${input.startDate}::date)
+    RETURNING *
+  ), audited AS (
+    INSERT INTO audit_events(actor_email,action,target_type,target_id,metadata,ip_address,user_agent,request_method,request_path,request_id)
+    SELECT created_by,'timesheet_period_created','timesheet_period',id::text,
+      jsonb_build_object('name',name,'startDate',start_date,'endDate',end_date,'submissionDeadline',submission_deadline,'managerGraceDays',manager_grace_days,'reminderDays',reminder_days),
+      ${context.ipAddress},${context.userAgent},${context.requestMethod},${context.requestPath},${context.requestId} FROM saved RETURNING target_id
+  ) SELECT id,name,start_date::text AS start_date,end_date::text AS end_date,submission_deadline::text AS submission_deadline,
+      manager_grace_days,reminder_days,created_by,created_at::text AS created_at FROM saved WHERE EXISTS(SELECT 1 FROM audited)`
+  const row=rows[0]
+  return row?{id:String(row.id),name:String(row.name),startDate:String(row.start_date),endDate:String(row.end_date),submissionDeadline:new Date(String(row.submission_deadline)).toISOString(),managerGraceDays:Number(row.manager_grace_days),reminderDays:Number(row.reminder_days),createdBy:String(row.created_by),createdAt:new Date(String(row.created_at)).toISOString()}:null
+}
+
+/** @returns Current hard submission boundary as ISO text, or null when not configured. */
+export async function getTimesheetSubmissionDeadline(): Promise<string | null> {
+  await ensureTimesheetPeriodsTable()
+  const periods=await sql`SELECT submission_deadline::text AS deadline FROM timesheet_periods WHERE end_date >= CURRENT_DATE ORDER BY start_date LIMIT 1`
+  if(periods[0]?.deadline)return new Date(String(periods[0].deadline)).toISOString()
+  await ensureWorkflowSettingsTable()
+  const rows = await sql`SELECT timesheet_submission_deadline::text AS deadline
+    FROM organization_workflow_settings WHERE id = 'organization'`
+  const deadline = rows[0]?.deadline
+  return deadline ? new Date(String(deadline)).toISOString() : null
+}
+
+/** Saves an organization submission boundary and its audit event atomically. */
+export async function setTimesheetSubmissionDeadline(deadline: string, actor: string, reason: string, context: AuditContext): Promise<string> {
+  await ensureWorkflowSettingsTable()
+  await ensureAuditEventsTable()
+  const rows = await sql`WITH saved AS (
+    INSERT INTO organization_workflow_settings(id, timesheet_submission_deadline, updated_by, updated_at)
+    VALUES ('organization', ${deadline}::timestamptz, ${actor.toLowerCase()}, now())
+    ON CONFLICT (id) DO UPDATE SET timesheet_submission_deadline = EXCLUDED.timesheet_submission_deadline,
+      updated_by = EXCLUDED.updated_by, updated_at = now()
+    RETURNING timesheet_submission_deadline, updated_by
+  ), audited AS (
+    INSERT INTO audit_events(actor_email,action,target_type,target_id,metadata,ip_address,user_agent,request_method,request_path,request_id)
+    SELECT updated_by, 'submission_deadline_updated', 'organization_workflow_settings', 'organization',
+      jsonb_build_object('timesheetSubmissionDeadline', timesheet_submission_deadline, 'reason', ${reason}),
+      ${context.ipAddress}, ${context.userAgent}, ${context.requestMethod}, ${context.requestPath}, ${context.requestId}
+    FROM saved RETURNING id
+  ) SELECT timesheet_submission_deadline::text AS deadline FROM saved WHERE EXISTS(SELECT 1 FROM audited)`
+  if (!rows.length) throw new Error("Submission deadline could not be confirmed.")
+  return new Date(String(rows[0].deadline)).toISOString()
 }
 
 /**
@@ -426,7 +545,7 @@ export function ensureManagedAccessTable() {
         email text PRIMARY KEY,
         role text NOT NULL CHECK (role IN ('admin', 'manager', 'account_manager', 'employee', 'contractor', 'user')),
         access_status text NOT NULL DEFAULT 'active'
-          CHECK (access_status IN ('active', 'denied', 'blocked')),
+          CHECK (access_status IN ('active', 'denied', 'suspended', 'retired', 'blocked')),
         note text NOT NULL DEFAULT '',
         updated_by text,
         created_at timestamptz NOT NULL DEFAULT now(),
@@ -438,6 +557,13 @@ export function ensureManagedAccessTable() {
       ON managed_user_access (access_status, role)
     `
     await sql`ALTER TABLE managed_user_access ADD COLUMN IF NOT EXISTS permissions jsonb NOT NULL DEFAULT '{}'::jsonb`
+    await sql`DO $$
+      BEGIN
+        ALTER TABLE managed_user_access DROP CONSTRAINT IF EXISTS managed_user_access_access_status_check;
+        ALTER TABLE managed_user_access ADD CONSTRAINT managed_user_access_access_status_check
+          CHECK (access_status IN ('active', 'denied', 'suspended', 'retired', 'blocked'));
+      END
+    $$`
     // Keep legacy rows readable while older deployments still use the shared database.
     await sql`DO $$
       BEGIN
@@ -539,6 +665,9 @@ export async function upsertUserProfile(
  * @param event.metadata - Sanitized contextual data for later review.
  * @param event.ipAddress - Optional request IP address.
  * @param event.userAgent - Optional request user agent.
+ * @param event.requestMethod - Optional HTTP method that produced the event.
+ * @param event.requestPath - Optional path without query parameters.
+ * @param event.requestId - Optional hosting or proxy request identifier.
  * @returns The created audit event.
  */
 export async function recordAuditEvent(event: {
@@ -549,6 +678,9 @@ export async function recordAuditEvent(event: {
   metadata?: Record<string, unknown>
   ipAddress?: string | null
   userAgent?: string | null
+  requestMethod?: string | null
+  requestPath?: string | null
+  requestId?: string | null
 }) {
   await ensureAuditEventsTable()
 
@@ -560,7 +692,10 @@ export async function recordAuditEvent(event: {
       target_id,
       metadata,
       ip_address,
-      user_agent
+      user_agent,
+      request_method,
+      request_path,
+      request_id
     )
     VALUES (
       ${event.actorEmail},
@@ -569,7 +704,10 @@ export async function recordAuditEvent(event: {
       ${event.targetId ?? null},
       ${JSON.stringify(event.metadata ?? {})}::jsonb,
       ${event.ipAddress ?? null},
-      ${event.userAgent ?? null}
+      ${event.userAgent ?? null},
+      ${event.requestMethod ?? null},
+      ${event.requestPath ?? null},
+      ${event.requestId ?? null}
     )
     RETURNING
       id,
@@ -580,6 +718,9 @@ export async function recordAuditEvent(event: {
       metadata,
       ip_address,
       user_agent,
+      request_method,
+      request_path,
+      request_id,
       occurred_at
   `
 
@@ -609,6 +750,9 @@ export async function listAuditEvents(limit = 100) {
       metadata,
       ip_address,
       user_agent,
+      request_method,
+      request_path,
+      request_id,
       occurred_at
     FROM audit_events
     ORDER BY occurred_at DESC
@@ -732,6 +876,49 @@ export async function upsertManagedAccessUser(assignment: {
   return toManagedAccessUser((rows as ManagedAccessUserRow[])[0])
 }
 
+/** Saves an admin access change and its audit record atomically. */
+export async function upsertManagedAccessUserWithAudit(assignment: {
+  environmentAdmins?: string[]
+  permissions?: PermissionOverrides
+  email: string
+  role: UserRole
+  accessStatus: AccessStatus
+  note?: string
+  updatedBy: string
+  context: AuditContext
+}) {
+  await ensureManagedAccessTable()
+  await ensureAuditEventsTable()
+  const email=assignment.email.toLowerCase()
+  const actor=assignment.updatedBy.toLowerCase()
+  const results=await sql.transaction([sql`WITH previous AS MATERIALIZED (
+      SELECT role,access_status,permissions,note FROM managed_user_access WHERE email=${email} FOR UPDATE
+    ), saved AS (
+      INSERT INTO managed_user_access(email,role,access_status,note,permissions,updated_by)
+      SELECT ${email},${assignment.role},${assignment.accessStatus},${assignment.note??""},${JSON.stringify(assignment.permissions??{})}::jsonb,${actor}
+      WHERE ((${assignment.role}='admin' AND ${assignment.accessStatus}='active')
+        OR ${(assignment.environmentAdmins?.length??0)>0}
+        OR EXISTS(SELECT 1 FROM managed_user_access WHERE role='admin' AND access_status='active' AND email<>${email}))
+        AND (${assignment.environmentAdmins?.includes(actor)??false}
+          OR EXISTS(SELECT 1 FROM managed_user_access WHERE email=${actor} AND role='admin' AND access_status='active'))
+      ON CONFLICT(email) DO UPDATE SET role=EXCLUDED.role,access_status=EXCLUDED.access_status,note=EXCLUDED.note,
+        permissions=EXCLUDED.permissions,updated_by=EXCLUDED.updated_by,updated_at=now()
+      RETURNING email,role,access_status,note,permissions,updated_by,created_at,updated_at
+    ), audited AS (
+      INSERT INTO audit_events(actor_email,action,target_type,target_id,metadata,ip_address,user_agent,request_method,request_path,request_id)
+      SELECT ${actor},CASE WHEN previous.role IS NULL THEN 'user_access_created' ELSE 'user_access_updated' END,
+        'managed_user_access',saved.email,jsonb_build_object('fromRole',previous.role,'toRole',saved.role,
+        'fromStatus',previous.access_status,'toStatus',saved.access_status,'noteChanged',previous.note IS DISTINCT FROM saved.note,
+        'permissionsChanged',previous.permissions IS DISTINCT FROM saved.permissions),
+        ${assignment.context.ipAddress},${assignment.context.userAgent},${assignment.context.requestMethod},${assignment.context.requestPath},${assignment.context.requestId}
+      FROM saved LEFT JOIN previous ON true RETURNING target_id
+    ) SELECT saved.email,saved.role,saved.access_status,saved.note,saved.permissions,saved.updated_by,saved.created_at,saved.updated_at
+      FROM saved WHERE EXISTS(SELECT 1 FROM audited)`],{isolationLevel:"Serializable"})
+  const rows=results[0]
+  if(!rows.length)throw new LastAdministratorError()
+  return toManagedAccessUser((rows as ManagedAccessUserRow[])[0])
+}
+
 /**
  * Delegates rights atomically without changing an existing account's role/status.
  * Concurrent admin blocking or promotion prevents the delegation from applying.
@@ -831,33 +1018,28 @@ export async function listKnownUsers(): Promise<KnownUserSummary[]> {
 export async function listTimeEntries(ownerEmail: string, includeAll = false) {
   await ensureTimeEntriesTable()
 
-  const rows = await sql`
-    SELECT
-      id,
-      owner_email,
-      contractor_number,
-      review_manager_email,
-      payout_eligible_at,
-      contractor,
-      work_date,
-      hours,
-      project,
-      description,
-      status,
-      reviewed_by,
-      reviewed_at,
-      review_note,
-      updated_at::text AS updated_at
-    FROM time_entries
-    WHERE ${includeAll} OR lower(owner_email) = lower(${ownerEmail})
-    ORDER BY work_date DESC, created_at DESC
-  `
+  const rows = includeAll
+    ? await sql`
+        SELECT id, owner_email, contractor_number, review_manager_email,
+          payout_eligible_at, contractor, work_date, hours, project, description,
+          status, reviewed_by, reviewed_at, review_note, updated_at::text AS updated_at
+        FROM time_entries
+        ORDER BY work_date DESC, created_at DESC
+      `
+    : await sql`
+        SELECT id, owner_email, contractor_number, review_manager_email,
+          payout_eligible_at, contractor, work_date, hours, project, description,
+          status, reviewed_by, reviewed_at, review_note, updated_at::text AS updated_at
+        FROM time_entries
+        WHERE lower(owner_email) = lower(${ownerEmail})
+        ORDER BY work_date DESC, created_at DESC
+      `
 
   return (rows as TimeEntryRow[]).map(toTimeEntry)
 }
 
 /**
- * Persists parsed time entries under the signed-in user's email.
+ * Persists parsed time entries under the signed-in user's email in bounded batches.
  *
  * Creation is always scoped to the caller even when the caller is elevated. This
  * keeps ownership explicit and prevents manager/admin-created entries from being
@@ -866,7 +1048,7 @@ export async function listTimeEntries(ownerEmail: string, includeAll = false) {
  * @param ownerEmail - Email that should own the created entries.
  * @param entries - Parsed time entries to insert.
  * @param contractorNumber - Server-resolved official number, never client-issued.
- * @returns Newly created time entries with database ids.
+ * @returns Newly created time entries with database ids, in input order.
  */
 export async function createTimeEntries(
   ownerEmail: string,
@@ -881,44 +1063,22 @@ export async function createTimeEntries(
 
   const created: TimeEntry[] = []
 
-  for (const entry of entries) {
-    const rows = await sql`
+  // Keep each HTTP transaction bounded while reducing per-row network overhead.
+  for (let offset = 0; offset < entries.length; offset += 50) {
+    const batch = entries.slice(offset, offset + 50)
+    const results = await sql.transaction(batch.map(entry => sql`
       INSERT INTO time_entries (
-        contractor,
-        work_date,
-        hours,
-        project,
-        description,
-        owner_email,
-        contractor_number
+        contractor, work_date, hours, project, description, owner_email, contractor_number
       )
       VALUES (
-        ${entry.contractor},
-        ${entry.date},
-        ${entry.hours},
-        ${entry.project || "General"},
-        ${entry.description || ""},
-        ${ownerEmail},
-        ${contractorNumber??null}
+        ${entry.contractor}, ${entry.date}, ${entry.hours}, ${entry.project || "General"},
+        ${entry.description || ""}, ${ownerEmail}, ${contractorNumber ?? null}
       )
-      RETURNING
-        id,
-        owner_email,
-        contractor_number,
-      review_manager_email,
-      payout_eligible_at,
-        contractor,
-        work_date,
-        hours,
-        project,
-        description,
-        status,
-        reviewed_by,
-        reviewed_at,
-        review_note,
-        updated_at::text AS updated_at
-    `
-    created.push(toTimeEntry((rows as TimeEntryRow[])[0]))
+      RETURNING id, owner_email, contractor_number, review_manager_email,
+        payout_eligible_at, contractor, work_date, hours, project, description,
+        status, reviewed_by, reviewed_at, review_note, updated_at::text AS updated_at
+    `))
+    for (const rows of results) created.push(toTimeEntry((rows as TimeEntryRow[])[0]))
   }
 
   return created
@@ -1061,6 +1221,49 @@ export async function updateTimeEntry(
   return row ? toTimeEntry(row) : null
 }
 
+/** Updates editable timesheet evidence and its audit event in one database statement. */
+export async function updateTimeEntryWithAudit(
+  ownerEmail: string,
+  id: string,
+  patch: Partial<ParsedEntry> & { status?: EntryStatus; reviewNote?: string | null; reviewManagerEmail?: string | null },
+  includeAll: boolean,
+  reviewerEmail: string | undefined,
+  expectedRevision: string,
+  audit: { actorEmail: string; action: AuditAction; metadata: Record<string, unknown>; context: AuditContext },
+): Promise<TimeEntry | null> {
+  await ensureTimeEntriesTable()
+  await ensureAuditEventsTable()
+  const rows = await sql`WITH changed AS (
+    UPDATE time_entries
+    SET contractor = COALESCE(${patch.contractor ?? null}, contractor),
+      work_date = COALESCE(${patch.date ?? null}, work_date),
+      hours = COALESCE(${patch.hours ?? null}, hours),
+      project = COALESCE(${patch.project ?? null}, project),
+      description = COALESCE(${patch.description ?? null}, description),
+      status = COALESCE(${patch.status ?? null}, status),
+      review_manager_email = CASE WHEN ${patch.reviewManagerEmail !== undefined} THEN ${patch.reviewManagerEmail ?? null} ELSE review_manager_email END,
+      reviewed_by = CASE WHEN ${patch.status ?? null} IN ('approved','rejected') THEN ${reviewerEmail ?? null} WHEN ${patch.status ?? null} IN ('draft','submitted') THEN null ELSE reviewed_by END,
+      reviewed_at = CASE WHEN ${patch.status ?? null} IN ('approved','rejected') THEN now() WHEN ${patch.status ?? null} IN ('draft','submitted') THEN null ELSE reviewed_at END,
+      review_note = CASE WHEN ${patch.status ?? null} = 'rejected' THEN ${patch.reviewNote ?? ''} WHEN ${patch.status ?? null} IN ('draft','submitted','approved') THEN null ELSE review_note END,
+      updated_at = now()
+    WHERE id = ${id}::uuid
+      AND (${includeAll} OR lower(owner_email) = lower(${ownerEmail}))
+      AND updated_at = ${expectedRevision}::timestamptz
+      AND payout_eligible_at IS NULL
+      AND (${patch.status ?? null} NOT IN ('approved','rejected') OR ${patch.status ?? null} IS NULL OR (status='submitted' AND lower(owner_email)<>lower(${ownerEmail}) AND ${reviewerEmail ?? null} IS NOT NULL))
+      AND (lower(owner_email)<>lower(${ownerEmail}) OR status IN ('draft','rejected') OR (status='submitted' AND ${patch.status ?? null}='draft' AND ${patch.contractor===undefined&&patch.date===undefined&&patch.hours===undefined&&patch.project===undefined&&patch.description===undefined}))
+    RETURNING *
+  ), audited AS (
+    INSERT INTO audit_events(actor_email,action,target_type,target_id,metadata,ip_address,user_agent,request_method,request_path,request_id)
+    SELECT ${audit.actorEmail.toLowerCase()},${audit.action},'time_entry',id::text,${JSON.stringify(audit.metadata)}::jsonb,
+      ${audit.context.ipAddress},${audit.context.userAgent},${audit.context.requestMethod},${audit.context.requestPath},${audit.context.requestId}
+    FROM changed RETURNING target_id
+  )
+  SELECT id,owner_email,contractor_number,review_manager_email,payout_eligible_at,contractor,work_date,hours,project,description,status,reviewed_by,reviewed_at,review_note,updated_at::text AS updated_at
+  FROM changed WHERE EXISTS (SELECT 1 FROM audited)`
+  return rows.length ? toTimeEntry(rows[0] as TimeEntryRow) : null
+}
+
 /**
  * Rejects submitted evidence and writes its audit event in the same SQL statement.
  * @param id - Authorized source timesheet identifier.
@@ -1077,12 +1280,99 @@ export async function rejectSubmittedEntry(id:string,actor:string,revision:strin
     WHERE id=${id}::uuid AND status='submitted' AND updated_at=${revision}::timestamptz
       AND lower(owner_email)<>${actor.toLowerCase()} AND payout_eligible_at IS NULL RETURNING *
   ), audited AS (
-    INSERT INTO audit_events(actor_email,action,target_type,target_id,metadata,ip_address,user_agent)
-    SELECT ${actor.toLowerCase()},'entry_rejected','time_entry',id::text,jsonb_build_object('fromStatus','submitted','toStatus','rejected'),${context.ipAddress},${context.userAgent}
+    INSERT INTO audit_events(actor_email,action,target_type,target_id,metadata,ip_address,user_agent,request_method,request_path,request_id)
+    SELECT ${actor.toLowerCase()},'entry_rejected','time_entry',id::text,jsonb_build_object('fromStatus','submitted','toStatus','rejected'),${context.ipAddress},${context.userAgent},${context.requestMethod},${context.requestPath},${context.requestId}
     FROM changed RETURNING target_id
   ) SELECT id,owner_email,contractor_number,review_manager_email,payout_eligible_at,contractor,work_date,hours,project,description,status,reviewed_by,reviewed_at,review_note,updated_at::text AS updated_at
     FROM changed WHERE EXISTS(SELECT 1 FROM audited)`
   return rows.length?toTimeEntry(rows[0] as TimeEntryRow):null
+}
+
+/**
+ * Saves a submission and its audit event atomically, so callers never see a
+ * failed response after the entry was committed without its audit record.
+ * @param ownerEmail - Authenticated user whose work is being updated.
+ * @param id - Entry identifier.
+ * @param patch - Validated fields and submission status.
+ * @param includeAll - Whether the caller may update visible team entries.
+ * @param reviewerEmail - Authenticated reviewer, when applicable.
+ * @param expectedRevision - Revision confirmed by the submitting UI.
+ * @param fromStatus - Previously loaded status for audit context.
+ * @param actorEmail - Authenticated actor recorded in the audit row.
+ * @param metadata - Sanitized audit metadata, containing field names only.
+ * @param context - Request metadata captured by the API route.
+ * @returns Updated entry, or null when ownership/revision/workflow guards fail.
+ */
+export async function submitTimeEntryWithAudit(
+  ownerEmail: string,
+  id: string,
+  patch: Partial<ParsedEntry> & { status: "submitted"; reviewManagerEmail?: string | null },
+  includeAll: boolean,
+  reviewerEmail: string | undefined,
+  expectedRevision: string,
+  actorEmail: string,
+  fromStatus: EntryStatus | null,
+  metadata: Record<string, unknown>,
+  actorRole: UserRole,
+  context: AuditContext,
+): Promise<TimeEntry | null> {
+  await ensureTimeEntriesTable()
+  await ensureAuditEventsTable()
+  await ensureWorkflowSettingsTable()
+  await ensureTimesheetPeriodsTable()
+
+  const rows = await sql`WITH changed AS (
+    UPDATE time_entries
+    SET
+      contractor = COALESCE(${patch.contractor ?? null}, contractor),
+      work_date = COALESCE(${patch.date ?? null}, work_date),
+      hours = COALESCE(${patch.hours ?? null}, hours),
+      project = COALESCE(${patch.project ?? null}, project),
+      description = COALESCE(${patch.description ?? null}, description),
+      status = 'submitted',
+      review_manager_email = CASE WHEN ${patch.reviewManagerEmail !== undefined} THEN ${patch.reviewManagerEmail ?? null} ELSE review_manager_email END,
+      reviewed_by = NULL,
+      reviewed_at = NULL,
+      review_note = NULL,
+      updated_at = now()
+    WHERE id = ${id}
+      AND (${includeAll} OR lower(owner_email) = lower(${ownerEmail}))
+      AND updated_at = ${expectedRevision}::timestamptz
+      AND payout_eligible_at IS NULL
+      AND (
+        EXISTS (SELECT 1 FROM timesheet_periods)
+        AND EXISTS (SELECT 1 FROM timesheet_periods p WHERE work_date BETWEEN p.start_date AND p.end_date
+          AND (now() <= p.submission_deadline OR (${actorRole} = 'manager' AND now() <= p.submission_deadline + make_interval(days => p.manager_grace_days))))
+        OR (NOT EXISTS (SELECT 1 FROM timesheet_periods) AND NOT EXISTS (
+          SELECT 1 FROM organization_workflow_settings WHERE id='organization' AND timesheet_submission_deadline <= now()
+        ))
+      )
+      AND (lower(owner_email) <> lower(${ownerEmail}) OR status IN ('draft', 'rejected'))
+      AND (status IN ('draft', 'rejected') OR (status = 'submitted' AND ${reviewerEmail ?? null} IS NOT NULL))
+    RETURNING *
+  ), audited AS (
+    INSERT INTO audit_events (
+      actor_email, action, target_type, target_id, metadata, ip_address,
+      user_agent, request_method, request_path, request_id
+    )
+    SELECT ${actorEmail.toLowerCase()}, 'entry_submitted', 'time_entry', id::text,
+      jsonb_build_object(
+        'fromStatus', ${fromStatus},
+        'toStatus', 'submitted',
+        'changedFields', ${JSON.stringify(metadata.changedFields ?? [])}::jsonb,
+        'hasReviewNote', ${metadata.hasReviewNote === true}
+      ),
+      ${context.ipAddress}, ${context.userAgent}, ${context.requestMethod},
+      ${context.requestPath}, ${context.requestId}
+    FROM changed
+    RETURNING target_id
+  )
+  SELECT id, owner_email, contractor_number, review_manager_email, payout_eligible_at,
+    contractor, work_date, hours, project, description, status, reviewed_by,
+    reviewed_at, review_note, updated_at::text AS updated_at
+  FROM changed WHERE EXISTS (SELECT 1 FROM audited)`
+
+  return rows.length ? toTimeEntry(rows[0] as TimeEntryRow) : null
 }
 
 /**

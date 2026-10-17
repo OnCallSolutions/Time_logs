@@ -12,3 +12,7 @@ it("retains existing defaults and supports explicit revocation",()=>{
 it("does not grant rights to denied accounts",()=>{
   expect(Object.values(resolvePermissions(null,{view_team:true,review_entries:true})).every(value=>!value)).toBe(true)
 })
+it("gives admins the full timesheet controls while preserving payout authorization as a separate right",()=>{
+  const permissions=resolvePermissions("admin")
+  expect(permissions).toMatchObject({create_entries:true,edit_entries:true,delete_entries:true,submit_entries:true,review_entries:true,view_team:true,view_reports:true,export_entries:true,view_accounts:true,review_accounts:true,ai_accounts:true,authorize_payouts:false})
+})

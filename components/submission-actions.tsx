@@ -33,8 +33,7 @@ export function SubmissionActions({ entries, destination = "manager", onStatusCh
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
   const [completed, setCompleted] = useState(0)
-  const [managers,setManagers]=useState<{email:string;displayName?:string}[]>([])
-  const [manager,setManager]=useState("")
+  const [manager,setManager]=useState<{email:string;displayName:string;assignment:"added_by_manager"|"available_manager"}|null>(null)
   const pending = useRef(false)
   const controller = useRef<AbortController | null>(null)
   useEffect(() => () => controller.current?.abort(), [])
@@ -42,7 +41,8 @@ export function SubmissionActions({ entries, destination = "manager", onStatusCh
   useEffect(()=>{
     if(!open||destination!=="manager")return
     const abort=new AbortController()
-    fetch(apiPath("/api/submission-managers"),{cache:"no-store",signal:abort.signal}).then(async response=>{const data=await response.json();if(!response.ok)throw new Error(data.error);const available=data.managers??[];setManagers(available);if(!available.length)setError("No active manager currently has both team-view and approval rights. Ask an admin to assign a reviewer before submitting.")}).catch(cause=>{if(!abort.signal.aborted)setError(cause instanceof Error?cause.message:"Manager choices unavailable.")})
+    setManager(null);setError("")
+    fetch(apiPath("/api/submission-managers"),{cache:"no-store",signal:abort.signal}).then(async response=>{const data=await response.json();if(!response.ok)throw new Error(data.error);const assigned=data.manager??null;setManager(assigned);if(!assigned)setError("No active manager currently has both team-view and approval rights. Ask an admin to assign a reviewer before submitting.")}).catch(cause=>{if(!abort.signal.aborted)setError(cause instanceof Error?cause.message:"Manager assignment unavailable.")})
     return()=>abort.abort()
   },[open,destination])
   const analyzing = busy && mode === "ai" && advice.length === 0
@@ -111,7 +111,7 @@ export function SubmissionActions({ entries, destination = "manager", onStatusCh
     setBusy(true); setError("")
     try {
       for (const entry of snapshot) {
-        await onStatusChange(entry.id, "submitted", undefined, entry.revision,...(destination==="manager"?[manager]:[]))
+        await onStatusChange(entry.id, "submitted", undefined, entry.revision,...(destination==="manager"?[manager!.email]:[]))
         onSubmitted(entry.id)
         setCompleted(count => count + 1)
         setSnapshot(previous => previous.filter(current => current.id !== entry.id))
@@ -129,7 +129,7 @@ export function SubmissionActions({ entries, destination = "manager", onStatusCh
       <section className="flex min-h-0 w-full flex-col bg-white">
         <header className="shrink-0 border-b px-4 py-3"><h2 className="font-semibold">{target}</h2><p className="text-sm text-muted-foreground">{snapshot.length} remaining / {totalHours.toLocaleString()}h / {completed} submitted</p></header>
         <div className="min-h-0 flex-1 overflow-auto p-4">
-          {destination==="manager"&&<label className="mb-4 block text-sm">Reviewing manager<select aria-label="Reviewing manager" disabled={busy} value={manager} onChange={event=>setManager(event.target.value)} className="mt-1 block w-full max-w-lg rounded border bg-white p-2"><option value="">Choose manager</option>{managers.map(actor=><option key={actor.email} value={actor.email}>{actor.displayName||actor.email}</option>)}</select></label>}
+          {destination==="manager"&&<div aria-label="Reviewing manager" className="mb-4 rounded-md border border-blue-200 bg-blue-50 p-3 text-sm"><p className="text-xs font-semibold uppercase text-blue-800">Assigned reviewing manager</p>{manager?<><p className="mt-1 font-semibold text-blue-950">{manager.displayName}</p><p className="text-xs text-blue-800">{manager.assignment==="added_by_manager"?"Assigned because this manager added your account.":"Assigned from the currently available authorized managers."}</p></>:<p role="status" className="mt-1 text-blue-900">Finding your reviewing manager...</p>}</div>}
           {busy && <p role="status" className="mb-3 text-sm">{advice.length || mode === "manual" ? "Submitting confirmed entries..." : "Preparing selected entries..."}</p>}
           {error && <p role="alert" className="mb-3 text-sm text-destructive">{error}</p>}
           {!currentSnapshot && <p role="alert" className="mb-3 text-sm text-destructive">Selection changed. Close this window and select current entries again.</p>}

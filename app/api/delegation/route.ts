@@ -11,7 +11,7 @@ import { permissionLabels, delegablePermissions, type Permission } from "@/lib/p
 import { getAuditContext } from "@/lib/audit"
 import { z } from "zod"
 import { emailSchema } from "@/lib/identity-policy"
-import { listAccountIdentities } from "@/lib/account-identities"
+import { ensureAccountIdentitiesForActors } from "@/lib/account-identities"
 /**
  * Returns all actor identities to authorized delegators without expanding edits.
  * Managers still modify only active employee workflow rights through PATCH.
@@ -22,8 +22,8 @@ export async function GET(): Promise<Response> {
   const access = await getEffectivePermissions(email)
   if (!email || !(access.role === "admin" || access.role === "manager") ||
       (!access.permissions.delegate_permissions && !access.permissions.send_messages)) return Response.json({error:"Forbidden."},{status:403})
-  const roster=await actorRoster(), identities=await listAccountIdentities(roster.map(user=>user.email))
-  const users = await Promise.all(roster.map(async user=>({...user,displayName:identities.find(identity=>identity.email===user.email.toLowerCase())?.officialName??"Company account",companyReference:identities.find(identity=>identity.email===user.email.toLowerCase())?.shortReference,permissions:(await getEffectivePermissions(user.email)).permissions})))
+  const roster=await actorRoster(), identities=await ensureAccountIdentitiesForActors(roster.map(user=>user.email),email)
+  const users = await Promise.all(roster.map(async user=>{const identity=identities.find(identity=>identity.email===user.email.toLowerCase());return {...user,displayName:identity?.officialName??"",companyReference:identity?.shortReference,contractorNumber:identity?.contractorNumber,employeeId:identity?.employeeId,permissions:(await getEffectivePermissions(user.email)).permissions}}))
   return Response.json({users},{headers:{"Cache-Control":"no-store"}})
 }
 /**

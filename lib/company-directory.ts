@@ -20,6 +20,17 @@ export function deploymentCompany() {
 }
 
 /**
+ * Reads optional organization email domains for a non-blocking membership warning.
+ * @returns Unique lower-case domains configured by this licensed deployment.
+ */
+export function companyEmailDomains(): string[] {
+  const domainPattern = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/
+  return [...new Set((process.env.COMPANY_EMAIL_DOMAINS ?? "").split(",")
+    .map(domain => domain.trim().toLowerCase().replace(/^@/, ""))
+    .filter(domain => domainPattern.test(domain)))]
+}
+
+/**
  * Creates additive company/membership storage after account_identities exists.
  * A persisted installation binding rejects accidental reuse for a different company.
  * @returns Promise<void> after existing account UUIDs receive stable short references.

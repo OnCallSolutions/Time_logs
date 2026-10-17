@@ -30,3 +30,9 @@ it("preserves twelve distinct work units and binds every personal result to the 
   expect(new Set(result.entries.map((entry: { description: string }) => entry.description)).size).toBe(12)
   expect(vi.mocked(generateText).mock.calls[0][0].system).toContain("Never merge, deduplicate, sum, or truncate")
 })
+
+it("refuses to extract display-only manager sample IDs",async()=>{
+  const response=await POST(new Request("http://localhost/api/parse",{method:"POST",body:JSON.stringify({notes:"Sample Contractor A (ID: SAMPLE-CTR-001): 2 hours"})}))
+  expect(response.status).toBe(400)
+  expect(generateText).not.toHaveBeenCalled()
+})

@@ -8,12 +8,13 @@
  * translates the user's role into visible navigation choices so the UI matches
  * the permissions enforced by the API routes.
  */
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
+import { signIn } from "next-auth/react"
 import { AssistantPanel } from "@/components/assistant-panel"
 import { WorkspaceSnapshot } from "@/components/workspace-snapshot"
 import { ReviewerHelpDialog } from "@/components/reviewer-help-dialog"
 import { Brand } from "@/components/brand"
-import { EmployeeWorkspace } from "@/components/employee-workspace"
+import { EmployeeWorkspace, RoleWorkspaceHome } from "@/components/employee-workspace"
 import { ApprovalSelection } from "@/components/approval-selection"
 import { BusinessAccounts } from "@/components/business-accounts"
 import { EmployeeRightsPanel, MessagesPanel } from "@/components/collaboration-panel"
@@ -23,13 +24,16 @@ import { MessageNotifications } from "@/components/message-notifications"
 import { notifyPermissionsChanged } from "@/lib/permission-events"
 import { EntryReviewDialog, ManagerWorkspace } from "@/components/manager-workspace"
 import { permissionLabels, resolvePermissions, type Permission, type PermissionOverrides } from "@/lib/permissions"
+import { accessChangeRequiresStepUp } from "@/lib/admin-policy"
 import { AdminWorkspace } from "@/components/admin-workspace"
 import { AccessLifecyclePanel } from "@/components/access-lifecycle-panel"
 import { SecurityRiskWindow } from "@/components/security-risk-window"
+import { SubmissionDeadlineSettings } from "@/components/submission-deadline-settings"
 import { WindowSurface } from "@/components/window-surface"
 import { WorkspaceUtilities } from "@/components/workspace-utilities"
 import {
   Activity,
+  CalendarClock,
   ChevronRight,
   Layers3,
   BarChart3,
@@ -43,6 +47,7 @@ import {
   Send,
   Sparkles,
   ShieldCheck,
+  Trash2,
   UserPlus,
   Users,
   X,
@@ -56,6 +61,7 @@ import { ManagerReport } from "@/components/manager-report"
 import { SignOutButton } from "@/components/sign-out-button"
 import { Button } from "@/components/ui/button"
 import { apiPath } from "@/lib/paths"
+import { invalidateClientData, readClientData } from "@/lib/client-data-cache"
 import type {
   AccessStatus,
   EntryStatus,
@@ -64,10 +70,12 @@ import type {
   UserRole,
 } from "@/lib/types"
 
-type View = "log" | "personal" | "approvals" | "report" | "admin" | "messages" | "permissions" | "accounts"
+type View = "home" | "log" | "personal" | "approvals" | "report" | "admin" | "messages" | "permissions" | "accounts"
 
 const manageableRoles: UserRole[] = ["admin", "manager", "account_manager", "employee", "contractor"]
-const manageableStatuses: AccessStatus[] = ["active", "denied", "blocked"]
+const manageableStatuses: AccessStatus[] = ["active", "suspended", "retired", "blocked", "denied"]
+const pendingAccessChangeKey = "tanovo-time:pending-access-change"
+const pendingClearEntriesKey = "tanovo-time:pending-clear-entries"
 
 /**
  * User directory row returned by the administrator users API.
@@ -98,6 +106,8 @@ type AdminDirectoryUser = {
   displayName: string
   /** Short company-scoped reference separate from the immutable account ID. */
   companyReference?: string | null
+  /** Permanent, server-generated account/contractor identifier. */
+  contractorNumber?: string | null
   /** Optional company-issued employee identifier. */
   employeeId?: string | null
   /** Persisted profile image data URL, when available. */
@@ -162,6 +172,12 @@ type AdminAuditEvent = {
   ipAddress: string | null
   /** Request user agent when available. */
   userAgent: string | null
+  /** HTTP method associated with the request when available. */
+  requestMethod: string | null
+  /** Request pathname, explicitly excluding query parameters. */
+  requestPath: string | null
+  /** Hosting or proxy request identifier when available. */
+  requestId: string | null
   /** ISO timestamp for when the event occurred. */
   occurredAt: string
 }
@@ -184,10 +200,12 @@ export function TimesheetApp({
   role: initialRole,
   userName,
   userEmail,
+  organizationName = "DevOnCall",
 }: {
   role: UserRole
   userName?: string | null
   userEmail?: string | null
+  organizationName?: string
 }) {
   const [role,setRole] = useState(initialRole)
   const [permissions,setPermissions] = useState(() => resolvePermissions(null))
@@ -197,18 +215,64 @@ export function TimesheetApp({
   const messageEncryption=useMessageEncryption(accessDenied?"":messageInbox.email,messageInbox.messages)
   const [entries, setEntries] = useState<TimeEntry[]>([])
   const entryReadEpoch=useRef(0),pendingEntryWrites=useRef(0)
-  const [view, setView] = useState<View>(role === "admin" ? "admin" : role === "manager" ? "approvals" : "log")
+  const [view, setView] = useState<View>(role === "admin" ? "admin" : role === "account_manager" ? "accounts" : "home")
+  const previousRole = useRef(initialRole)
   const [messagesOpen,setMessagesOpen]=useState(false)
-  const [assistantOpen,setAssistantOpen]=useState(false)
+  const assistantDockRef=useRef<HTMLDivElement>(null)
+  const assistantResizeStart=useRef<{pointerId:number;y:number;height:number}|null>(null)
+  const [assistantHeight,setAssistantHeight]=useState(380)
+  const [assistantFocusRequest,setAssistantFocusRequest]=useState(0)
   const [assistantMessageContext,setAssistantMessageContext]=useState("")
   const [assistantCompose,setAssistantCompose]=useState<{recipient:string;body:string;confirmed:boolean}|null>(null)
+  function focusAssistant():void {
+    assistantDockRef.current?.scrollIntoView?.({behavior:"smooth",block:"center"})
+    setAssistantFocusRequest(value=>value+1)
+  }
+  /**
+   * Starts resizing the dock by dragging its top edge.
+   * @param event - Pointer gesture on the assistant resize grip.
+   * @returns void after capturing the pointer and initial dimensions.
+   */
+  function beginAssistantResize(event:ReactPointerEvent<HTMLDivElement>):void {
+    const measuredHeight=assistantDockRef.current?.getBoundingClientRect().height
+    assistantResizeStart.current={pointerId:event.pointerId,y:event.clientY,height:measuredHeight&&measuredHeight>0?measuredHeight:assistantHeight}
+    event.currentTarget.setPointerCapture?.(event.pointerId)
+    event.preventDefault()
+  }
+  /**
+   * Grows or shrinks the dock within the visible viewport bounds.
+   * @param event - Active pointer movement from the resize grip.
+   * @returns void after applying the bounded dock height.
+   */
+  function moveAssistantResize(event:ReactPointerEvent<HTMLDivElement>):void {
+    const start=assistantResizeStart.current
+    if(!start||start.pointerId!==event.pointerId)return
+    const maximum=Math.max(300,Math.floor(window.innerHeight*.78))
+    setAssistantHeight(Math.max(300,Math.min(maximum,start.height+start.y-event.clientY)))
+  }
+  /**
+   * Ends the current assistant resize gesture.
+   * @param event - Pointer release or cancellation event.
+   * @returns void after clearing the active resize state.
+   */
+  function endAssistantResize(event:ReactPointerEvent<HTMLDivElement>):void {
+    if(assistantResizeStart.current?.pointerId===event.pointerId)assistantResizeStart.current=null
+  }
   const permissionRequest=useRef(0)
   useEffect(()=>{
+    if(role!==previousRole.current) {
+      if(role==="admin")setView("admin")
+      else if(role==="account_manager"&&permissions.view_accounts)setView("accounts")
+      else setView("home")
+    }
     if(role==="account_manager"&&permissions.view_accounts)setView("accounts")
+    previousRole.current=role
   },[role,permissions.view_accounts])
   const [entriesRefresh,setEntriesRefresh]=useState(0)
   const [loadingEntries, setLoadingEntries] = useState(true)
   const [syncError, setSyncError] = useState<string | null>(null)
+  const [clearEntriesConfirmationOpen, setClearEntriesConfirmationOpen] = useState(false)
+  const [clearEntriesBusy, setClearEntriesBusy] = useState(false)
   const [savedStatus,setSavedStatus]=useState("")
   const [personalStatus, setPersonalStatus] = useState<EntryStatus | "all">("all")
   const [suggestedReview,setSuggestedReview] = useState<{entry:TimeEntry;decision:"approved"|"rejected";reason:string}|null>(null)
@@ -217,7 +281,47 @@ export function TimesheetApp({
   const [lifecycleOpen,setLifecycleOpen]=useState(false)
   const [directoryRequest,setDirectoryRequest] = useState(0)
   const [commandGroup,setCommandGroup] = useState<"time"|"review"|"insights"|"access"|null>(null)
+  const [pageWindow,setPageWindow] = useState(false)
   const [workspaceWindow,setWorkspaceWindow] = useState<"overview"|"workflow"|"notes"|null>(null)
+  const entriesEndpoint = apiPath("/api/entries")
+  /**
+   * Opens a complete role page while preserving its parent command group for Back.
+   * @param next - Authorized workspace view selected by a user or assistant action.
+   * @returns void after scheduling the requested page state.
+   */
+  function openWorkspacePage(next:View):void { setView(next);setPageWindow(true) }
+  /**
+   * Returns from a nested role page to its command group or role home.
+   * @returns void after closing the child page window.
+   */
+  function closeWorkspacePage():void {
+    setPageWindow(false)
+    setView(role==="admin"?"admin":role==="account_manager"?"accounts":"home")
+  }
+  useEffect(() => {
+    if (!userEmail) return
+    const stored = window.sessionStorage.getItem(pendingClearEntriesKey)
+    if (!stored) return
+    window.sessionStorage.removeItem(pendingClearEntriesKey)
+    if (new URL(window.location.href).searchParams.has("error")) {
+      setSyncError("Microsoft reauthentication failed. No entries were cleared.")
+      return
+    }
+    try {
+      const pending = JSON.parse(stored) as { email?: string; expiresAt?: number }
+      if (typeof pending.expiresAt === "number" && pending.expiresAt >= Date.now() && typeof pending.email === "string" && pending.email.toLowerCase() === userEmail.toLowerCase()) {
+        setClearEntriesConfirmationOpen(true)
+        return
+      }
+      setSyncError("Microsoft verification expired or returned to a different account. No entries were cleared.")
+    } catch {
+      setSyncError("The pending clear request could not be verified. No entries were cleared.")
+    }
+  }, [userEmail])
+  /** Clears this account's brief entries snapshot after authorization or writes change. */
+  const invalidateEntriesCache = () => {
+    if (userEmail) invalidateClientData(userEmail, entriesEndpoint)
+  }
 
   useEffect(() => {
     const controller = new AbortController()
@@ -232,8 +336,10 @@ export function TimesheetApp({
         const data = await response.json()
         if(requestId!==permissionRequest.current)return
         if (!response.ok || !data.role) {
+          invalidateEntriesCache()
           setPermissionsLoaded(true); setAccessDenied(true); setPermissions(resolvePermissions(null)); setEntries([]); return
         }
+        invalidateEntriesCache()
         setPermissionsLoaded(true); setAccessDenied(false); setRole(data.role); setPermissions(data.permissions)
       } catch { if (!controller.signal.aborted&&requestId===permissionRequest.current) { setAccessDenied(true); setEntries([]); setPermissions(resolvePermissions(null)) } }
     }
@@ -266,9 +372,7 @@ export function TimesheetApp({
       fetching=true
       const epoch=entryReadEpoch.current
       try {
-        const res = await fetch(apiPath("/api/entries"), { cache: "no-store",signal:controller.signal })
-        const data = await res.json()
-        if (!res.ok) throw new Error(data.error ?? "Failed to load entries.")
+        const data = await readClientData<{ entries?: TimeEntry[]; error?: string }>(entriesEndpoint, userEmail ?? "anonymous", 1500)
         if (active&&epoch===entryReadEpoch.current&&!pendingEntryWrites.current) setEntries(previous=>JSON.stringify(previous)===JSON.stringify(data.entries??[])?previous:data.entries??[])
       } catch (err) {
         if (active) {
@@ -283,7 +387,8 @@ export function TimesheetApp({
     }
 
     loadEntries()
-    const refresh=()=>{if(document.visibilityState==="visible")void loadEntries()}
+    /** Forces a fresh server read when the user returns to an active tab. */
+    const refresh=()=>{if(document.visibilityState==="visible"){invalidateEntriesCache();void loadEntries()}}
     const timer=window.setInterval(refresh,15000)
     window.addEventListener("focus",refresh)
 
@@ -291,11 +396,17 @@ export function TimesheetApp({
       active = false
       controller.abort();window.clearInterval(timer);window.removeEventListener("focus",refresh)
     }
-  }, [role,permissions.view_team,permissions.view_manager_entries,permissions.review_manager_entries,permissions.view_other_manager_entries,permissions.review_other_manager_entries,permissions.accept_review_requests,entriesRefresh,messageInbox.messages,accessDenied])
+  }, [role,permissions.view_team,permissions.view_manager_entries,permissions.review_manager_entries,permissions.view_other_manager_entries,permissions.review_other_manager_entries,permissions.accept_review_requests,entriesRefresh,messageInbox.messages,accessDenied,entriesEndpoint,userEmail])
 
   const canViewTeamReports = permissions.view_reports
   const canViewAdmin = role === "admin" && !accessDenied
   const canClearVisibleEntries = role === "admin" && permissions.delete_entries && permissions.view_team
+  useEffect(() => {
+    if (clearEntriesConfirmationOpen && permissionsLoaded && !canClearVisibleEntries) {
+      setClearEntriesConfirmationOpen(false)
+      setSyncError("Administrator clear permission is no longer active. No entries were cleared.")
+    }
+  }, [clearEntriesConfirmationOpen, permissionsLoaded, canClearVisibleEntries])
   const canReviewEntries = permissions.review_entries||permissions.review_manager_entries
   const canAIReview = permissions.ai_review||(role==="account_manager"&&permissions.review_manager_entries&&permissions.ai_accounts)
   const canSubmitEntries = permissions.submit_entries
@@ -331,6 +442,7 @@ export function TimesheetApp({
    * @returns A promise that resolves after entries are saved and local state updates.
    */
   async function addParsed(parsed: ParsedEntry[]) {
+    invalidateEntriesCache()
     pendingEntryWrites.current++;entryReadEpoch.current++
     try{
     const res = await fetch(apiPath("/api/entries"), {
@@ -342,7 +454,7 @@ export function TimesheetApp({
       if (!res.ok) throw new Error(`${data.error ?? "Failed to save entries."}${data.reference?` Reference: ${data.reference}`:""}`)
     setEntries((prev) => [...(data.entries ?? []), ...prev])
     setSyncError(null)
-    }finally{pendingEntryWrites.current--;entryReadEpoch.current++}
+    }finally{invalidateEntriesCache();pendingEntryWrites.current--;entryReadEpoch.current++}
   }
 
   /**
@@ -354,6 +466,7 @@ export function TimesheetApp({
    * @returns Promise<void> after server confirmation; rejects on failure.
    */
   async function updateEntry(id: string, patch: Partial<TimeEntry>, expectedRevision?: string): Promise<void> {
+    invalidateEntriesCache()
     pendingEntryWrites.current++;entryReadEpoch.current++
     try {
       const response = await fetch(apiPath(`/api/entries/${id}`), {
@@ -373,7 +486,7 @@ export function TimesheetApp({
         : cause instanceof Error ? cause : new Error("Failed to update entry.")
       setSyncError(error.message)
       throw error
-    }finally{pendingEntryWrites.current--;entryReadEpoch.current++}
+    }finally{invalidateEntriesCache();pendingEntryWrites.current--;entryReadEpoch.current++}
   }
 
   /**
@@ -399,6 +512,7 @@ export function TimesheetApp({
    * @returns Nothing; local state and API sync happen as side effects.
    */
   function deleteEntry(id: string) {
+    invalidateEntriesCache()
     pendingEntryWrites.current++;entryReadEpoch.current++
     const previous = entries
     setEntries((prev) => prev.filter((e) => e.id !== id))
@@ -415,40 +529,49 @@ export function TimesheetApp({
           err instanceof Error ? err.message : "Failed to delete entry.",
         )
       })
-      .finally(()=>{pendingEntryWrites.current--;entryReadEpoch.current++})
+      .finally(()=>{invalidateEntriesCache();pendingEntryWrites.current--;entryReadEpoch.current++})
   }
 
-  /**
-   * Clears every entry visible to the signed-in user's role.
-   *
-   * This action is only exposed to managers and administrators. The backend uses
-   * the same role information to decide whether "visible" means team-wide data or
-   * the current user's own entries.
-   *
-   * @returns Nothing; local state and API sync happen as side effects.
-   */
-  function clearEntries() {
+  /** Starts the five-minute Entra step-up flow; it does not mutate timesheets. */
+  async function clearEntries() {
+    if (!canClearVisibleEntries || !userEmail) return
+    setSyncError(null)
+    try {
+      window.sessionStorage.setItem(pendingClearEntriesKey, JSON.stringify({ email: userEmail.toLowerCase(), expiresAt: Date.now() + 5 * 60_000 }))
+      await signIn("microsoft-entra-id", { redirectTo: window.location.href }, { max_age: "0", prompt: "login" })
+    } catch {
+      window.sessionStorage.removeItem(pendingClearEntriesKey)
+      setSyncError("Microsoft reauthentication did not complete. No entries were cleared.")
+    }
+  }
+
+  /** Executes a clear only after fresh Entra authentication and a second explicit confirmation. */
+  async function confirmClearEntries() {
+    if (!canClearVisibleEntries || clearEntriesBusy) return
+    setClearEntriesBusy(true)
+    invalidateEntriesCache()
     pendingEntryWrites.current++;entryReadEpoch.current++
     const previous = entries
     setEntries([])
-
-    fetch(apiPath("/api/entries"), { method: "DELETE" })
-      .then(async (res) => {
-        const data = await res.json()
-        if (!res.ok) throw new Error(data.error ?? "Failed to clear entries.")
-        const refresh = await fetch(apiPath("/api/entries"), { cache: "no-store" })
-        const current = await refresh.json()
-        if (!refresh.ok) throw new Error(current.error ?? "Unable to refresh entries after clearing.")
-        setEntries(current.entries ?? [])
-        setSyncError(null)
-      })
-      .catch((err) => {
-        setEntries(previous)
-        setSyncError(
-          err instanceof Error ? err.message : "Failed to clear entries.",
-        )
-      })
-      .finally(()=>{pendingEntryWrites.current--;entryReadEpoch.current++})
+    try {
+      const res = await fetch(apiPath("/api/entries"), { method: "DELETE" })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? "Failed to clear entries.")
+      const refresh = await fetch(apiPath("/api/entries"), { cache: "no-store" })
+      const current = await refresh.json()
+      if (!refresh.ok) throw new Error(current.error ?? "Unable to refresh entries after clearing.")
+      setEntries(current.entries ?? [])
+      setSyncError(null)
+    } catch (err) {
+      setEntries(previous)
+      setSyncError(err instanceof Error ? err.message : "Failed to clear entries.")
+    } finally {
+      setClearEntriesBusy(false)
+      setClearEntriesConfirmationOpen(false)
+      invalidateEntriesCache()
+      pendingEntryWrites.current--
+      entryReadEpoch.current++
+    }
   }
 
   const totalHours = entries.reduce((s, e) => s + (Number(e.hours) || 0), 0)
@@ -456,37 +579,27 @@ export function TimesheetApp({
   const approvedEntries = entries.filter((entry) => entry.status === "approved")
   const rejectedEntries = entries.filter((entry) => entry.status === "rejected")
   const draftEntries = entries.filter((entry) => entry.status === "draft")
+  const personalStatuses:[EntryStatus|"all",string][]=[["all","All entries"],["draft","Drafts"],["submitted","Awaiting approval"],["rejected","Needs correction"],["approved","Approved"]]
+  const isPersonalEntriesView=view==="personal"||((role==="employee"||role==="contractor")&&view==="log")
+  const ownEntries=entries.filter(entry=>entry.ownerEmail?.toLowerCase()===userEmail?.toLowerCase())
+  const visibleOwnEntries=personalStatus==="all"?ownEntries:ownEntries.filter(entry=>entry.status===personalStatus)
+  const personalStatusLabel=personalStatuses.find(([status])=>status===personalStatus)?.[1]??"All entries"
 
   const accountsContent=<BusinessAccounts key={`${role}:${permissions.send_to_accounts}:${permissions.view_accounts}:${permissions.review_accounts}:${permissions.ai_accounts}`} canSend={false} canReview={permissions.view_accounts&&permissions.review_accounts&&(role==="account_manager"||role==="admin")} canAI={permissions.view_accounts&&permissions.ai_accounts&&(role==="account_manager"||role==="admin")} canAuthorize={permissions.authorize_payouts}/>
-  const tabs: { key: View; label: string; icon: typeof ListChecks }[] = [
-    ...(role==="manager"?[{key:"personal" as const,label:"My managerial time",icon:Clock3}]:[]),
-    ...(!accessDenied&&permissions.view_accounts&&role==="account_manager"?[{key:"accounts" as const,label:"Business accounts",icon:BarChart3}]:[]),
-    {
-      key: "log",
-      label: permissions.view_team ? "Team entries" : "My entries",
-      icon: ListChecks,
-    },
-    ...(canReviewEntries || canAIReview
-      ? [{ key: "approvals" as const, label: canReviewEntries?"Approvals":"AI review", icon: CheckCircle2 }]
-      : []),
-    ...(canViewTeamReports
-      ? [{ key: "report" as const, label: "Reports", icon: BarChart3 }]
-      : []),
-    ...(canViewAdmin
-      ? [{ key: "admin" as const, label: "Admin", icon: ShieldCheck }]
-      : []),
-    ...(permissions.delegate_permissions && (role === "admin" || role === "manager") ? [{key:"permissions" as const,label:"Manage employees/contractors",icon:KeyRound}] : []),
-  ]
-
+  const assistantPane=accessDenied?null:<div ref={assistantDockRef} style={{height:assistantHeight,maxHeight:"calc(100dvh - 1.5rem)"}} className="relative min-h-[18rem] min-w-0 lg:sticky lg:top-3">
+    <div role="separator" aria-label="Resize assistant panel" aria-orientation="horizontal" aria-valuenow={assistantHeight} tabIndex={0} onPointerDown={beginAssistantResize} onPointerMove={moveAssistantResize} onPointerUp={endAssistantResize} onPointerCancel={endAssistantResize} onKeyDown={event=>{if(event.key==="ArrowUp")setAssistantHeight(value=>Math.min(Math.floor(window.innerHeight*.78),value+32));if(event.key==="ArrowDown")setAssistantHeight(value=>Math.max(300,value-32))}} className="absolute -top-2 left-1/2 z-10 h-4 w-16 -translate-x-1/2 cursor-ns-resize rounded-full bg-transparent after:absolute after:left-1/2 after:top-1/2 after:h-1 after:w-10 after:-translate-x-1/2 after:-translate-y-1/2 after:rounded-full after:bg-emerald-500/50 hover:after:bg-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500" />
+    <AssistantPanel organizationName={organizationName} onNavigate={destination=>{if(destination==="messages")setMessagesOpen(true);else{setCommandGroup(null);openWorkspacePage(destination as View)}}} onRefresh={()=>{setEntriesRefresh(value=>value+1);messageInbox.refresh()}} messageContext={assistantMessageContext} onContextUsed={()=>setAssistantMessageContext("")} onCompose={draft=>{setAssistantCompose(draft);setMessagesOpen(true)}} focusRequest={assistantFocusRequest}/>
+  </div>
+  const pageTitle=view==="personal"?`My managerial timesheets · ${personalStatusLabel}`:view==="log"&&(role==="employee"||role==="contractor")?`My timesheets · ${personalStatusLabel}`:view==="log"?(permissions.view_team?"Team entries":role==="contractor"?"Contractor time submissions":"Employee time entries"):view==="approvals"?"Review queue":view==="report"?"Reports":view==="permissions"?"Manage employees and contractors":view==="accounts"?"Business accounts":view==="admin"?"Admin dashboard":"Workspace"
   return (
-    <main className="app-workspace tech-surface flex min-h-svh w-full min-w-0 flex-col gap-4 bg-background px-3 pb-8 pt-4 sm:px-5 md:pt-5">
-      {!accessDenied&&messagesOpen&&<WindowSurface title="Messages" onBack={()=>setMessagesOpen(false)}><section className="min-h-0 w-full overflow-auto bg-background p-3 sm:p-5"><MessagesPanel inbox={messageInbox} encryption={messageEncryption} canSend={permissions.send_messages&&(role==="admin"||role==="manager")} initialDraft={assistantCompose} onDraftConsumed={()=>setAssistantCompose(null)} onExplainMessage={text=>{setAssistantMessageContext(text);setAssistantOpen(true)}}/></section></WindowSurface>}
-      {!accessDenied&&assistantOpen&&<WindowSurface title="Tanovo assistant" onBack={()=>setAssistantOpen(false)}><section className="min-h-0 w-full overflow-auto bg-background p-3 sm:p-5"><AssistantPanel onNavigate={destination=>{if(destination==="messages")setMessagesOpen(true);else setView(destination as View);setCommandGroup(null)}} onRefresh={()=>{setEntriesRefresh(value=>value+1);messageInbox.refresh()}} messageContext={assistantMessageContext} onContextUsed={()=>setAssistantMessageContext("")} onCompose={draft=>{setAssistantCompose(draft);setMessagesOpen(true)}}/></section></WindowSurface>}
-      <header className="workspace-header flex flex-col gap-3 border-b border-border pb-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <Brand />
-          <div className="flex min-w-0 items-center justify-end gap-3">
-            {!accessDenied&&<Button variant="outline" size="icon-lg" aria-label="Open Tanovo assistant" title="Tanovo assistant" onClick={()=>setAssistantOpen(true)}><Sparkles className="size-5"/></Button>}
+    <main className="app-workspace tech-surface flex h-dvh min-h-svh w-full min-w-0 flex-col gap-3 overflow-x-hidden overflow-y-auto overscroll-y-contain bg-background px-3 pb-8 pt-3 sm:px-5 md:pt-4">
+      {!accessDenied&&messagesOpen&&<WindowSurface title="Messages" onBack={()=>setMessagesOpen(false)}><section className="min-h-0 w-full overflow-auto bg-background p-3 sm:p-5"><MessagesPanel inbox={messageInbox} encryption={messageEncryption} canSend={permissions.send_messages&&(role==="admin"||role==="manager")} initialDraft={assistantCompose} onDraftConsumed={()=>setAssistantCompose(null)} onExplainMessage={text=>{setAssistantMessageContext(text);setMessagesOpen(false);focusAssistant()}}/></section></WindowSurface>}
+      <header className="workspace-header flex flex-col gap-2 border-b border-border pb-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1"><Brand/><span aria-hidden="true" className="hidden h-5 border-l border-orange-200 sm:block"/><h1 className="text-base font-semibold text-slate-900">{role === "admin" ? "Technology management" : role === "account_manager" ? "Business accounts" : role === "manager" ? "Manager workspace" : role === "contractor" ? "Contractor workspace" : "Employee workspace"}</h1></div>
+          <div className="flex min-w-0 items-center justify-end gap-2">
+            {!accessDenied&&<Button variant="outline" size="icon-lg" aria-label={`Go to ${organizationName} assistant`} title={`Go to ${organizationName} assistant`} onClick={focusAssistant}><Sparkles className="size-5"/></Button>}
+            {!accessDenied&&<MessageNotifications inbox={messageInbox} onOpen={()=>setMessagesOpen(true)}/>}
             {!accessDenied&&<WorkspaceUtilities unread={messageInbox.unread} onMessages={()=>setMessagesOpen(true)}/>}
             <AccountProfile
               email={userEmail}
@@ -496,49 +609,45 @@ export function TimesheetApp({
             <SignOutButton />
           </div>
         </div>
-        {!accessDenied&&<MessageNotifications inbox={messageInbox} onOpen={()=>setMessagesOpen(true)}/>}
-        <h1 className="text-2xl font-semibold text-balance">
-          {role === "admin" ? "Technology management" : role === "account_manager" ? "Business accounts" : role === "manager" ? "Team workspace" : "My timesheet"}
-        </h1>
       </header>
 
       {!accessDenied && <WorkspaceSnapshot entries={entries} email={userEmail ?? ""} role={role} loading={loadingEntries} canReview={canReviewEntries || canAIReview} />}
       {!accessDenied && <nav aria-label="Command groups" className="flex flex-wrap gap-2 border-b pb-3">
         <Button variant="outline" help="Time capture, personal entries, drafts, and submission controls." aria-haspopup="dialog" onClick={()=>setCommandGroup("time")}><Layers3 className="size-4"/>Timesheets<ChevronRight className="size-4"/></Button>
-        {(canReviewEntries || canAIReview || ((role==="admin"||role==="account_manager")&&permissions.view_accounts)) && <Button variant="outline" help="Review submissions, prepare AI advice, and hand approved evidence to accounts." aria-haspopup="dialog" onClick={()=>setCommandGroup("review")}><CheckCircle2 className="size-4"/>{role==="admin"?"Operations":"Reviews"}<ChevronRight className="size-4"/></Button>}
+        {(role==="admin" || canReviewEntries || canAIReview || (role==="account_manager"&&permissions.view_accounts)) && <Button variant="outline" help="Review submissions, prepare AI advice, and hand approved evidence to accounts." aria-haspopup="dialog" onClick={()=>setCommandGroup("review")}><CheckCircle2 className="size-4"/>{role==="admin"?"Operations":"Reviews"}<ChevronRight className="size-4"/></Button>}
         <Button variant="outline" help="Workspace information, workflow totals, and authorized reports." aria-haspopup="dialog" onClick={()=>setCommandGroup("insights")}><BarChart3 className="size-4"/>Insights<ChevronRight className="size-4"/></Button>
         {(canViewAdmin || (role==="manager" && permissions.delegate_permissions)) && <Button variant="outline" help="Authorized people, rights, coverage, and security controls." aria-haspopup="dialog" onClick={()=>setCommandGroup("access")}><ShieldCheck className="size-4"/>Access &amp; security<ChevronRight className="size-4"/></Button>}
       </nav>}
-      {!accessDenied && commandGroup && <WindowSurface title={{time:"Timesheets",review:role==="admin"?"Operations":"Reviews",insights:"Insights",access:"Access & security"}[commandGroup]} onBack={()=>setCommandGroup(null)}>
+      {!accessDenied && commandGroup && !pageWindow && <WindowSurface title={{time:"Timesheets",review:role==="admin"?"Operations":"Reviews",insights:"Insights",access:"Access & security"}[commandGroup]} onBack={()=>setCommandGroup(null)}>
         <section className="min-h-0 w-full overflow-auto bg-white p-4 sm:p-6">
           <p className="mb-2 text-xs text-muted-foreground">Workspace / {{time:"Timesheets",review:role==="admin"?"Operations":"Reviews",insights:"Insights",access:"Access & security"}[commandGroup]}</p>
           {commandGroup==="time" && <div className="space-y-5">
             <h2 className="text-lg font-semibold">Time capture and submissions</h2>
             <div className="flex flex-wrap gap-2">
-              <Button variant="outline" onClick={()=>{setEntriesRefresh(value=>value+1);setCommandGroup(null)}}>Refresh entries</Button>
-              {permissions.create_entries && <Button onClick={()=>setWorkspaceWindow("notes")}><Pencil className="size-4"/>Log time notes</Button>}
-              <Button variant="outline" onClick={()=>{setView(role==="manager"?"personal":"log");setCommandGroup(null)}}><ListChecks className="size-4"/>{role==="manager"?"My managerial time":"My entries"}</Button>
-              {permissions.view_team && <Button variant="outline" onClick={()=>{setView("log");setCommandGroup(null)}}><Users className="size-4"/>Team entries</Button>}
+              <Button variant="outline" onClick={()=>setEntriesRefresh(value=>value+1)}><Activity className="size-4"/>Refresh entries</Button>
+              {permissions.create_entries && <Button onClick={()=>setWorkspaceWindow("notes")}><Pencil className="size-4"/>{role==="contractor"?"Log project time":"Log time notes"}</Button>}
+              <Button variant="outline" onClick={()=>openWorkspacePage(role==="manager"?"personal":"log")}><ListChecks className="size-4"/>{role==="manager"?"My managerial time":role==="contractor"?"My submissions":"My entries"}</Button>
+              {permissions.view_team && <Button variant="outline" onClick={()=>openWorkspacePage("log")}><Users className="size-4"/>Team entries</Button>}
             </div>
-            {(role==="contractor" || role==="employee" || role==="manager") && <EmployeeWorkspace contractor={role==="contractor"} entries={entries.filter(entry=>entry.ownerEmail?.toLowerCase()===userEmail?.toLowerCase())} selected={personalStatus} onSelect={status=>{setPersonalStatus(status);setView(role==="manager"?"personal":"log");setCommandGroup(null)}}/>}
+            {(role==="contractor" || role==="employee" || role==="manager") && <EmployeeWorkspace role={role} entries={entries.filter(entry=>entry.ownerEmail?.toLowerCase()===userEmail?.toLowerCase())} selected={personalStatus} onSelect={status=>{setPersonalStatus(status);openWorkspacePage(role==="manager"?"personal":"log")}}/>}
           </div>}
           {commandGroup==="review" && <div className="space-y-5">
             <h2 className="text-lg font-semibold">{role==="admin"?"Operations":"Review and handoff"}</h2>
-            {(canReviewEntries || canAIReview || canViewTeamReports) && <ManagerWorkspace canReview={canReviewEntries} canReports={canViewTeamReports} canAI={canAIReview} pending={pendingEntries.length} entries={pendingEntries} onApprovals={()=>{setView("approvals");setCommandGroup(null)}} onReports={()=>{setView("report");setCommandGroup(null)}} onRecommendation={(entry,decision,reason)=>setSuggestedReview({entry,decision,reason})}/>}
-            {(permissions.view_accounts && (role==="account_manager"||role==="admin")) && <Button variant="outline" onClick={()=>{setView("accounts");setCommandGroup(null)}}><BarChart3 className="size-4"/>Business accounts</Button>}
+            {(canReviewEntries || canAIReview || canViewTeamReports) && <ManagerWorkspace canReview={canReviewEntries} canReports={canViewTeamReports} canAI={canAIReview} pending={pendingEntries.length} entries={pendingEntries} onApprovals={()=>openWorkspacePage("approvals")} onReports={()=>openWorkspacePage("report")} onRecommendation={(entry,decision,reason)=>setSuggestedReview({entry,decision,reason})}/>}
+            {(permissions.view_accounts && (role==="account_manager"||role==="admin")) && <Button variant="outline" onClick={()=>openWorkspacePage("accounts")}><BarChart3 className="size-4"/>Business accounts</Button>}
           </div>}
           {commandGroup==="insights" && <div className="space-y-4">
             <h2 className="text-lg font-semibold">Workspace information and reports</h2>
             <div className="flex flex-wrap gap-2">
               <Button variant="outline" onClick={()=>setWorkspaceWindow("overview")}><Users className="size-4"/>Workspace overview</Button>
               <Button variant="outline" onClick={()=>setWorkspaceWindow("workflow")}><BarChart3 className="size-4"/>Workflow totals</Button>
-              {canViewTeamReports && <Button variant="outline" onClick={()=>{setView("report");setCommandGroup(null)}}><BarChart3 className="size-4"/>Reports</Button>}
+              {canViewTeamReports && <Button variant="outline" onClick={()=>openWorkspacePage("report")}><BarChart3 className="size-4"/>Reports</Button>}
             </div>
           </div>}
           {commandGroup==="access" && <div className="space-y-4">
             <h2 className="text-lg font-semibold">People, rights, and security</h2>
-            {canViewAdmin && <AdminWorkspace onDirectory={()=>{setView("admin");setDirectoryRequest(value=>value+1);setCommandGroup(null)}} onSecurity={()=>setTechnologyReports(true)} onLifecycle={()=>setLifecycleOpen(true)}/>}
-            {permissions.delegate_permissions && (role==="manager"||role==="admin") && <Button variant="outline" onClick={()=>{setView("permissions");setCommandGroup(null)}}><KeyRound className="size-4"/>Manage employees/contractors</Button>}
+            {canViewAdmin && <Button variant="outline" onClick={()=>openWorkspacePage("admin")}><ShieldCheck className="size-4"/>Admin dashboard</Button>}
+            {permissions.delegate_permissions && role==="manager" && <Button variant="outline" onClick={()=>openWorkspacePage("permissions")}><KeyRound className="size-4"/>Manage employees/contractors</Button>}
             {role==="manager" && permissions.delegate_permissions && <Button variant="outline" onClick={()=>setLifecycleOpen(true)}><KeyRound className="size-4"/>Temporary coverage</Button>}
           </div>}
         </section>
@@ -547,7 +656,7 @@ export function TimesheetApp({
       {canViewAdmin && technologyReports && <SecurityRiskWindow onClose={() => setTechnologyReports(false)} />}
 
       {workspaceWindow&&<WindowSurface title={workspaceWindow==="notes"?"Log time notes":workspaceWindow==="overview"?"Workspace overview":"Workflow totals"} onBack={()=>setWorkspaceWindow(null)}><section className="flex min-h-0 w-full max-w-6xl flex-col bg-white"><div className="min-h-0 flex-1 overflow-auto p-4">
-      {workspaceWindow==="overview"?<RoleOverview role={role}/>:workspaceWindow==="notes"?<NoteInput onParsed={async parsed=>{await addParsed(parsed);setWorkspaceWindow(null);setCommandGroup(null);setView(role==="manager"?"personal":"log")}}/>:<WorkflowOverview
+      {workspaceWindow==="overview"?<RoleOverview role={role}/>:workspaceWindow==="notes"?<NoteInput onParsed={async parsed=>{await addParsed(parsed);setWorkspaceWindow(null);if(role!=="admin"||view!=="admin")openWorkspacePage(role==="manager"?"personal":"log")}}/>:<WorkflowOverview
         approvedCount={approvedEntries.length}
         draftCount={draftEntries.length}
         pendingCount={pendingEntries.length}
@@ -561,68 +670,53 @@ export function TimesheetApp({
         setSuggestedReview(null)
       }} />}
       {accessDenied && <p role="alert">Access is unavailable. Contact your administrator.</p>}
-      {!accessDenied&&view==="approvals"&&(role==="manager"||role==="admin"||role==="account_manager")&&(canReviewEntries||permissions.ai_review)&&<ApprovalSelection entries={pendingEntries} email={userEmail??""} canReview={canReviewEntries} canAI={canAIReview} onUpdated={entry=>{entryReadEpoch.current++;setEntries(previous=>role==="manager"&&entry.ownerEmail?.toLowerCase()!==userEmail?.toLowerCase()&&entry.status!=="submitted"?previous.filter(current=>current.id!==entry.id):previous.map(current=>current.id===entry.id?entry:current))}}/>}
-
-      {savedStatus&&!syncError&&<p role="status" className="border-y border-green-200 bg-green-50 px-4 py-2 text-sm text-green-900">{savedStatus}</p>}
-      {(loadingEntries || syncError) && (
-        <div
-          className={`rounded-lg border px-4 py-3 text-sm ${
-            syncError
-              ? "border-destructive/40 bg-destructive/10 text-destructive"
-              : "border-border bg-muted/50 text-muted-foreground"
-          }`}
-          role={syncError ? "alert" : "status"}
-        >
-          {syncError ?? "Loading saved entries..."}
-        </div>
-      )}
-
-      {/* View switch */}
-      <div aria-label="Workspace views" className="sticky top-0 z-10 grid grid-cols-2 gap-1 border-y border-border bg-card p-1 sm:flex sm:flex-wrap sm:items-center">
-        {tabs.map(({ key, label, icon: Icon }) => (
-          <Button
-            key={key}
-            variant="ghost"
-            help={`Open ${label.toLowerCase()} using your current role and permissions.`}
-            type="button"
-            onClick={() => setView(key)}
-            aria-pressed={view === key}
-            className={`flex min-h-11 min-w-0 flex-1 items-center justify-center gap-2 rounded-md px-2 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-              view === key
-                ? "bg-accent text-primary ring-1 ring-primary/20"
-                : "text-muted-foreground hover:bg-muted hover:text-foreground"
-            }`}
-          >
-            <Icon className="size-4" aria-hidden="true" />
-            {label}
-            {key==="messages"&&messageInbox.unread>0&&<span className="rounded-full bg-primary px-1.5 text-xs text-white" aria-label={`${messageInbox.unread} unread messages`}>{messageInbox.unread}</span>}
-            {key === "log" && entries.length > 0 && (
-              <span
-                className={`ml-1 rounded-full px-1.5 text-xs tabular-nums ${
-                  view === key
-                    ? "bg-primary/10"
-                    : "bg-muted-foreground/15"
-                }`}
-              >
-                {entries.length}
-              </span>
-            )}
-            {key === "approvals" && pendingEntries.length > 0 && (
-              <span
-                className={`ml-1 rounded-full px-1.5 text-xs tabular-nums ${
-                  view === key
-                    ? "bg-primary/10"
-                    : "bg-muted-foreground/15"
-                }`}
-              >
-                {pendingEntries.length}
-              </span>
-            )}
-          </Button>
-        ))}
-      </div>
+      {view === "admin" ? (
+        <WorkspacePageSurface open={pageWindow} title={pageTitle} onBack={closeWorkspacePage}><AdminPanel role={role} entries={entries} pendingEntries={pendingEntries} userEmail={userEmail??""} onEntryUpdate={updateEntry} onEntryStatusChange={changeEntryStatus} onEntryDelete={deleteEntry} onEntryClear={clearEntries} onRefreshEntries={()=>setEntriesRefresh(value=>value+1)} onOpenEntryCapture={()=>setWorkspaceWindow("notes")} onApprovalUpdated={entry=>{entryReadEpoch.current++;setEntries(previous=>previous.map(current=>current.id===entry.id?entry:current))}} canCreateEntries={permissions.create_entries} canEditEntries={permissions.edit_entries} canDeleteEntries={permissions.delete_entries} canClearEntries={canClearVisibleEntries} canReviewEntries={canReviewEntries} canAIReview={canAIReview} canSubmitEntries={canSubmitEntries} canExportEntries={permissions.export_entries} openRequest={directoryRequest} assistantPane={assistantPane} reportContent={<ManagerReport entries={entries}/>} onSecurity={()=>setTechnologyReports(true)} onLifecycle={()=>setLifecycleOpen(true)} /></WorkspacePageSurface>
+      ) : view === "permissions" && role === "admin" ? (
+        <WorkspacePageSurface open={pageWindow} title={pageTitle} onBack={closeWorkspacePage}><AdminPanel role={role} entries={entries} pendingEntries={pendingEntries} userEmail={userEmail??""} onEntryUpdate={updateEntry} onEntryStatusChange={changeEntryStatus} onEntryDelete={deleteEntry} onEntryClear={clearEntries} onRefreshEntries={()=>setEntriesRefresh(value=>value+1)} onOpenEntryCapture={()=>setWorkspaceWindow("notes")} onApprovalUpdated={entry=>{entryReadEpoch.current++;setEntries(previous=>previous.map(current=>current.id===entry.id?entry:current))}} canCreateEntries={permissions.create_entries} canEditEntries={permissions.edit_entries} canDeleteEntries={permissions.delete_entries} canClearEntries={canClearVisibleEntries} canReviewEntries={canReviewEntries} canAIReview={canAIReview} canSubmitEntries={canSubmitEntries} canExportEntries={permissions.export_entries} rightsOnly openRequest={directoryRequest} assistantPane={assistantPane} reportContent={<ManagerReport entries={entries}/>} onSecurity={()=>setTechnologyReports(true)} onLifecycle={()=>setLifecycleOpen(true)} /></WorkspacePageSurface>
+      ) : <WorkspacePageSurface open={pageWindow} title={pageTitle} onBack={closeWorkspacePage}><div className="grid min-w-0 w-full flex-1 items-start gap-4 lg:grid-cols-2">
+        <div className="flex min-w-0 flex-col gap-4">
+          {view==="home"&&(role==="contractor"||role==="employee"||role==="manager")&&<RoleWorkspaceHome
+            role={role}
+            entries={entries.filter(entry=>entry.ownerEmail?.toLowerCase()===userEmail?.toLowerCase())}
+            teamEntries={role==="manager"?entries.filter(entry=>entry.ownerEmail?.toLowerCase()!==userEmail?.toLowerCase()):[]}
+            pending={pendingEntries.length}
+            canCreate={permissions.create_entries}
+            canReview={canReviewEntries||canAIReview}
+            canReports={canViewTeamReports}
+            onTimesheets={()=>setCommandGroup("time")}
+            onReviews={()=>setCommandGroup("review")}
+            onLogTime={()=>setWorkspaceWindow("notes")}
+          />}
+          {view!=="home"&&<>
+          {!accessDenied&&view==="approvals"&&(role==="manager"||role==="admin"||role==="account_manager")&&(canReviewEntries||permissions.ai_review)&&<ApprovalSelection entries={pendingEntries} email={userEmail??""} canReview={canReviewEntries} canAI={canAIReview} onUpdated={entry=>{entryReadEpoch.current++;setEntries(previous=>role==="manager"&&entry.ownerEmail?.toLowerCase()!==userEmail?.toLowerCase()&&entry.status!=="submitted"?previous.filter(current=>current.id!==entry.id):previous.map(current=>current.id===entry.id?entry:current))}}/>}
+          {savedStatus&&!syncError&&<p role="status" className="border-y border-green-200 bg-green-50 px-4 py-2 text-sm text-green-900">{savedStatus}</p>}
+          {(loadingEntries || syncError) && (
+            <div className={`rounded-lg border px-4 py-3 text-sm ${syncError ? "border-destructive/40 bg-destructive/10 text-destructive" : "border-border bg-muted/50 text-muted-foreground"}`} role={syncError ? "alert" : "status"}>
+              {syncError ?? "Loading saved entries..."}
+            </div>
+          )}
 
       {view === "log" || view === "personal" ? (
+        <>
+        {isPersonalEntriesView&&<section aria-label={`${personalStatusLabel} timesheet workspace`} className="mb-4 w-full border-b border-orange-200 bg-gradient-to-r from-orange-50 via-sky-50 to-emerald-50 p-4 sm:p-5">
+          <header className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200/80 pb-3">
+            <div><p className="text-xs font-semibold uppercase text-orange-800">{role==="contractor"?"Contractor timesheets":role==="manager"?"Manager personal timesheets":"Employee timesheets"}</p><h2 className="mt-1 text-lg font-semibold text-slate-950">{personalStatusLabel}</h2><p className="mt-1 text-sm text-slate-600">A dedicated view of your {personalStatusLabel.toLowerCase()} with entry details, submission controls, search, filters, and history.</p></div>
+            <div className="flex flex-wrap gap-2">
+              {permissions.create_entries&&<Button onClick={()=>setWorkspaceWindow("notes")}><Pencil className="size-4"/>{role==="contractor"?"Log project time":"Log time notes"}</Button>}
+              <Button variant="outline" onClick={()=>setEntriesRefresh(value=>value+1)}><Activity className="size-4"/>Refresh entries</Button>
+            </div>
+          </header>
+          <div className="grid gap-2 py-3 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="border-l-4 border-orange-500 bg-white/80 px-3 py-2"><p className="text-xs text-slate-600">Entries in view</p><p className="mt-1 text-lg font-semibold tabular-nums">{visibleOwnEntries.length}</p></div>
+            <div className="border-l-4 border-blue-500 bg-white/80 px-3 py-2"><p className="text-xs text-slate-600">Hours in view</p><p className="mt-1 text-lg font-semibold tabular-nums">{visibleOwnEntries.reduce((sum,entry)=>sum+Number(entry.hours||0),0).toLocaleString(undefined,{maximumFractionDigits:2})}h</p></div>
+            <div className="border-l-4 border-emerald-500 bg-white/80 px-3 py-2"><p className="text-xs text-slate-600">Projects</p><p className="mt-1 text-lg font-semibold tabular-nums">{new Set(visibleOwnEntries.map(entry=>entry.project)).size}</p></div>
+            <div className="border-l-4 border-violet-500 bg-white/80 px-3 py-2"><p className="text-xs text-slate-600">Latest work date</p><p className="mt-1 text-sm font-semibold">{visibleOwnEntries.map(entry=>entry.date).sort().at(-1)??"No entries yet"}</p></div>
+          </div>
+          <nav aria-label="My timesheet views" className="flex flex-wrap gap-2">
+            {personalStatuses.map(([status,label])=><Button key={status} size="sm" variant={personalStatus===status?"default":"outline"} aria-pressed={personalStatus===status} onClick={()=>setPersonalStatus(status)}>{label}<span className="tabular-nums">{status==="all"?ownEntries.length:ownEntries.filter(entry=>entry.status===status).length}</span><ChevronRight className="size-3.5"/></Button>)}
+          </nav>
+        </section>}
         <EntriesLog
           userEmail={userEmail ?? undefined}
           submissionDestination={role==="manager"?"account_manager":"manager"}
@@ -636,6 +730,8 @@ export function TimesheetApp({
           canClear={view!=="personal"&&canClearVisibleEntries}
           canReview={view!=="personal"&&canReviewEntries}
           canSubmit={canSubmitEntries}
+          canSubmitOthers={role==="manager"&&view==="log"}
+          canExport={permissions.export_entries}
           canEdit={permissions.edit_entries}
           canDelete={permissions.delete_entries}
           description={
@@ -645,6 +741,7 @@ export function TimesheetApp({
           }
           title={view==="personal"?"My managerial time — independent review required":permissions.view_team ? "Team entries" : role==="contractor"?"Contractor time submissions":"Internal employee time"}
         />
+        </>
       ) : view === "approvals" ? (
         pendingEntries.length === 0 ? (
           <div className="rounded-xl border border-dashed border-border bg-card/50 px-6 py-16 text-center">
@@ -667,6 +764,7 @@ export function TimesheetApp({
             canClear={false}
             canReview={canReviewEntries}
             canSubmit={false}
+            canExport={permissions.export_entries}
             canEdit={permissions.edit_entries}
             canDelete={permissions.delete_entries}
             description="Approve or reject submitted time after review."
@@ -674,33 +772,60 @@ export function TimesheetApp({
           />
         )
       ) : view === "report" ? (
-        entries.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-border bg-card/50 px-6 py-16 text-center">
-            <p className="text-sm font-medium">Nothing to report yet</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Add some entries first and the manager report will build itself.
-            </p>
-          </div>
-        ) : (
-          <ManagerReport entries={entries} />
-        )
+        <section aria-label="Reports" className="min-w-0 space-y-3">
+          <header className="border-y border-orange-200 bg-orange-50 px-4 py-3">
+            <h2 className="font-semibold text-orange-950">Reports</h2>
+            <p className="text-xs text-orange-900">Organized summaries and analysis of timesheet activity. Open Timesheets for individual source entries.</p>
+          </header>
+          <ManagerReport entries={entries}/>
+        </section>
       ) : view === "accounts" ? (
-        role==="admin"?<WindowSurface title="Business accounts" onBack={()=>{setView("admin");setCommandGroup("review")}}><section className="min-h-0 w-full overflow-auto bg-white p-4">{accountsContent}</section></WindowSurface>:accountsContent
+        <section className="min-h-0 w-full overflow-auto bg-white p-4">{accountsContent}</section>
       ) : view === "messages" ? (
         <MessagesPanel inbox={messageInbox} canSend={permissions.send_messages && (role === "admin" || role === "manager")} />
       ) : view === "permissions" ? (
-        role === "admin" ? <AdminPanel role={role} rightsOnly openRequest={directoryRequest} /> : <EmployeeRightsPanel permissions={permissions} />
+        <EmployeeRightsPanel permissions={permissions} />
       ) : (
-        <AdminPanel role={role} openRequest={directoryRequest} />
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50/40 p-4 text-sm text-slate-700">This workspace is unavailable for the current role.</div>
       )}
-
-      <footer className="mt-auto pt-4 text-center text-xs text-muted-foreground">
+          </>}
+        </div>
+        {assistantPane}
+      </div></WorkspacePageSurface>}
+      {view!=="home"&&<footer className="mt-auto pt-4 text-center text-xs text-muted-foreground">
         {entries.length} entries ·{" "}
         {totalHours.toLocaleString(undefined, { maximumFractionDigits: 2 })}h logged
         total · {approvedEntries.length} approved
-      </footer>
+      </footer>}
+      {clearEntriesConfirmationOpen && <WindowSurface title="Confirm clearing all timesheets" compact resizable disabled={clearEntriesBusy} onBack={() => setClearEntriesConfirmationOpen(false)}>
+        <section className="flex w-full max-w-xl flex-col bg-white text-slate-950">
+          <header className="flex items-start gap-3 border-b border-red-200 bg-red-50 p-4">
+            <ShieldCheck className="mt-0.5 size-5 shrink-0 text-red-700" aria-hidden="true" />
+            <div><h2 className="font-semibold text-red-950">Microsoft verification complete</h2><p className="mt-1 text-sm text-red-900">You reauthenticated as {userEmail}. Confirm only if you intend to permanently clear all entries visible to this administrator account.</p></div>
+          </header>
+          <p className="p-4 text-sm">This action cannot be undone. {entries.length} entries are currently loaded. Cancel leaves all data unchanged.</p>
+          {syncError && <p role="alert" className="px-4 pb-3 text-sm text-red-700">{syncError}</p>}
+          <footer className="flex justify-end gap-2 border-t p-4">
+            <Button variant="outline" disabled={clearEntriesBusy} onClick={() => setClearEntriesConfirmationOpen(false)}>Cancel</Button>
+            <Button variant="destructive" disabled={clearEntriesBusy || !permissionsLoaded || !canClearVisibleEntries} onClick={() => void confirmClearEntries()}><Trash2 className="size-4" />{clearEntriesBusy ? "Clearing..." : !permissionsLoaded ? "Checking access..." : "Clear all entries"}</Button>
+          </footer>
+        </section>
+      </WindowSurface>}
     </main>
   )
+}
+
+/**
+ * Opens role content in a complete nested window only when navigation requests it.
+ * The non-window path preserves the original landing-page layout.
+ * @param props.open - Whether the content should occupy a full-screen work window.
+ * @param props.title - Accessible page-window title.
+ * @param props.onBack - Returns to the parent command group or role home.
+ * @param props.children - Complete role page content, including its authorized actions.
+ * @returns The content inline or inside a full-screen application window.
+ */
+function WorkspacePageSurface({open,title,onBack,children}:{open:boolean;title:string;onBack:()=>void;children:ReactNode}) {
+  return open?<WindowSurface title={title} onBack={onBack}>{children}</WindowSurface>:<>{children}</>
 }
 
 /**
@@ -816,18 +941,28 @@ function WorkflowOverview({
  * @param props.role - Effective role for the signed-in user.
  * @returns The administrator user directory panel, or null for non-admin roles.
  */
-function AdminPanel({ role, rightsOnly = false,openRequest = 0 }: { role: UserRole; rightsOnly?: boolean;openRequest?:number }) {
+function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, onEntryStatusChange, onEntryDelete, onEntryClear, onRefreshEntries, onOpenEntryCapture, onApprovalUpdated, canCreateEntries, canEditEntries, canDeleteEntries, canClearEntries, canReviewEntries, canAIReview, canSubmitEntries, canExportEntries, rightsOnly = false,openRequest = 0,assistantPane,reportContent,onSecurity,onLifecycle }: { role: UserRole; entries:TimeEntry[]; pendingEntries:TimeEntry[]; userEmail:string; onEntryUpdate:(id:string,patch:Partial<TimeEntry>,revision?:string)=>void|Promise<void>; onEntryStatusChange:(id:string,status:EntryStatus,note?:string,revision?:string,manager?:string)=>Promise<void>; onEntryDelete:(id:string)=>void; onEntryClear:()=>void; onRefreshEntries:()=>void; onOpenEntryCapture:()=>void; onApprovalUpdated:(entry:TimeEntry)=>void; canCreateEntries:boolean; canEditEntries:boolean; canDeleteEntries:boolean; canClearEntries:boolean; canReviewEntries:boolean; canAIReview:boolean; canSubmitEntries:boolean; canExportEntries:boolean; rightsOnly?: boolean;openRequest?:number;assistantPane?:ReactNode;reportContent?:ReactNode;onSecurity?:()=>void;onLifecycle?:()=>void }) {
   const [users, setUsers] = useState<AdminDirectoryUser[]>([])
   const [auditEvents, setAuditEvents] = useState<AdminAuditEvent[]>([])
   const [allActivityEvents, setAllActivityEvents] = useState<AdminAuditEvent[]>([])
   const [activityWindowOpen, setActivityWindowOpen] = useState(false)
   const [directoryOpen,setDirectoryOpen] = useState(rightsOnly)
-  const [totalsOpen,setTotalsOpen] = useState(false)
+  const [adminSection,setAdminSection] = useState<"admin"|"reports"|"timesheets"|null>(null)
+  const [adminReportOpen,setAdminReportOpen]=useState(false)
+  const [patronSearch,setPatronSearch]=useState("")
+  const [patronRoleFilter,setPatronRoleFilter]=useState("all")
+  const [patronStatusFilter,setPatronStatusFilter]=useState("all")
+  const [selectedPatron,setSelectedPatron] = useState<AdminDirectoryUser|null>(null)
+  const [editingOfficialName,setEditingOfficialName] = useState(false)
+  const [officialNameDraft,setOfficialNameDraft] = useState("")
+  const [savingOfficialName,setSavingOfficialName] = useState(false)
   const [activityLoading, setActivityLoading] = useState(false)
   const [activityError, setActivityError] = useState<string | null>(null)
   const [accessEditor, setAccessEditor] = useState<AccessEditorState | null>(
     null,
   )
+  const [accessConfirmationOpen, setAccessConfirmationOpen] = useState(false)
+  const [reauthenticatedPendingChange, setReauthenticatedPendingChange] = useState(false)
   const [savingUser, setSavingUser] = useState<string | null>(null)
   const [managementError, setManagementError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -835,6 +970,25 @@ function AdminPanel({ role, rightsOnly = false,openRequest = 0 }: { role: UserRo
 
   useEffect(()=>{if(rightsOnly)setDirectoryOpen(true)},[rightsOnly])
   useEffect(()=>{if(openRequest)setDirectoryOpen(true)},[openRequest])
+
+  useEffect(() => {
+    if (role !== "admin") return
+    const stored = window.sessionStorage.getItem(pendingAccessChangeKey)
+    if (!stored) return
+    window.sessionStorage.removeItem(pendingAccessChangeKey)
+    try {
+      const pending = JSON.parse(stored) as AccessEditorState & { expiresAt: number }
+      if (pending.expiresAt < Date.now() || !pending.email || !manageableRoles.includes(pending.role) || !manageableStatuses.includes(pending.accessStatus) || typeof pending.note !== "string") {
+        setManagementError("The pending access change expired or could not be verified. Review and submit it again.")
+        return
+      }
+      setAccessEditor({ ...pending, mode: "edit" })
+      setReauthenticatedPendingChange(true)
+      setAccessConfirmationOpen(true)
+    } catch {
+      setManagementError("The pending access change could not be restored. Please review it again.")
+    }
+  }, [role])
 
   useEffect(() => {
     let active = true
@@ -883,10 +1037,14 @@ function AdminPanel({ role, rightsOnly = false,openRequest = 0 }: { role: UserRo
       }
     }
 
+    window.addEventListener("permissions-changed", loadAdminData)
+    window.addEventListener("focus", loadAdminData)
     loadAdminData()
 
     return () => {
       active = false
+      window.removeEventListener("permissions-changed", loadAdminData)
+      window.removeEventListener("focus", loadAdminData)
     }
   }, [role,rightsOnly])
 
@@ -894,12 +1052,14 @@ function AdminPanel({ role, rightsOnly = false,openRequest = 0 }: { role: UserRo
     return null
   }
 
-  const configuredCount = users.filter((user) => user.accessConfigured).length
-  const submittedCount = users.reduce(
-    (sum, user) => sum + user.submittedEntries,
-    0,
-  )
   const sortedUsers = sortAdminDirectoryUsers(users)
+  const landingPatrons=sortedUsers.filter(user=>{
+    const search=patronSearch.trim().toLowerCase()
+    const matchesSearch=!search||user.displayName.toLowerCase().includes(search)||user.email.toLowerCase().includes(search)
+    const needsAttention = !user.accessConfigured || user.accessStatus !== "active" || !user.displayName.trim()
+    const matchesStatus = patronStatusFilter === "all" || (patronStatusFilter === "needs_attention" ? needsAttention : user.accessStatus === patronStatusFilter)
+    return matchesSearch&&(patronRoleFilter==="all"||user.role===patronRoleFilter)&&matchesStatus
+  })
 
   /**
    * Applies a saved managed access assignment to the visible directory.
@@ -997,6 +1157,8 @@ function AdminPanel({ role, rightsOnly = false,openRequest = 0 }: { role: UserRo
    */
   function openAddUserEditor() {
     setManagementError(null)
+    setAccessConfirmationOpen(false)
+    setReauthenticatedPendingChange(false)
     setAccessEditor({
       mode: "add",
       email: "",
@@ -1017,6 +1179,8 @@ function AdminPanel({ role, rightsOnly = false,openRequest = 0 }: { role: UserRo
    */
   function openEditUserEditor(user: AdminDirectoryUser) {
     setManagementError(null)
+    setAccessConfirmationOpen(false)
+    setReauthenticatedPendingChange(false)
     setAccessEditor({
       mode: "edit",
       email: user.email,
@@ -1040,7 +1204,34 @@ function AdminPanel({ role, rightsOnly = false,openRequest = 0 }: { role: UserRo
    */
   async function saveAccessEditor() {
     if (!accessEditor || !accessEditor.email.trim()) return
+    setManagementError(null)
+    setAccessConfirmationOpen(true)
+  }
 
+  /** Reauthenticates for high-impact changes, then saves only after explicit confirmation. */
+  async function confirmAccessEditor() {
+    if (!accessEditor || !accessEditor.email.trim()) return
+    const existing = users.find(user => user.email.toLowerCase() === accessEditor.email.trim().toLowerCase())
+    const current = existing && existing.role !== "none"
+      ? { role: existing.role, accessStatus: existing.accessStatus === "observed" ? "active" : existing.accessStatus, permissions: existing.permissions }
+      : null
+    const requiresStepUp = accessChangeRequiresStepUp(current, {
+      role: accessEditor.role,
+      accessStatus: accessEditor.accessStatus,
+      permissions: accessEditor.permissions,
+    })
+
+    if (requiresStepUp && !reauthenticatedPendingChange) {
+      window.sessionStorage.setItem(pendingAccessChangeKey, JSON.stringify({ ...accessEditor, expiresAt: Date.now() + 5 * 60_000 }))
+      setAccessConfirmationOpen(false)
+      try {
+        await signIn("microsoft-entra-id", { redirectTo: window.location.href }, { max_age: "0", prompt: "login" })
+      } catch {
+        window.sessionStorage.removeItem(pendingAccessChangeKey)
+        setManagementError("Microsoft reauthentication did not complete. No access change was saved.")
+      }
+      return
+    }
     const saved = await saveManagedUserAccess({
       email: accessEditor.email.trim(),
       role: accessEditor.role,
@@ -1050,8 +1241,24 @@ function AdminPanel({ role, rightsOnly = false,openRequest = 0 }: { role: UserRo
     })
 
     if (saved) {
+      setAccessConfirmationOpen(false)
+      setReauthenticatedPendingChange(false)
       setAccessEditor(null)
     }
+  }
+
+  /** Saves a normalized official name while preserving the patron's identifiers. */
+  async function saveOfficialName():Promise<void> {
+    if(!selectedPatron)return
+    setSavingOfficialName(true);setManagementError(null)
+    try{
+      const res=await fetch(apiPath("/api/people"),{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({email:selectedPatron.email,officialName:officialNameDraft})})
+      const data=await res.json();if(!res.ok)throw new Error(data.error??"Unable to update official name.")
+      setUsers(previous=>previous.map(user=>user.email===selectedPatron.email?{...user,displayName:data.identity.officialName,companyReference:data.identity.shortReference,contractorNumber:data.identity.contractorNumber}:user))
+      setSelectedPatron(previous=>previous?{...previous,displayName:data.identity.officialName,companyReference:data.identity.shortReference,contractorNumber:data.identity.contractorNumber}:previous)
+      setEditingOfficialName(false)
+    }catch(err){setManagementError(err instanceof Error?err.message:"Unable to update official name.")}
+    finally{setSavingOfficialName(false)}
   }
 
   /**
@@ -1091,26 +1298,77 @@ function AdminPanel({ role, rightsOnly = false,openRequest = 0 }: { role: UserRo
   const activityEvents = allActivityEvents.length > 0 ? allActivityEvents : auditEvents
 
   return (
-    <div className="tech-surface flex flex-col gap-4 bg-white text-slate-950">
-      <div className="flex flex-wrap items-center gap-2 border-y border-border py-2">
-        <Button variant="outline" size="sm" onClick={()=>setDirectoryOpen(true)}><Users className="size-4"/>{rightsOnly?"Actor rights":"User directory"}</Button>
-        <Button variant="outline" size="sm" onClick={()=>setTotalsOpen(true)}><BarChart3 className="size-4"/>Directory totals</Button>
-        {!rightsOnly&&<Button variant="outline" size="sm" onClick={openActivityWindow}><Activity className="size-4"/>View all app activity</Button>}
-        <span className="text-xs text-muted-foreground">{users.length} actors · {users.filter(user=>user.role==="admin"&&user.accessStatus==="active").length} active admins</span>
+    <div className="tech-surface flex min-w-0 flex-col gap-2.5 bg-white text-slate-950">
+      {!rightsOnly&&<AdminWorkspace activeSection={adminSection} onAdmin={()=>setAdminSection("admin")} onReports={()=>setAdminSection("reports")} onTimesheets={()=>setAdminSection("timesheets")}/>}
+      <div className="grid min-w-0 items-start gap-3 lg:grid-cols-2">
+        <div className="min-w-0">
+          {rightsOnly?<div className="flex flex-wrap items-center gap-2 border-y border-orange-200 bg-orange-50/70 px-3 py-2"><Button variant="outline" size="sm" className="border-blue-200 bg-blue-50 text-blue-800 hover:bg-blue-100" onClick={()=>setDirectoryOpen(true)}><Users className="size-4"/>Patron rights</Button><span className="ml-auto text-xs text-slate-600">{users.length} actors · {users.filter(user=>user.role==="admin"&&user.accessStatus==="active").length} active admins</span></div>:adminSection===null&&<section aria-label="People and access" className="flex h-[min(72svh,54rem)] min-h-[26rem] min-w-0 flex-col overflow-hidden rounded-lg border border-orange-200 bg-white shadow-sm shadow-orange-950/5">
+            <header className="flex flex-wrap items-center justify-between gap-2 border-b border-orange-200 bg-gradient-to-r from-orange-50 via-white to-sky-50 px-3 py-1.5">
+              <div><h2 className="text-sm font-semibold text-orange-950">People and access</h2><p className="text-[11px] text-slate-600">Resolve identity, access, and account health issues</p></div>
+              <div className="flex flex-wrap gap-1.5"><AddPerson admin/><Button size="sm" variant="outline" onClick={()=>setDirectoryOpen(true)}><Users className="size-4"/>Directory</Button></div>
+            </header>
+            <div className="flex flex-wrap gap-1.5 border-b border-slate-200 bg-slate-50/70 p-2">
+              <label className="sr-only" htmlFor="patron-search">Search patrons by name or email</label><input id="patron-search" type="search" value={patronSearch} onChange={event=>setPatronSearch(event.target.value)} placeholder="Search name or email" className="h-8 min-w-0 flex-1 basis-52 rounded-md border border-slate-300 px-2.5 text-sm"/>
+              <label className="sr-only" htmlFor="patron-role-filter">Filter patrons by role</label><select id="patron-role-filter" value={patronRoleFilter} onChange={event=>setPatronRoleFilter(event.target.value)} className="h-8 rounded-md border border-slate-300 bg-white px-2 text-xs"><option value="all">All roles</option>{["admin","manager","account_manager","employee","contractor","none"].map(value=><option key={value} value={value}>{value==="none"?"Unassigned":value.replaceAll("_"," ")}</option>)}</select>
+              <label className="sr-only" htmlFor="patron-status-filter">Filter people by access status</label><select id="patron-status-filter" value={patronStatusFilter} onChange={event=>setPatronStatusFilter(event.target.value)} className="h-8 rounded-md border border-slate-300 bg-white px-2 text-xs"><option value="all">All access states</option><option value="needs_attention">Needs attention</option>{["active","suspended","retired","blocked","denied","observed"].map(value=><option key={value} value={value}>{value==="observed"?"Observed":accessStatusLabel(value as AccessStatus)}</option>)}</select>
+            </div>
+            <div className="min-h-0 flex-1 overflow-auto overscroll-contain">
+              {loading?<p role="status" className="p-3 text-sm text-slate-600">Loading organization patrons...</p>:error?<p role="alert" className="p-3 text-sm text-red-700">{error}</p>:landingPatrons.length===0?<p className="p-3 text-sm text-slate-600">No patrons match these filters.</p>:<table className="w-full min-w-[500px] text-left text-sm"><thead className="sticky top-0 z-[1] bg-sky-50"><tr className="border-b border-sky-200 text-[11px] uppercase text-sky-950"><th className="px-2.5 py-1.5 font-medium">Patron</th><th className="px-2.5 py-1.5 font-medium">Role</th><th className="px-2.5 py-1.5 font-medium">Access</th><th className="px-2.5 py-1.5 text-right font-medium">Edit</th></tr></thead><tbody>{landingPatrons.map(user=><tr key={user.email} className="border-b border-slate-100 odd:bg-white even:bg-sky-50/30 hover:bg-orange-50"><td className="px-2.5 py-1.5"><button type="button" className="max-w-full truncate text-left text-sm font-medium text-slate-900 underline-offset-2 hover:underline" onClick={()=>setSelectedPatron(user)}>{displayOfficialName(user.displayName)}</button></td><td className="px-2.5 py-1.5"><span className={`inline-flex rounded-full border px-1.5 py-0.5 text-[11px] font-medium capitalize ${roleBadgeClass(user.role)}`}>{user.role.replaceAll("_"," ")}</span></td><td className="px-2.5 py-1.5 text-xs">{user.accessStatus==="observed"?"Observed":accessStatusLabel(user.accessStatus)}</td><td className="px-2.5 py-1 text-right"><Button type="button" variant="outline" size="sm" className="h-7 border-orange-300 bg-orange-50 px-2 text-orange-900 hover:bg-orange-100" onClick={()=>openEditUserEditor(user)} disabled={savingUser===user.email}><Pencil className="size-3.5"/><span className="sr-only">Edit access for {displayOfficialName(user.displayName)}</span></Button></td></tr>)}</tbody></table>}
+            </div>
+          </section>}
+        </div>
+        {assistantPane}
       </div>
+      {!rightsOnly&&adminSection==="admin"&&<WindowSurface title="Admin" onBack={()=>setAdminSection(null)}>
+        <section className="flex min-h-0 w-full flex-col gap-3 overflow-auto bg-white p-4 sm:p-6">
+          <header className="border-b border-orange-200 bg-orange-50 px-3 py-2"><h2 className="font-semibold text-orange-950">Administration</h2><p className="text-xs text-orange-900">People, account rights, access lifecycle, and security.</p></header>
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(16rem,0.65fr)]">
+            <section className="space-y-3 border-l-4 border-orange-500 bg-orange-50/60 p-3">
+              <div><h3 className="text-sm font-semibold text-orange-950">People and rights</h3><p className="text-xs text-orange-900">Create patron identities or manage roles and control permissions.</p></div>
+              <div className="flex flex-wrap gap-2"><AddPerson admin/><Button variant="outline" onClick={()=>setDirectoryOpen(true)}><Users className="size-4"/>Patron access and rights</Button></div>
+            </section>
+            <section className="space-y-2 border-l-4 border-sky-500 bg-sky-50/80 p-3">
+              <h3 className="text-sm font-semibold text-sky-950">Account operations</h3>
+              <div className="grid gap-2"><Button variant="outline" className="justify-start" onClick={()=>onLifecycle?.()}><CalendarClock className="size-4"/>Access lifecycle</Button></div>
+            </section>
+          </div>
+        </section>
+      </WindowSurface>}
+      {!rightsOnly&&adminSection==="reports"&&<WindowSurface title="Reports" onBack={()=>setAdminSection(null)}>
+        <section className="flex min-h-0 w-full flex-col gap-3 overflow-auto bg-white p-4 sm:p-6">
+          <header className="border-b border-blue-200 bg-blue-50 px-3 py-2"><h2 className="font-semibold text-blue-950">Reports</h2><p className="text-xs text-blue-900">Admin reporting hub: operational analytics, activity history, and security risk findings. Raw entries stay in Timesheets.</p></header>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            <section className="flex flex-col items-start gap-2 border-l-4 border-blue-600 bg-blue-50/70 p-3"><h3 className="text-sm font-semibold text-blue-950">Timesheet analytics</h3><p className="flex-1 text-xs text-blue-900">Organized summaries and analysis across the available timesheet records.</p><Button variant="outline" className="justify-start border-blue-200 bg-white text-blue-900 hover:bg-blue-100" onClick={()=>setAdminReportOpen(true)}><BarChart3 className="size-4"/>Open analytics report</Button></section>
+            <section className="flex flex-col items-start gap-2 border-l-4 border-orange-500 bg-orange-50/70 p-3"><h3 className="text-sm font-semibold text-orange-950">Activity and audit log</h3><p className="flex-1 text-xs text-orange-900">Investigate who did what, when, and which request or record was involved.</p><Button variant="outline" className="justify-start border-orange-200 bg-white text-orange-900 hover:bg-orange-100" onClick={openActivityWindow}><Activity className="size-4"/>Open activity log</Button></section>
+            <section className="flex flex-col items-start gap-2 border-l-4 border-red-500 bg-red-50/70 p-3"><h3 className="text-sm font-semibold text-red-950">Security risk report</h3><p className="flex-1 text-xs text-red-900">Review AI-highlighted activity patterns and security findings before taking action.</p><Button variant="outline" className="justify-start border-red-200 bg-white text-red-900 hover:bg-red-100" onClick={()=>onSecurity?.()}><ShieldCheck className="size-4"/>Open security risks</Button></section>
+          </div>
+        </section>
+      </WindowSurface>}
+      {!rightsOnly&&adminSection==="timesheets"&&<WindowSurface title="Timesheets" onBack={()=>setAdminSection(null)}>
+        <section className="flex min-h-0 w-full flex-col gap-3 overflow-auto bg-white p-4 sm:p-6">
+          <header className="flex flex-wrap items-center justify-between gap-2 border-b border-green-200 bg-green-50 px-3 py-2"><div><h2 className="font-semibold text-green-950">Timesheet workbench</h2><p className="text-xs text-green-900">Create source entries, prepare and send approvals, then inspect or manually edit saved records.</p></div><div className="flex flex-wrap gap-2">{canCreateEntries&&<Button variant="outline" size="sm" onClick={onOpenEntryCapture}><Pencil className="size-4"/>Log time</Button>}<Button variant="outline" size="sm" onClick={onRefreshEntries}><Activity className="size-4"/>Refresh entries</Button></div></header>
+          {role==="admin"&&<SubmissionDeadlineSettings/>}
+          <div className="min-h-0 flex-1 overflow-auto">
+            <section aria-label="Approval preparation" className="border-b border-orange-200 bg-orange-50/30 p-3"><div className="mb-2"><h3 className="text-sm font-semibold text-orange-950">Prepare and send for approval</h3><p className="text-xs text-orange-900">AI suggestions are advisory. A person confirms every approval, rejection, or return.</p></div><ApprovalSelection entries={pendingEntries} email={userEmail} canReview={canReviewEntries} canAI={canAIReview} onUpdated={onApprovalUpdated}/></section>
+            <EntriesLog userEmail={userEmail} entries={entries} onUpdate={onEntryUpdate} onStatusChange={onEntryStatusChange} onDelete={onEntryDelete} onClear={onEntryClear} canEdit={canEditEntries} canDelete={canDeleteEntries} canClear={canClearEntries} canReview={canReviewEntries} canSubmit={canSubmitEntries} canSubmitOthers canExport={canExportEntries} title="Raw timesheet entries" description="Source records with search, status, project and date filters, sorting, grouping, individual edits, and permission-based actions."/>
+          </div>
+        </section>
+      </WindowSurface>}
+      {!rightsOnly&&adminReportOpen&&<WindowSurface title="Analytics reports" onBack={()=>setAdminReportOpen(false)}><section className="min-h-0 w-full overflow-auto bg-white p-4 sm:p-6">{reportContent}</section></WindowSurface>}
       {directoryOpen&&<WindowSurface title={rightsOnly?"Manage employees/contractors":"User directory"} onBack={()=>setDirectoryOpen(false)}>
       <section className="flex min-h-0 w-full flex-col overflow-hidden bg-white">
-        <div className="border-b border-slate-200 bg-white px-4 py-3">
+        <div className="border-b border-orange-200 bg-orange-50 px-4 py-3">
         <div className="flex items-center gap-2">
-          <ShieldCheck className="size-4 text-primary" aria-hidden="true" />
-          <h2 className="text-sm font-semibold">Admin user directory</h2>
+          <span className="grid size-8 place-items-center rounded-full bg-orange-100 text-orange-800"><ShieldCheck className="size-4" aria-hidden="true" /></span>
+          <div><h2 className="text-sm font-semibold text-orange-950">Admin user directory</h2><p className="text-xs text-orange-800">Patron identity and access controls</p></div>
         </div>
       </div>
 
 
         <div className="flex flex-col gap-3 border-b border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h3 className="text-sm font-semibold">Employee access</h3>
+            <h3 className="text-sm font-semibold text-blue-950">Patron access</h3>
+            <p className="mt-1 text-xs text-slate-600">Select a name for details; edit access explicitly with Edit and Save.</p>
           </div>
           <AddPerson admin/>
           {managementError && (
@@ -1140,31 +1398,22 @@ function AdminPanel({ role, rightsOnly = false,openRequest = 0 }: { role: UserRo
         </div>
       ) : (
         <div className="min-h-0 flex-1 overflow-auto overscroll-contain">
-          <table className="w-full min-w-[1050px] border-collapse text-left text-sm">
-            <thead className="sticky top-0 bg-white">
-              <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
-                <th className="px-4 py-2 font-medium">User</th>
+          <table className="w-full min-w-[560px] border-collapse text-left text-sm">
+            <thead className="sticky top-0 bg-blue-50">
+              <tr className="border-b border-blue-200 text-xs uppercase tracking-wide text-blue-900">
+                <th className="px-4 py-2 font-medium">Patron</th>
                 <th className="px-4 py-2 font-medium">Role</th>
-                <th className="px-4 py-2 font-medium">Permission</th>
-                <th className="px-4 py-2 font-medium">Rights</th>
-                <th className="px-4 py-2 text-right font-medium">Entries</th>
-                <th className="px-4 py-2 text-right font-medium">Review</th>
-                <th className="px-4 py-2 font-medium">Last entry</th>
-                <th className="sticky right-0 bg-white px-4 py-2 text-right font-medium">Actions</th>
+                <th className="sticky right-0 bg-blue-50 px-4 py-2 text-right font-medium">Actions</th>
               </tr>
             </thead>
             <tbody>
               {sortedUsers.map((user) => (
                 <tr
                   key={user.email}
-                  className="border-b border-slate-200 last:border-0"
+                  className="border-b border-slate-200 odd:bg-white even:bg-slate-50/70 last:border-0 hover:bg-orange-50"
                 >
                   <td className="px-4 py-2">
-                    <p className="font-medium">{user.displayName || user.email}</p>
-                    {user.displayName && (
-                      <p className="text-xs text-slate-500">{user.email}</p>
-                    )}
-                    {(user.companyReference||user.employeeId)&&<p className="text-xs text-slate-500">{user.companyReference}{user.employeeId?` · Employee ID ${user.employeeId}`:""}</p>}
+                    <button type="button" className="font-medium text-left text-slate-900 underline-offset-2 hover:underline" onClick={()=>setSelectedPatron(user)}>{displayOfficialName(user.displayName)}</button>
                   </td>
                   <td className="px-4 py-2">
                     <span
@@ -1173,38 +1422,12 @@ function AdminPanel({ role, rightsOnly = false,openRequest = 0 }: { role: UserRo
                       {user.role}
                     </span>
                   </td>
-                  <td className="px-4 py-2">
-                    <div className="flex flex-col gap-2">
-                      <span
-                        className={`inline-flex w-fit rounded-full border px-2 py-0.5 text-xs font-medium ${accessStatusClass(user.accessStatus)}`}
-                      >
-                        {user.accessSource}: {user.accessStatus}
-                      </span>
-                      {user.note && (
-                        <p className="max-w-56 text-xs text-slate-500">
-                          {user.note}
-                        </p>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-4 py-2 text-xs text-slate-600">
-                    {Object.values(resolvePermissions(user.role==="none"||user.accessStatus!=="active"?null:user.role,user.permissions)).filter(Boolean).length} allowed
-                  </td>
-                  <td className="px-4 py-2 text-right font-mono tabular-nums">
-                    {user.totalEntries}
-                  </td>
-                  <td className="px-4 py-2 text-right font-mono text-xs tabular-nums">
-                    {user.submittedEntries} pending · {user.approvedEntries} approved
-                  </td>
-                  <td className="px-4 py-2 text-xs text-slate-500">
-                    {user.lastEntryAt ? formatAdminDate(user.lastEntryAt) : "—"}
-                  </td>
-                  <td className="sticky right-0 bg-white px-4 py-2 text-right">
+                  <td className="sticky right-0 bg-inherit px-4 py-2 text-right">
                     <Button
                       type="button"
                       variant="outline"
                       size="sm"
-                      className="border-slate-300 bg-white text-slate-900 hover:bg-slate-50"
+                      className="border-orange-300 bg-orange-50 text-orange-900 hover:bg-orange-100"
                       onClick={() => openEditUserEditor(user)}
                       disabled={savingUser === user.email}
                     >
@@ -1220,7 +1443,8 @@ function AdminPanel({ role, rightsOnly = false,openRequest = 0 }: { role: UserRo
       )}
       </section>
       </WindowSurface>}
-      {totalsOpen&&<WindowSurface title="Directory totals" onBack={()=>setTotalsOpen(false)}><section className="w-full bg-white p-4"><h2 className="mb-4 font-semibold">Directory totals</h2><div className="grid gap-3 sm:grid-cols-3"><AdminStat icon={Users} label="Directory users" value={users.length}/><AdminStat icon={ShieldCheck} label="Configured access" value={configuredCount}/><AdminStat icon={CheckCircle2} label="Awaiting review" value={submittedCount}/></div></section></WindowSurface>}
+
+      {selectedPatron&&<PatronDetailsDialog user={selectedPatron} editingName={editingOfficialName} nameDraft={officialNameDraft} error={managementError} saving={savingOfficialName} onClose={()=>{if(!savingOfficialName){setSelectedPatron(null);setEditingOfficialName(false);setManagementError(null)}}} onStartNameEdit={()=>{setOfficialNameDraft(selectedPatron.displayName.startsWith("Name Not Set ")?"":selectedPatron.displayName);setManagementError(null);setEditingOfficialName(true)}} onNameChange={setOfficialNameDraft} onNameCancel={()=>{setEditingOfficialName(false);setManagementError(null)}} onNameSave={saveOfficialName}/>}
 
       {activityWindowOpen && (
         <AdminActivityWindow
@@ -1237,13 +1461,56 @@ function AdminPanel({ role, rightsOnly = false,openRequest = 0 }: { role: UserRo
           saving={savingUser === accessEditor.email.toLowerCase()}
           onChange={(nextEditor) => setAccessEditor(nextEditor)}
           onClose={() => {
-            if (!savingUser) setAccessEditor(null)
+            if (!savingUser) {
+              setAccessEditor(null)
+              setAccessConfirmationOpen(false)
+              setReauthenticatedPendingChange(false)
+            }
           }}
           onSave={saveAccessEditor}
         />
       )}
+      {accessEditor && accessConfirmationOpen && <AccessChangeConfirmation
+        editor={accessEditor}
+        currentRole={users.find(user => user.email.toLowerCase() === accessEditor.email.toLowerCase())?.role ?? null}
+        currentStatus={users.find(user => user.email.toLowerCase() === accessEditor.email.toLowerCase())?.accessStatus ?? "observed"}
+        currentPermissions={users.find(user => user.email.toLowerCase() === accessEditor.email.toLowerCase())?.permissions ?? {}}
+        reauthenticated={reauthenticatedPendingChange}
+        saving={savingUser === accessEditor.email.toLowerCase()}
+        error={managementError}
+        onClose={() => setAccessConfirmationOpen(false)}
+        onConfirm={confirmAccessEditor}
+      />}
     </div>
   )
+}
+
+/** Renders secondary patron details and the admin-only official-name editor. */
+function PatronDetailsDialog({user,editingName,nameDraft,error,saving,onClose,onStartNameEdit,onNameChange,onNameCancel,onNameSave}:{user:AdminDirectoryUser;editingName:boolean;nameDraft:string;error:string|null;saving:boolean;onClose:()=>void;onStartNameEdit:()=>void;onNameChange:(value:string)=>void;onNameCancel:()=>void;onNameSave:()=>void}) {
+  const rights=Object.values(resolvePermissions(user.role==="none"||user.accessStatus!=="active"?null:user.role,user.permissions)).filter(Boolean).length
+  return <WindowSurface title={displayOfficialName(user.displayName)} onBack={onClose} disabled={saving} compact>
+    <section aria-labelledby="patron-details-title" className="flex min-h-0 w-full flex-col overflow-auto bg-white text-slate-950">
+      <header className="border-b border-blue-200 bg-blue-50 p-4"><h2 id="patron-details-title" className="font-semibold text-blue-950">{displayOfficialName(user.displayName)}</h2><p className="mt-1 text-xs text-blue-800">{user.role} · {user.accessStatus === "observed" ? "Observed" : accessStatusLabel(user.accessStatus)}</p></header>
+      <div className="grid gap-x-5 gap-y-3 p-4 text-sm sm:grid-cols-2">
+        <DetailField label="Company reference" value={user.companyReference??"Not assigned"}/>
+        <DetailField label="Permanent account ID" value={user.contractorNumber??"Not assigned"}/>
+        <DetailField label="Official email" value={user.email}/>
+        <DetailField label="Company-issued ID" value={user.employeeId||"Not provided"}/>
+        <DetailField label="Access source" value={user.accessSource}/>
+        <DetailField label="Effective rights" value={`${rights} allowed`}/>
+        <DetailField label="Access note" value={user.note||"None"}/>
+        {user.updatedBy&&<DetailField label="Last access update" value={`${user.updatedBy}${user.updatedAt?` · ${formatAdminDateTime(user.updatedAt)}`:""}`}/>}
+      </div>
+      <div className="border-t p-4">
+        {editingName?<form onSubmit={event=>{event.preventDefault();onNameSave()}} className="space-y-3"><label className="block text-sm font-medium">Official name<input autoFocus required minLength={2} maxLength={80} value={nameDraft} onChange={event=>onNameChange(event.target.value)} className="mt-1 h-10 w-full rounded border border-slate-300 px-3 font-normal"/></label>{error&&<p role="alert" className="text-sm text-red-700">{error}</p>}<div className="flex justify-end gap-2"><Button type="button" variant="outline" disabled={saving} onClick={onNameCancel}>Cancel</Button><Button type="submit" disabled={saving}>{saving?"Saving...":"Save name"}</Button></div></form>:<div className="flex items-center justify-between gap-3"><p className="text-xs text-slate-500">Official names are visible to authorized company users.</p><Button variant="outline" size="sm" onClick={onStartNameEdit}><Pencil className="size-3.5"/>Edit name</Button></div>}
+      </div>
+    </section>
+  </WindowSurface>
+}
+
+/** Renders a single label/value item in the compact patron details window. */
+function DetailField({label,value}:{label:string;value:string}) {
+  return <div className="min-w-0"><p className="text-[11px] font-medium uppercase text-slate-500">{label}</p><p className="mt-0.5 break-words">{value}</p></div>
 }
 
 /**
@@ -1278,23 +1545,23 @@ function AdminUserAccessEditor({
   onSave: () => void
 }) {
   const title =
-    editor.mode === "add" ? "Add employee access" : "Edit employee access"
+    editor.mode === "add" ? "Add patron access" : "Edit patron access"
 
   return (
-    <WindowSurface title={title} onBack={onClose} disabled={saving}>
+    <WindowSurface title={title} onBack={onClose} disabled={saving} compact resizable>
       <section
         tabIndex={-1}
-        className="tech-surface flex max-h-[calc(100dvh-1.5rem)] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-slate-200 bg-white text-slate-950 shadow-2xl sm:max-h-[calc(100dvh-3rem)]"
+        className="tech-surface flex min-h-0 w-full min-w-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white text-slate-950 shadow-2xl"
       >
-        <div className="flex items-start justify-between gap-4 border-b border-slate-200 bg-white px-4 py-3">
+        <div className="flex items-start justify-between gap-4 border-b border-orange-200 bg-orange-50 px-4 py-3">
           <div>
             <div className="flex items-center gap-2">
-              <Users className="size-4 text-primary" aria-hidden="true" />
-              <h2 className="text-base font-semibold">{title}</h2>
+              <span className="grid size-8 place-items-center rounded-full bg-orange-100 text-orange-800"><Users className="size-4" aria-hidden="true" /></span>
+              <h2 className="text-base font-semibold text-orange-950">{title}</h2>
             </div>
             <p className="mt-1 text-xs text-slate-600">
-              Select the role and permission state, then click Save to apply the
-              change.
+              Set the account role, lifecycle status, and control rights, then
+              save to apply the change.
             </p>
           </div>
           <Button
@@ -1313,7 +1580,7 @@ function AdminUserAccessEditor({
 
         <div className="grid min-h-0 content-start gap-4 overflow-y-auto overscroll-contain p-4 lg:grid-cols-2">
           <label className="text-xs font-medium text-slate-600">
-            Employee email
+            Account email
             <input
               type="email"
               value={editor.email}
@@ -1326,9 +1593,9 @@ function AdminUserAccessEditor({
             />
           </label>
 
-          <div>
-            <p className="text-xs font-medium text-slate-600">Role</p>
-            <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="rounded-md border border-blue-200 bg-blue-50/60 p-3">
+            <p className="text-xs font-semibold text-blue-900">Role</p>
+            <div className="role-choice-grid mt-2">
               {manageableRoles.map((roleOption) => (
                 <button
                   key={roleOption}
@@ -1336,13 +1603,13 @@ function AdminUserAccessEditor({
                   onClick={() => onChange({ ...editor, role: roleOption })}
                   aria-pressed={editor.role === roleOption}
                   disabled={saving || editor.protectedAdmin}
-                  className={`rounded-md border px-3 py-2 text-sm font-medium capitalize transition ${
+                  className={`min-h-12 min-w-0 whitespace-normal break-words rounded-md border px-2 py-2 text-xs font-medium capitalize transition sm:px-3 sm:text-sm ${
                     editor.role === roleOption
-                      ? "border-primary bg-primary text-white"
+                      ? roleSelectionClass(roleOption)
                       : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
                   }`}
                 >
-                  {roleOption}
+                  {roleDisplayName(roleOption)}
                 </button>
               ))}
             </div>
@@ -1352,11 +1619,11 @@ function AdminUserAccessEditor({
             {editor.protectedAdmin&&<p className="mt-2 text-xs text-primary">{editor.environmentAdmin?"Recovery administrators are managed in deployment settings.":"At least one active admin is required. Add another admin before changing this role or access state."}</p>}
           </div>
 
-          <div>
-            <p className="text-xs font-medium text-slate-600">
-              Permission state
+          <div className="rounded-md border border-orange-200 bg-orange-50/60 p-3">
+            <p className="text-xs font-semibold text-orange-900">
+              Account status
             </p>
-            <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <div className="status-choice-grid mt-2">
               {manageableStatuses.map((statusOption) => (
                 <button
                   key={statusOption}
@@ -1364,18 +1631,20 @@ function AdminUserAccessEditor({
                   onClick={() =>
                     onChange({ ...editor, accessStatus: statusOption })
                   }
+                  title={accessStatusDescription(statusOption)}
                   aria-pressed={editor.accessStatus === statusOption}
                   disabled={saving || editor.protectedAdmin}
-                  className={`rounded-md border px-3 py-2 text-sm font-medium capitalize transition ${
+                  className={`min-h-10 rounded-md border px-2 py-2 text-xs font-semibold transition sm:px-3 sm:text-sm ${
                     editor.accessStatus === statusOption
                       ? accessStatusClass(statusOption)
                       : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
                   }`}
                 >
-                  {statusOption}
+                  {accessStatusLabel(statusOption)}
                 </button>
               ))}
             </div>
+            <p className="mt-2 text-xs leading-5 text-orange-950">{accessStatusDescription(editor.accessStatus)}</p>
           </div>
 
           <label className="text-xs font-medium text-slate-600">
@@ -1392,10 +1661,10 @@ function AdminUserAccessEditor({
             />
           </label>
 
-          <fieldset className="grid gap-2 sm:grid-cols-2 lg:col-span-2 lg:grid-cols-3">
-            <legend className="mb-2 text-sm font-semibold">Control permissions</legend>
-            {(Object.entries(permissionLabels) as [Permission,string][]).map(([permission,label]) => <label key={permission} className="flex items-center gap-2 text-sm">
-              <input type="checkbox" disabled={saving} checked={resolvePermissions(editor.role,editor.permissions)[permission]} onChange={event => onChange({...editor,permissions:{...editor.permissions,[permission]:event.target.checked}})} />{label}
+          <fieldset className="grid gap-2 rounded-md border border-green-200 bg-green-50/40 p-3 sm:grid-cols-2 lg:col-span-2 lg:grid-cols-3">
+            <legend className="mb-2 px-1 text-sm font-semibold text-green-950">Control permissions</legend>
+            {(Object.entries(permissionLabels) as [Permission,string][]).map(([permission,label]) => <label key={permission} className="flex items-center gap-2 text-sm text-slate-800">
+              <input className="accent-green-700" type="checkbox" disabled={saving} checked={resolvePermissions(editor.role,editor.permissions)[permission]} onChange={event => onChange({...editor,permissions:{...editor.permissions,[permission]:event.target.checked}})} />{label}
             </label>)}
             <Button variant="outline" disabled={saving} onClick={() => onChange({...editor,permissions:{}})}>Use role defaults</Button>
           </fieldset>
@@ -1407,7 +1676,7 @@ function AdminUserAccessEditor({
           )}
         </div>
 
-        <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-slate-200 bg-slate-50 px-4 py-3">
+        <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-orange-200 bg-orange-50 px-4 py-3">
           <Button
             type="button"
             variant="outline"
@@ -1419,7 +1688,7 @@ function AdminUserAccessEditor({
           </Button>
           <Button
             type="button"
-            className="bg-primary text-white hover:bg-primary/90"
+            className="bg-orange-600 text-white hover:bg-orange-700"
             onClick={onSave}
             disabled={saving || !editor.email.trim()}
           >
@@ -1430,6 +1699,75 @@ function AdminUserAccessEditor({
       </section>
     </WindowSurface>
   )
+}
+
+/** Requires a deliberate review before saving an administrator access draft. */
+function AccessChangeConfirmation({editor,currentRole,currentStatus,currentPermissions,reauthenticated,saving,error,onClose,onConfirm}: {
+  editor: AccessEditorState
+  currentRole: UserRole | "none" | null
+  currentStatus: AccessStatus | "observed"
+  currentPermissions?: PermissionOverrides
+  reauthenticated: boolean
+  saving: boolean
+  error: string | null
+  onClose: () => void
+  onConfirm: () => void
+}) {
+  const current = currentRole && currentRole !== "none"
+    ? { role: currentRole, accessStatus: currentStatus === "observed" ? "active" : currentStatus, permissions: currentPermissions }
+    : null
+  const highImpact = accessChangeRequiresStepUp(current, { role: editor.role, accessStatus: editor.accessStatus, permissions: editor.permissions })
+  const previousRights = resolvePermissions(currentRole && currentRole !== "none" ? currentRole : null, currentPermissions)
+  const nextRights = resolvePermissions(editor.role, editor.permissions)
+  const changedRights = (Object.keys(permissionLabels) as Permission[]).filter(permission => previousRights[permission] !== nextRights[permission])
+
+  return <WindowSurface title="Confirm access change" onBack={onClose} disabled={saving} compact>
+    <section className="flex min-h-0 w-full flex-col overflow-auto bg-white text-slate-950">
+      <header className="border-b border-orange-200 bg-orange-50 px-4 py-3">
+        <h2 className="font-semibold text-orange-950">Are you sure you want to make this change?</h2>
+        <p className="mt-1 text-xs text-orange-900">Review the account and access changes before saving.</p>
+      </header>
+      <div className="grid gap-3 p-4 text-sm">
+        <div className="grid gap-2 sm:grid-cols-2">
+          <div className="border-l-4 border-blue-500 bg-blue-50 px-3 py-2"><p className="text-xs font-medium text-blue-800">Account</p><p className="break-all font-semibold text-blue-950">{editor.email}</p></div>
+          <div className="border-l-4 border-orange-500 bg-orange-50 px-3 py-2"><p className="text-xs font-medium text-orange-800">Role</p><p className="font-semibold text-orange-950">{currentRole && currentRole !== "none" ? roleDisplayName(currentRole) : "Not assigned"} → {roleDisplayName(editor.role)}</p></div>
+          <div className="border-l-4 border-red-500 bg-red-50 px-3 py-2"><p className="text-xs font-medium text-red-800">Account status</p><p className="font-semibold text-red-950">{currentStatus === "observed" ? "Observed" : accessStatusLabel(currentStatus)} → {accessStatusLabel(editor.accessStatus)}</p></div>
+          <div className="border-l-4 border-green-600 bg-green-50 px-3 py-2"><p className="text-xs font-medium text-green-800">Control rights</p><p className="font-semibold text-green-950">{changedRights.length ? `${changedRights.length} change${changedRights.length === 1 ? "" : "s"}` : "No changes"}</p></div>
+        </div>
+        {changedRights.length > 0 && <p className="text-xs leading-5 text-slate-700">{changedRights.map(permission => `${permissionLabels[permission]}: ${previousRights[permission] ? "allowed" : "not allowed"} → ${nextRights[permission] ? "allowed" : "not allowed"}`).join(" · ")}</p>}
+        {editor.note.trim() && <p className="border-t border-slate-200 pt-2 text-xs text-slate-600">Admin note: {editor.note.trim()}</p>}
+        {highImpact && <p role="note" className="border-l-4 border-red-500 bg-red-50 px-3 py-2 text-xs leading-5 text-red-950">This change affects elevated access or account availability. Confirm your identity with Microsoft before the final save. Tanovo Time never asks for your Microsoft password.</p>}
+        {reauthenticated && <p role="status" className="border-l-4 border-green-600 bg-green-50 px-3 py-2 text-xs text-green-950">Microsoft reauthentication completed. Review this change once more, then confirm the save.</p>}
+        {error && <p role="alert" className="border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>}
+      </div>
+      <footer className="mt-auto flex flex-wrap justify-end gap-2 border-t border-orange-200 bg-orange-50 px-4 py-3">
+        <Button variant="outline" disabled={saving} onClick={onClose}>Back to editor</Button>
+        <Button disabled={saving} onClick={onConfirm} className={highImpact && !reauthenticated ? "bg-blue-700 text-white hover:bg-blue-800" : "bg-orange-600 text-white hover:bg-orange-700"}>
+          {saving ? "Saving..." : highImpact && !reauthenticated ? "Verify with Microsoft" : "Confirm and save"}
+        </Button>
+      </footer>
+    </section>
+  </WindowSurface>
+}
+
+/**
+ * Summarizes the currently loaded audit slice using visual severity cues.
+ * @param props.label - Audit metric name.
+ * @param props.value - Bounded value derived from the loaded event set.
+ * @param props.tone - Accent used to distinguish related audit metrics.
+ * @returns A compact metric cell for the activity workspace.
+ */
+function AuditSummary({label,value,tone}:{label:string;value:string;tone:"blue"|"green"|"orange"|"purple"}) {
+  const tones={
+    blue:"border-blue-200 text-blue-800",
+    green:"border-emerald-200 text-emerald-800",
+    orange:"border-orange-200 text-orange-800",
+    purple:"border-violet-200 text-violet-800",
+  }
+  return <div className={`min-w-0 border-r px-4 py-2 last:border-r-0 ${tones[tone]}`}>
+    <p className="text-[11px] font-semibold uppercase tracking-wide">{label}</p>
+    <p className="mt-0.5 truncate text-sm font-medium text-slate-900" title={value}>{value}</p>
+  </div>
 }
 
 /**
@@ -1465,13 +1803,13 @@ function AdminActivityWindow({
 
   return (
     <WindowSurface title="All app activity" onBack={onClose}>
-      <section className="tech-surface flex min-h-0 w-full max-w-7xl flex-col overflow-hidden rounded-lg border border-slate-200 bg-white text-slate-950">
-        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 bg-white px-4 py-3">
+      <section className="tech-surface flex h-full min-h-0 w-full flex-col overflow-hidden border-0 bg-white text-slate-950">
+        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-blue-200 bg-blue-50 px-4 py-3">
           <div>
             <div className="flex items-center gap-2">
-              <Activity className="size-4 text-primary" aria-hidden="true" />
-              <h2 className="text-base font-semibold">All app activity</h2>
-              <Button variant="outline" onClick={() => setShowSecurity(true)}>Security risks</Button>
+              <Activity className="size-4 text-blue-700" aria-hidden="true" />
+              <h2 className="text-base font-semibold text-blue-950">All app activity</h2>
+              <Button variant="outline" className="border-red-200 bg-red-50 text-red-800 hover:bg-red-100" onClick={() => setShowSecurity(true)}>Security risks</Button>
             </div>
             <p className="mt-1 text-xs text-slate-600">
               Full admin view of recent audited actions across entries, profiles,
@@ -1490,6 +1828,13 @@ function AdminActivityWindow({
             <span className="sr-only">Close activity window</span>
           </Button>
         </div>
+
+        {!loading && !error && events.length > 0 && <div className="grid shrink-0 grid-cols-2 border-b border-sky-200 bg-gradient-to-r from-sky-50 via-white to-emerald-50 sm:grid-cols-4">
+          <AuditSummary label="Events shown" value={String(events.length)} tone="blue" />
+          <AuditSummary label="Distinct actors" value={String(new Set(events.map(event => event.actorEmail)).size)} tone="green" />
+          <AuditSummary label="Action types" value={String(new Set(events.map(event => event.action)).size)} tone="orange" />
+          <AuditSummary label="Latest event" value={formatAdminDateTime(events[0].occurredAt)} tone="purple" />
+        </div>}
 
         {showSecurity && <SecurityRiskWindow onClose={() => setShowSecurity(false)} />}
         {loading || error ? (
@@ -1513,12 +1858,13 @@ function AdminActivityWindow({
         ) : (
           <div tabIndex={0} aria-label="Activity table" className="min-h-0 flex-1 overflow-auto overscroll-contain">
             <table className="w-full min-w-[1200px] border-collapse text-left text-sm">
-              <thead className="sticky top-0 bg-white">
-                <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
+            <thead className="sticky top-0 z-[1] bg-blue-50 shadow-sm">
+                <tr className="border-b border-blue-200 text-xs uppercase tracking-wide text-blue-900">
                   <th className="px-4 py-2 font-medium">Time</th>
                   <th className="px-4 py-2 font-medium">Actor</th>
                   <th className="px-4 py-2 font-medium">Action</th>
                   <th className="px-4 py-2 font-medium">Target</th>
+                  <th className="px-4 py-2 font-medium">Request</th>
                   <th className="px-4 py-2 font-medium">User agent</th>
                   <th className="px-4 py-2 font-medium">Metadata</th>
                 </tr>
@@ -1527,8 +1873,8 @@ function AdminActivityWindow({
                 {events.map((event) => (
                   <tr
                     key={event.id}
-                    className={`cursor-pointer border-b border-slate-200 align-top outline-none last:border-0 hover:bg-accent focus:bg-accent ${
-                      selectedEvent?.id === event.id ? "bg-accent" : ""
+                    className={`cursor-pointer border-b border-slate-200 align-top outline-none odd:bg-white even:bg-sky-50/60 last:border-0 hover:bg-orange-50 focus:bg-blue-100 ${
+                      selectedEvent?.id === event.id ? "bg-blue-100" : ""
                     }`}
                     tabIndex={0}
                     onClick={() => setSelectedEvent(event)}
@@ -1545,13 +1891,17 @@ function AdminActivityWindow({
                     <td className="px-4 py-3 text-xs text-slate-600">
                       {formatAdminDateTime(event.occurredAt)}
                     </td>
-                    <td className="px-4 py-3 font-medium">{event.actorEmail}</td>
-                    <td className="px-4 py-3">{formatAuditAction(event.action)}</td>
+                    <td className="px-4 py-3 font-medium"><span className="inline-flex rounded-md border border-sky-200 bg-sky-50 px-2 py-1 text-sky-950">{event.actorEmail}</span></td>
+                    <td className="px-4 py-3"><span className={`inline-flex rounded-md border px-2 py-1 text-xs font-semibold capitalize ${auditActionTone(event.action)}`}>{formatAuditAction(event.action)}</span></td>
                     <td className="px-4 py-3 text-xs text-slate-600">
-                      <p>{event.targetType}</p>
+                      <p><span className={`inline-flex rounded-md border px-2 py-1 font-medium ${auditTargetTone(event.targetType)}`}>{event.targetType.replaceAll("_", " ")}</span></p>
                       <p className="mt-1 break-all font-mono">
                         {event.targetId ?? "No target id"}
                       </p>
+                    </td>
+                    <td className="max-w-xs px-4 py-3 text-xs text-slate-600">
+                      <span className="inline-flex rounded border border-violet-200 bg-violet-50 px-1.5 py-0.5 font-semibold text-violet-800">{event.requestMethod ?? "Unknown"}</span>
+                      <p className="mt-1 break-all font-mono">{event.requestPath ?? "Path unavailable"}</p>
                     </td>
                     <td className="max-w-sm px-4 py-3 text-xs text-slate-600">
                       <span className="line-clamp-1">
@@ -1559,7 +1909,8 @@ function AdminActivityWindow({
                       </span>
                     </td>
                     <td className="max-w-xs px-4 py-3 text-xs text-slate-600">
-                      <p className="truncate">{formatAuditMetadata(event)}</p>
+                      <p className="line-clamp-2">{formatAuditMetadata(event)}</p>
+                      <p className="mt-1 text-[11px] font-medium text-slate-500">{Object.keys(event.metadata).length} metadata fields · open row for details</p>
                     </td>
                   </tr>
                 ))}
@@ -1607,11 +1958,14 @@ function AdminActivityEventDetails({
     { label: "Target ID", value: event.targetId ?? "No target id" },
     { label: "IP address", value: event.ipAddress ?? "Unknown" },
     { label: "User agent", value: event.userAgent ?? "Unknown" },
+    { label: "Request method", value: event.requestMethod ?? "Unknown" },
+    { label: "Request path", value: event.requestPath ?? "Unknown" },
+    { label: "Request ID", value: event.requestId ?? "Unavailable" },
   ]
 
   return (
     <WindowSurface title="Activity detail" onBack={onClose}>
-    <section className="w-full max-w-5xl overflow-y-auto overscroll-contain bg-white p-4">
+    <section className="flex h-full w-full flex-col overflow-y-auto overscroll-contain bg-white p-4 sm:p-6">
       <div className="sticky top-0 z-[1] mb-3 flex items-start justify-between gap-4 bg-white pb-2">
         <div>
           <h3 className="text-sm font-semibold">Activity detail</h3>
@@ -1632,12 +1986,12 @@ function AdminActivityEventDetails({
         </Button>
       </div>
 
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)]">
+      <div className="grid flex-1 content-start gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)]">
         <dl className="grid gap-2 sm:grid-cols-2">
           {details.map((detail) => (
             <div
               key={detail.label}
-              className="rounded-lg border border-slate-200 bg-slate-50 p-3"
+              className="rounded-lg border border-blue-200 bg-blue-50/70 p-3"
             >
               <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">
                 {detail.label}
@@ -1649,48 +2003,17 @@ function AdminActivityEventDetails({
           ))}
         </dl>
 
-        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+        <div className="rounded-lg border border-orange-200 bg-orange-50/70 p-3">
           <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
             Metadata
           </p>
-          <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-md bg-white p-3 font-mono text-xs leading-relaxed text-slate-800">
+          <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-md border border-orange-100 bg-white p-3 font-mono text-xs leading-relaxed text-slate-800">
             {formatAuditMetadataBlock(event)}
           </pre>
         </div>
       </div>
     </section>
     </WindowSurface>
-  )
-}
-
-/**
- * Renders a compact statistic for the admin directory header.
- *
- * @param props - Statistic props.
- * @param props.icon - Lucide icon component used beside the label.
- * @param props.label - Human-readable statistic label.
- * @param props.value - Numeric statistic value.
- * @returns Admin directory statistic tile.
- */
-function AdminStat({
-  icon: Icon,
-  label,
-  value,
-}: {
-  icon: typeof Users
-  label: string
-  value: number
-}) {
-  return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-slate-950">
-      <div className="flex items-center gap-2 text-xs text-slate-600">
-        <Icon className="size-3.5" aria-hidden="true" />
-        {label}
-      </div>
-      <p className="mt-1 font-mono text-lg font-semibold tabular-nums">
-        {value}
-      </p>
-    </div>
   )
 }
 
@@ -1778,6 +2101,37 @@ function roleBadgeClass(role: UserRole | "none") {
   return "border-slate-200 bg-slate-100 text-slate-500"
 }
 
+/** Returns a distinct, high-contrast selected-role treatment in the admin editor. */
+function roleSelectionClass(role: UserRole) {
+  if (role === "admin") return "border-blue-700 bg-blue-700 text-white"
+  if (role === "manager") return "border-orange-600 bg-orange-600 text-white"
+  if (role === "account_manager") return "border-red-700 bg-red-700 text-white"
+  if (role === "employee") return "border-green-700 bg-green-700 text-white"
+  return "border-cyan-700 bg-cyan-700 text-white"
+}
+
+/** Displays role identifiers as readable labels without exposing underscores. */
+function roleDisplayName(role: UserRole): string {
+  if (role === "account_manager") return "Account manager"
+  return role.charAt(0).toUpperCase() + role.slice(1)
+}
+
+/** Returns the administrator-facing label for a persisted account lifecycle status. */
+function accessStatusLabel(status: AccessStatus): string {
+  if (status === "denied") return "Not approved"
+  if (status === "retired") return "Offboarded"
+  return status.charAt(0).toUpperCase() + status.slice(1)
+}
+
+/** Explains the effective sign-in and workflow impact of each lifecycle state. */
+function accessStatusDescription(status: AccessStatus): string {
+  if (status === "active") return "For current employees, engaged contractors, and authorized company operators. Sign-in is enabled; assigned role and rights still limit actions."
+  if (status === "suspended") return "Temporary hold for leave, contract verification, investigation, or access review. Sign-in and actions pause; existing records remain available to authorized reviewers."
+  if (status === "retired") return "Offboarded because employment or engagement ended. Sign-in is disabled; retain timesheets, approvals, and audit history. An admin can reactivate if the person returns."
+  if (status === "blocked") return "Security containment for suspected account compromise or serious policy risk. Access is stopped immediately; investigate before restoring access."
+  return "Not approved for onboarding or app access. Sign-in is disabled; activate only after identity, company affiliation, and role are verified."
+}
+
 /**
  * Returns the white-admin-table badge style for an access status.
  *
@@ -1788,6 +2142,12 @@ function accessStatusClass(status: AccessStatus | "observed") {
   if (status === "active") {
     return "border-green-200 bg-green-50 text-green-700"
   }
+  if (status === "suspended") {
+    return "border-orange-200 bg-orange-50 text-orange-800"
+  }
+  if (status === "retired") {
+    return "border-slate-300 bg-slate-100 text-slate-700"
+  }
   if (status === "denied") {
     return "border-amber-200 bg-amber-50 text-amber-700"
   }
@@ -1795,6 +2155,11 @@ function accessStatusClass(status: AccessStatus | "observed") {
     return "border-red-200 bg-red-50 text-red-700"
   }
   return "border-slate-200 bg-slate-100 text-slate-600"
+}
+
+/** Hides generated temporary names behind an admin-friendly placeholder label. */
+function displayOfficialName(name:string):string {
+  return name.startsWith("Name Not Set ")?"Name not set":name||"Name not set"
 }
 
 /**
@@ -1845,6 +2210,31 @@ function formatAdminDateTime(value: string) {
  */
 function formatAuditAction(action: string) {
   return action.replaceAll("_", " ")
+}
+
+/**
+ * Applies an intuitive severity color to an audit action label.
+ * @param action - Machine-readable audit action.
+ * @returns Tailwind classes for the action badge.
+ */
+function auditActionTone(action:string) {
+  if(/reject|delete|clear|block|revoke|deny|fail/i.test(action))return "border-red-200 bg-red-50 text-red-800"
+  if(/approve|create|submit|grant|restore|deliver/i.test(action))return "border-emerald-200 bg-emerald-50 text-emerald-800"
+  if(/permission|access|role|identity|user/i.test(action))return "border-violet-200 bg-violet-50 text-violet-800"
+  if(/message|announcement/i.test(action))return "border-orange-200 bg-orange-50 text-orange-800"
+  return "border-blue-200 bg-blue-50 text-blue-800"
+}
+
+/**
+ * Applies a category color to an audit target type.
+ * @param targetType - Entity type affected by an event.
+ * @returns Tailwind classes for the target badge.
+ */
+function auditTargetTone(targetType:string) {
+  if(/identity|user|access|permission|profile/i.test(targetType))return "border-violet-200 bg-violet-50 text-violet-800"
+  if(/message|announcement/i.test(targetType))return "border-orange-200 bg-orange-50 text-orange-800"
+  if(/entry|timesheet|approval/i.test(targetType))return "border-blue-200 bg-blue-50 text-blue-800"
+  return "border-slate-200 bg-slate-100 text-slate-700"
 }
 
 /**

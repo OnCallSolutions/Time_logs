@@ -63,6 +63,9 @@ export async function POST(req: Request) {
     if (!notes || !notes.trim()) {
       return Response.json({ error: "No notes provided." }, { status: 400 })
     }
+    if (/SAMPLE-(?:CTR|EMP|MGR)-\d{3}/i.test(notes)) {
+      return Response.json({ error: "Display-only synthetic samples cannot be extracted or submitted." }, { status: 400 })
+    }
 
     const today = new Date().toISOString().slice(0, 10)
 

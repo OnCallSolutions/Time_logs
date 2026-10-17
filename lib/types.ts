@@ -72,8 +72,10 @@ export type UserRole = "admin" | "manager" | "account_manager" | "employee" | "c
 /**
  * Access states administrators can apply to managed app users.
  *
- * Active users can enter the app with their assigned role. Denied users are known
- * but not currently approved, while blocked users are explicitly barred until an
- * administrator changes their status.
+ * Only active users can enter with their assigned role. Denied represents an
+ * onboarding/access request that was not approved; suspended is a temporary
+ * business hold; retired means an employment or contractor engagement ended;
+ * blocked is reserved for security containment. Historical records remain
+ * separate from access state and are not deleted by these transitions.
  */
-export type AccessStatus = "active" | "denied" | "blocked"
+export type AccessStatus = "active" | "denied" | "suspended" | "retired" | "blocked"

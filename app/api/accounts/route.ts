@@ -10,6 +10,7 @@ import { actorRoster } from "@/lib/collaboration"
 import { getTimeEntry,listTimeEntries,recordAuditEvent } from "@/lib/db"
 import { createHandoffs,listHandoffs,reviewHandoff,accountTriageStates,actOnHandoffs } from "@/lib/account-handoffs"
 import { getAuditContext } from "@/lib/audit"
+import { listAccountIdentities } from "@/lib/account-identities"
 import { z } from "zod"
 
 /** @returns Authorized assignees or a scoped business-account queue. */
@@ -32,11 +33,12 @@ export async function POST(req:Request){
     const input=z.object({ids:z.array(z.string().uuid()).min(1).max(50),recipient:z.string().email()}).parse(await req.json())
     const ids=[...new Set(input.ids)]
     const categories:Record<string,"contractor"|"employee">={}
+    const identities=await listAccountIdentities()
     if(await getEffectiveUserRole(input.recipient)!=="account_manager")return Response.json({error:"Choose an active account manager."},{status:400})
     for(const id of ids){
       const entry=await getTimeEntry(email,id,access.permissions.view_team)
       const category=entry?.ownerEmail?await getEffectiveUserRole(entry.ownerEmail):null
-      if(!entry||entry.status!=="approved"||!(category==="contractor"||category==="employee"))return Response.json({error:"Only visible approved contractor or internal employee records can be handed off."},{status:409})
+      if(!entry||entry.status!=="approved"||!identities.some(identity=>identity.email===entry.ownerEmail?.toLowerCase())||!(category==="contractor"||category==="employee"))return Response.json({error:"Only approved records owned by a registered contractor or employee can be handed off."},{status:409})
       categories[id]=category
     }
     const handoffs=await createHandoffs(ids,email,input.recipient,access.permissions.view_team,categories)

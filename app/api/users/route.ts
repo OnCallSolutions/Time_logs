@@ -16,13 +16,14 @@ import {
   getManagedAccessUser,
   listKnownUsers,
   listManagedAccessUsers,
-  recordAuditEvent,
-  upsertManagedAccessUser,
+  upsertManagedAccessUserWithAudit,
 } from "@/lib/db"
 import type { AccessStatus, UserRole } from "@/lib/types"
 import { permissionLabels, type PermissionOverrides } from "@/lib/permissions"
 import { LastAdministratorError } from "@/lib/admin-policy"
-import { listAccountIdentities } from "@/lib/account-identities"
+import { accessChangeRequiresStepUp } from "@/lib/admin-policy"
+import { isAppSessionFresh } from "@/lib/app-sessions"
+import { ensureAccountIdentitiesForActors } from "@/lib/account-identities"
 import { emailSchema } from "@/lib/identity-policy"
 
 export const runtime = "nodejs"
@@ -72,7 +73,7 @@ const accessUpdateSchema = z.object({
   permissions: z.partialRecord(z.enum(Object.keys(permissionLabels) as [keyof typeof permissionLabels, ...(keyof typeof permissionLabels)[]]), z.boolean()).optional(),
   email: emailSchema,
   role: z.enum(["admin", "manager", "account_manager", "employee", "contractor"]),
-  accessStatus: z.enum(["active", "denied", "blocked"]).default("active"),
+  accessStatus: z.enum(["active", "denied", "suspended", "retired", "blocked"]).default("active"),
   note: z.string().trim().max(500).default(""),
 })
 
@@ -214,7 +215,7 @@ export async function GET() {
       })
     }
 
-    const identities=await listAccountIdentities()
+    const identities=await ensureAccountIdentitiesForActors([...directory.keys()],adminEmail)
     for(const user of directory.values()){
       const identity=identities.find(item=>item.email===user.email)
       user.displayName=identity?.officialName??""
@@ -287,7 +288,18 @@ async function saveManagedAccess(req: Request) {
 
     const existing = await getManagedAccessUser(email)
     if(!existing&&(body.role==="employee"||body.role==="contractor")&&!await getEffectiveUserRole(email))return Response.json({error:"Create the official identity using Add contractor/employee before changing account rights."},{status:400})
-    const user = await upsertManagedAccessUser({
+    const currentRole = existing?.role ?? await getEffectiveUserRole(email)
+    const nextPermissions = body.permissions ?? existing?.permissions ?? {}
+    if (accessChangeRequiresStepUp(
+      currentRole ? { role: currentRole, accessStatus: existing?.accessStatus ?? "active", permissions: existing?.permissions } : null,
+      { role: body.role, accessStatus: body.accessStatus, permissions: nextPermissions },
+    )) {
+      const session = await auth()
+      if (!session?.appSessionId || !await isAppSessionFresh(session.appSessionId, adminEmail)) {
+        return Response.json({ error: "Reauthenticate with Microsoft before saving this high-impact access change.", requiresReauthentication: true }, { status: 428 })
+      }
+    }
+    const user = await upsertManagedAccessUserWithAudit({
       environmentAdmins,
       email,
       role: body.role,
@@ -295,22 +307,7 @@ async function saveManagedAccess(req: Request) {
       note: body.note,
       permissions: body.permissions ?? existing?.permissions ?? {},
       updatedBy: adminEmail,
-    })
-
-    await recordAuditEvent({
-      actorEmail: adminEmail,
-      action: existing ? "user_access_updated" : "user_access_created",
-      targetType: "managed_user_access",
-      targetId: email,
-      metadata: {
-        fromRole: existing?.role ?? null,
-        toRole: user.role,
-        fromStatus: existing?.accessStatus ?? null,
-        toStatus: user.accessStatus,
-        noteChanged: existing?.note !== user.note,
-        permissionsChanged: JSON.stringify(existing?.permissions ?? {}) !== JSON.stringify(user.permissions),
-      },
-      ...getAuditContext(req),
+      context:getAuditContext(req),
     })
 
     return Response.json({ user })

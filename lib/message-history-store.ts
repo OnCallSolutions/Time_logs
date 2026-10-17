@@ -37,6 +37,7 @@ export async function historyPage(owner: string, before: { date: string; id: str
       AND r.recipient_email=CASE WHEN m.sender_email=${owner.toLowerCase()} AND m.recipient_email IS NOT NULL THEN m.recipient_email ELSE ${owner.toLowerCase()} END
     WHERE (m.sender_email=${owner.toLowerCase()} OR m.recipient_email=${owner.toLowerCase()} OR (m.recipient_email IS NULL AND
       (m.encrypted_payload->'keys' ? ${owner.toLowerCase()} OR (${receivesBroadcast} AND m.encrypted_payload IS NULL))))
+    AND NOT EXISTS(SELECT 1 FROM app_message_hidden_for h WHERE h.message_id=m.id AND h.account_email=${owner.toLowerCase()})
     AND (${before === null} OR (m.created_at,m.id)<(${before?.date ?? "9999-01-01"}::timestamptz,${before?.id ?? "ffffffff-ffff-ffff-ffff-ffffffffffff"}::uuid))
     ORDER BY m.created_at DESC,m.id DESC LIMIT 50` as AppMessage[]
 }
@@ -55,7 +56,8 @@ export async function historyByIds(owner:string,ids:string[],receivesBroadcast:b
     FROM app_messages m LEFT JOIN app_message_receipts r ON r.message_id=m.id
       AND r.recipient_email=CASE WHEN m.sender_email=${owner.toLowerCase()} AND m.recipient_email IS NOT NULL THEN m.recipient_email ELSE ${owner.toLowerCase()} END
     WHERE m.id=ANY(${ids}::uuid[]) AND (m.sender_email=${owner.toLowerCase()} OR m.recipient_email=${owner.toLowerCase()}
-      OR (m.recipient_email IS NULL AND (m.encrypted_payload->'keys' ? ${owner.toLowerCase()} OR (${receivesBroadcast} AND m.encrypted_payload IS NULL))))` as AppMessage[]
+      OR (m.recipient_email IS NULL AND (m.encrypted_payload->'keys' ? ${owner.toLowerCase()} OR (${receivesBroadcast} AND m.encrypted_payload IS NULL))))
+      AND NOT EXISTS(SELECT 1 FROM app_message_hidden_for h WHERE h.message_id=m.id AND h.account_email=${owner.toLowerCase()})` as AppMessage[]
 }
 /**
  * Retrieves transfers only for the current account and selected registered target.

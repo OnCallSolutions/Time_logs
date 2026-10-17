@@ -8,7 +8,13 @@ Each deployment is bound to one company record. The first company defaults to co
 
 Managers and admins may enter an optional company employee ID when adding or correcting a person's official identity. The ID is stored exactly after surrounding whitespace is trimmed, is unique within the company, and remains distinct from all app-generated identifiers. It is not generated, guessed, used to sign in, or accepted as authorization proof. Keep official names in title case and emails lowercase. Existing official identity names and legacy timesheet display names are normalized when the directory initializes; personal nicknames remain user-controlled.
 
+## Organization email-domain guidance
+
+`COMPANY_EMAIL_DOMAINS` is an optional comma-separated list, such as `devoncall.net,devoncall.org`. The Add contractor/employee form compares new addresses against this list and warns admins/managers when an address is outside the organization's expected domains. Personal Gmail receives an identity-verification warning but is never blocked; the API does not enforce a company-domain restriction. Leaving this setting empty disables domain warnings. Configure it in `.env.local` for local work and in the corresponding Vercel environment for each deployment. This is deployment-level configuration today; per-organization settings should move into licensed-company administration when multi-tenant onboarding is introduced.
+
 This schema is ready for a single-company deployment and a clear mapping to multi-company licensing. It does **not** yet provide shared-database multi-tenant isolation: `licensed_company` is deliberately a singleton, and the existing product tables still use their established ownership model. Before placing multiple customers in one database, add a tenant key and database-enforced tenant scoping to every company-owned table, unique constraint, query, audit path, cache key, and background task, then test cross-tenant access denial. For now, use a separate database per licensed company.
+
+See [Company registration and tenancy](COMPANY_REGISTRATION_AND_TENANCY.md) for the company onboarding lifecycle, isolation model, and release gates.
 
 ## AI assistant
 

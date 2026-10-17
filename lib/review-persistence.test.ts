@@ -13,7 +13,7 @@ vi.mock("@neondatabase/serverless",()=>({neon:()=>async(strings:TemplateStringsA
 }}))
 import {approveAndForward} from "./account-handoffs"
 import {rejectSubmittedEntry} from "./db"
-const id="00000000-0000-4000-8000-000000000000",actor="reviewer@example.invalid",revision="2000-01-01T00:00:00Z",context={ipAddress:null,userAgent:null}
+const id="00000000-0000-4000-8000-000000000000",actor="reviewer@example.invalid",revision="2000-01-01T00:00:00Z",context={ipAddress:null,userAgent:null,requestMethod:"PATCH",requestPath:"/api/entries/test",requestId:null}
 beforeEach(()=>{queries.length=0})
 it("binds approval, business handoff and audit to unchanged independently owned submitted evidence",async()=>{
   expect(await approveAndForward(id,actor,revision,"contractor",context)).toBeNull()

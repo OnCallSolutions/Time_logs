@@ -9,12 +9,14 @@ vi.mock("@/lib/effective-permissions",()=>({getEffectivePermissions:vi.fn()}))
 vi.mock("@/lib/access",()=>({getEffectiveUserRole:vi.fn()}))
 vi.mock("@/lib/collaboration",()=>({actorRoster:vi.fn()}))
 vi.mock("@/lib/db",()=>({getTimeEntry:vi.fn(),listTimeEntries:vi.fn(),recordAuditEvent:vi.fn()}))
+vi.mock("@/lib/account-identities",()=>({listAccountIdentities:vi.fn()}))
 vi.mock("@/lib/account-handoffs",()=>({createHandoffs:vi.fn(),listHandoffs:vi.fn(),reviewHandoff:vi.fn(),actOnHandoffs:vi.fn(),accountTriageStates:["pending","needs_information","ready_for_finance","archived"]}))
 import { actorRoster } from "@/lib/collaboration"
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { getEffectiveUserRole } from "@/lib/access"
 import { getTimeEntry } from "@/lib/db"
+import { listAccountIdentities } from "@/lib/account-identities"
 import { createHandoffs,listHandoffs,reviewHandoff } from "@/lib/account-handoffs"
 import { resolvePermissions } from "@/lib/permissions"
 import { GET,POST,PATCH } from "./route"
@@ -28,6 +30,7 @@ beforeEach(()=>{
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"manager",permissions:resolvePermissions("manager",{send_to_accounts:true})})
   vi.mocked(getEffectiveUserRole).mockImplementation(async email=>email==="accounts@example.com"?"account_manager":"contractor")
   vi.mocked(getTimeEntry).mockResolvedValue({id,status:"approved",ownerEmail:"supplier@example.com"} as never)
+  vi.mocked(listAccountIdentities).mockResolvedValue([{email:"supplier@example.com"}] as never)
   vi.mocked(createHandoffs).mockResolvedValue([{id,entry_id:id}])
 })
 it("respects an administrator-denied handoff permission",async()=>{
@@ -48,6 +51,12 @@ it("refuses an inactive or non-account-manager assignee",async()=>{
 it("passes only authenticated handoff identity and server visibility",async()=>{
   expect((await POST(request())).status).toBe(201)
   expect(createHandoffs).toHaveBeenCalledWith([id],"manager@example.com","accounts@example.com",true,{[id]:"contractor"})
+})
+it("does not hand off approved time for an account without a registered company identity",async()=>{
+  vi.mocked(listAccountIdentities).mockResolvedValue([])
+  const response=await POST(request())
+  expect(response.status).toBe(409)
+  expect(createHandoffs).not.toHaveBeenCalled()
 })
 it("requires separate account triage rights even when queue visibility exists",async()=>{
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"account_manager",permissions:resolvePermissions("account_manager",{view_accounts:true})})

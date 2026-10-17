@@ -2,19 +2,83 @@
  * Checks project grouping without collapsing distinct work records.
  * Both entries retain independent editing and submission controls.
  */
-import { render,screen,within,waitFor,act } from "@testing-library/react"
+import { render,screen,within,waitFor,act,fireEvent } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { expect,it,vi } from "vitest"
 import { EntriesLog } from "./entries-log"
 it("keeps multiple same-project work units as separate entries",()=>{
   const row={id:"one",contractor:"Person",project:"Project A",date:"2026-10-10",hours:2,description:"Documentation",status:"draft" as const}
   render(<EntriesLog entries={[row,{...row,id:"two",hours:3,description:"Testing"}]} onUpdate={vi.fn()} onStatusChange={vi.fn()} onDelete={vi.fn()} onClear={vi.fn()}/>)
-  expect(screen.getByText("Project: Project A / 2 entries / 5h")).toBeVisible()
+  expect(screen.getByText("Project: Project A · 2 entries · 5h")).toBeVisible()
   expect(screen.getAllByRole("button",{name:"Edit entry"})).toHaveLength(2)
   expect(screen.queryByRole("spinbutton",{name:"Hours"})).not.toBeInTheDocument()
   expect(screen.getAllByText("Person")).toHaveLength(1)
   expect(screen.getByText("Documentation")).toBeVisible()
   expect(screen.getByText("Testing")).toBeVisible()
+})
+
+it("exposes filtered CSV export only when the caller has the explicit export right",()=>{
+  const onUpdate=vi.fn(),onStatusChange=vi.fn(),onDelete=vi.fn(),onClear=vi.fn()
+  const props={entries:[entry],onUpdate,onStatusChange,onDelete,onClear}
+  const {rerender}=render(<EntriesLog {...props}/> )
+  expect(screen.queryByRole("button",{name:/export visible/i})).not.toBeInTheDocument()
+  rerender(<EntriesLog {...props} canExport/> )
+  expect(screen.getByRole("button",{name:"Export visible (1)"})).toBeEnabled()
+})
+
+it("filters timesheets by text, status, project and date, with selectable sort and grouping",async()=>{
+  const user=userEvent.setup()
+  const rows=[
+    {id:"one",ownerEmail:"ann@example.com",contractor:"Ann",project:"Alpha",date:"2026-10-10",hours:2,description:"Design notes",status:"draft" as const},
+    {id:"two",ownerEmail:"bo@example.com",contractor:"Bo",project:"Beta",date:"2026-10-12",hours:5,description:"Build release",status:"submitted" as const},
+    {id:"three",ownerEmail:"cy@example.com",contractor:"Cy",project:"Beta",date:"2026-10-08",hours:3,description:"Test suite",status:"rejected" as const},
+  ]
+  render(<EntriesLog entries={rows} onUpdate={vi.fn()} onStatusChange={vi.fn()} onDelete={vi.fn()} onClear={vi.fn()}/> )
+
+  await user.type(screen.getByRole("textbox",{name:"Search entries"}),"Build release")
+  expect(screen.getByText("Build release")).toBeVisible()
+  expect(screen.queryByText("Design notes")).not.toBeInTheDocument()
+  await user.click(screen.getByRole("button",{name:"Reset timesheet view"}))
+
+  await user.selectOptions(screen.getByRole("combobox",{name:"Filter entry project"}),"Beta")
+  expect(screen.getByText("Project: Beta · 2 entries · 8h")).toBeVisible()
+  await user.selectOptions(screen.getByRole("combobox",{name:"Sort entries"}),"hours_low")
+  const rowTexts=screen.getAllByRole("row").map(row=>row.textContent??"")
+  expect(rowTexts.findIndex(text=>text.includes("Test suite"))).toBeLessThan(rowTexts.findIndex(text=>text.includes("Build release")))
+
+  await user.selectOptions(screen.getByRole("combobox",{name:"Group entries"}),"day")
+  expect(screen.getByText(/Day: 2026-10-08/)).toBeVisible()
+  fireEvent.change(screen.getByLabelText("Entries from date"),{target:{value:"2026-10-10"}})
+  expect(screen.queryByText("Test suite")).not.toBeInTheDocument()
+  expect(screen.getByText("Build release")).toBeVisible()
+  await user.selectOptions(screen.getByRole("combobox",{name:"Filter entry status"}),"submitted")
+  expect(screen.getByText("Showing 1 / 3")).toBeVisible()
+})
+
+it("requires a confirmation window before deleting an entry",async()=>{
+  const onDelete=vi.fn()
+  const user=userEvent.setup()
+  render(<EntriesLog entries={[{id:"one",contractor:"Person",project:"Project A",date:"2026-10-10",hours:2,description:"Documentation",status:"draft"}]} onUpdate={vi.fn()} onStatusChange={vi.fn()} onDelete={onDelete} onClear={vi.fn()}/> )
+  await user.click(screen.getByRole("button",{name:"Delete entry"}))
+  const dialog=await screen.findByRole("dialog",{name:"Confirm entry deletion"})
+  expect(onDelete).not.toHaveBeenCalled()
+  await user.click(within(dialog).getByRole("button",{name:"Cancel"}))
+  expect(onDelete).not.toHaveBeenCalled()
+  await user.click(screen.getByRole("button",{name:"Delete entry"}))
+  const secondDialog=await screen.findByRole("dialog",{name:"Confirm entry deletion"})
+  await user.click(within(secondDialog).getByRole("button",{name:"Delete entry"}))
+  expect(onDelete).toHaveBeenCalledExactlyOnceWith("one")
+})
+
+it("requires confirmation before requesting a clear-all operation",async()=>{
+  const onClear=vi.fn()
+  const user=userEvent.setup()
+  render(<EntriesLog entries={[{id:"one",contractor:"Person",project:"Project A",date:"2026-10-10",hours:2,description:"Documentation",status:"draft"}]} canClear onUpdate={vi.fn()} onStatusChange={vi.fn()} onDelete={vi.fn()} onClear={onClear}/> )
+  await user.click(screen.getByRole("button",{name:"Clear all"}))
+  const dialog=await screen.findByRole("dialog",{name:"Confirm clearing timesheets"})
+  expect(onClear).not.toHaveBeenCalled()
+  await user.click(within(dialog).getByRole("button",{name:"Continue to Entra verification"}))
+  expect(onClear).toHaveBeenCalledOnce()
 })
 
 const entry={id:"one",ownerEmail:"person@example.com",revision:"original",contractor:"Person",project:"Project A",date:"2026-10-10",hours:2,description:"Documentation",status:"draft" as const}

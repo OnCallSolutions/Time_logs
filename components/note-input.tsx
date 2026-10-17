@@ -36,13 +36,14 @@ export function NoteInput({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [sampleCount, setSampleCount] = useState("random")
+  const [sampleIsPreview, setSampleIsPreview] = useState(false)
   /**
    * Loads synthetic examples scoped by the authenticated server identity.
    * @returns Promise<void> after replacing notes or displaying a safe error.
    */
   async function loadSample(){
     setLoading(true);setError(null)
-    try{const response=await fetch(apiPath(`/api/samples?count=${sampleCount}`),{cache:"no-store"});const data=await response.json();if(!response.ok)throw new Error(data.error);setNotes(data.notes)}
+    try{const response=await fetch(apiPath(`/api/samples?count=${sampleCount}`),{cache:"no-store"});const data=await response.json();if(!response.ok)throw new Error(data.error);setNotes(data.notes);setSampleIsPreview(!!data.previewOnly)}
     catch(error){setError(error instanceof Error?error.message:"Samples unavailable.")}finally{setLoading(false)}
   }
 
@@ -56,7 +57,7 @@ export function NoteInput({
    * @returns A promise that resolves after parsing, saving, or error handling.
    */
   async function handleParse() {
-    if (!notes.trim() || loading || previewOnly) return
+    if (!notes.trim() || loading || previewOnly || sampleIsPreview) return
     setLoading(true)
     setError(null)
     try {
@@ -121,6 +122,7 @@ export function NoteInput({
       <textarea
         id="notes"
         value={notes}
+        readOnly={sampleIsPreview}
         onChange={(e) => setNotes(e.target.value)}
         onKeyDown={(e) => {
           if (
@@ -142,6 +144,8 @@ export function NoteInput({
         <p className="text-xs text-muted-foreground" aria-live="polite">
           {error ? (
             <span className="text-destructive">{error}</span>
+          ) : sampleIsPreview ? (
+            <span>Display-only sample. Clear it before entering real timesheet notes.</span>
           ) : (
             <>
               Press{" "}
@@ -152,7 +156,8 @@ export function NoteInput({
             </>
           )}
         </p>
-        {!previewOnly&&<Button onClick={handleParse} disabled={loading || !notes.trim()} size="lg">
+        {sampleIsPreview&&<Button variant="outline" disabled={loading} onClick={()=>{setNotes("");setSampleIsPreview(false)}}>Clear sample</Button>}
+        {!previewOnly&&!sampleIsPreview&&<Button onClick={handleParse} disabled={loading || !notes.trim()} size="lg">
           {loading ? (
             <>
               <Loader2 className="size-4 animate-spin" aria-hidden="true" />

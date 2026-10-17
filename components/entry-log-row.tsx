@@ -6,7 +6,7 @@
 "use client"
 
 import { Fragment, useRef, useState } from "react"
-import { CheckCircle2, ClipboardList, Pencil, Save, Send, Trash2, UserPlus, X, XCircle } from "lucide-react"
+import { AlertTriangle, CheckCircle2, ClipboardList, Pencil, Save, Send, Trash2, UserPlus, X, XCircle } from "lucide-react"
 import { WindowSurface } from "@/components/window-surface"
 import { Button } from "@/components/ui/button"
 import type { EntryStatus, TimeEntry } from "@/lib/types"
@@ -36,8 +36,8 @@ const statusStyles: Record<EntryStatus, string> = {
  * @param props.selection - Optional controlled selection for an owned eligible row.
  * @returns JSX.Element containing the row and any local validation/error feedback.
  */
-export function EntryLogRow({ entry, showIdentity, canEdit, canDelete, canSubmit, canReview, onUpdate, onStatusChange, onDelete, onReview, selection, onRequestReview, onSubmit }: {
-  entry: TimeEntry; showIdentity: boolean; canEdit: boolean; canDelete: boolean; canSubmit: boolean; canReview: boolean;
+export function EntryLogRow({ entry, showIdentity, canEdit, canDelete, canSubmit, canRecall = canSubmit, canReview, onUpdate, onStatusChange, onDelete, onReview, selection, onRequestReview, onSubmit }: {
+  entry: TimeEntry; showIdentity: boolean; canEdit: boolean; canDelete: boolean; canSubmit: boolean; canRecall?: boolean; canReview: boolean;
   onUpdate: EntryMutation; onStatusChange: EntryTransition; onDelete: (id: string) => void;
   onReview: (entry: TimeEntry, decision: "approved" | "rejected") => void;
   selection?: { checked: boolean; disabled: boolean; onChange: (checked: boolean) => void };
@@ -47,6 +47,7 @@ export function EntryLogRow({ entry, showIdentity, canEdit, canDelete, canSubmit
   const [draft, setDraft] = useState<(Omit<TimeEntry, "hours"> & { hours: string }) | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
+  const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false)
   const pending = useRef(false)
   const editing = !!draft && canEdit
   const inputClass = "w-full min-w-24 rounded-md border border-input bg-white px-2 py-2 text-sm focus:ring-2 focus:ring-orange-300"
@@ -94,6 +95,24 @@ export function EntryLogRow({ entry, showIdentity, canEdit, canDelete, canSubmit
   }
 
   return <Fragment>
+    {deleteConfirmationOpen && <WindowSurface title="Confirm entry deletion" onBack={() => setDeleteConfirmationOpen(false)} compact resizable>
+      <section className="flex w-full max-w-xl flex-col bg-white text-slate-950">
+        <header className="flex items-start gap-3 border-b border-red-200 bg-red-50 p-4">
+          <AlertTriangle className="mt-0.5 size-5 shrink-0 text-red-700" aria-hidden="true" />
+          <div><h2 className="font-semibold text-red-950">Delete this timesheet entry?</h2><p className="mt-1 text-sm text-red-900">This permanently removes the selected record. This cannot be undone.</p></div>
+        </header>
+        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 p-4 text-sm">
+          <dt className="font-medium text-slate-500">Project</dt><dd className="break-words">{entry.project}</dd>
+          <dt className="font-medium text-slate-500">Date</dt><dd>{entry.date}</dd>
+          <dt className="font-medium text-slate-500">Work</dt><dd className="break-words">{entry.description || "No description"}</dd>
+          <dt className="font-medium text-slate-500">Hours</dt><dd>{entry.hours}h</dd>
+        </dl>
+        <footer className="flex justify-end gap-2 border-t p-4">
+          <Button variant="outline" onClick={() => setDeleteConfirmationOpen(false)}>Cancel</Button>
+          <Button variant="destructive" onClick={() => { setDeleteConfirmationOpen(false); onDelete(entry.id) }}><Trash2 className="size-4" />Delete entry</Button>
+        </footer>
+      </section>
+    </WindowSurface>}
     <tr className="border-b border-border/60 align-top hover:bg-muted/30" aria-label={`Entry ${entry.description || entry.id}`}>
       {selection && <td className="px-3 py-3"><input type="checkbox" aria-label={`Select entry ${entry.id}`} checked={selection.checked} disabled={selection.disabled || busy} onChange={event => selection.onChange(event.target.checked)} className="size-4 accent-orange-700" /></td>}
       <td className="px-3 py-3">{showIdentity && <><span className="text-sm font-medium">{entry.contractor}</span>{entry.contractorNumber&&<span title={entry.contractorNumber} className="mt-1 block max-w-48 break-all font-mono text-xs text-muted-foreground">{entry.shortReference || entry.contractorNumber}</span>}{entry.employeeId&&<span className="block text-xs text-muted-foreground">Employee ID: {entry.employeeId}</span>}</>}</td>
@@ -106,9 +125,9 @@ export function EntryLogRow({ entry, showIdentity, canEdit, canDelete, canSubmit
         {canEdit && <Button size="icon-sm" variant="outline" title="Edit entry" aria-label="Edit entry" disabled={busy} onClick={() => { setDraft({ ...entry, hours: String(entry.hours) }); setError("") }}><Pencil className="size-4" /></Button>}
         {canSubmit && (entry.status === "draft" || entry.status === "rejected") && <Button size="icon-sm" variant="outline" title="Submit entry" aria-label="Submit entry" disabled={busy} onClick={() => onSubmit ? onSubmit() : void perform(() => onStatusChange(entry.id, "submitted", undefined, entry.revision))}><Send className="size-4" /></Button>}
         {onRequestReview && <Button size="icon-sm" variant="outline" title="Request reviewer help" aria-label="Request reviewer help" disabled={busy} onClick={onRequestReview}><UserPlus className="size-4" /></Button>}
-        {canSubmit && entry.status === "submitted" && <Button size="icon-sm" variant="outline" title="Recall entry to draft" aria-label="Recall entry to draft" disabled={busy} onClick={() => void perform(() => onStatusChange(entry.id, "draft", undefined, entry.revision))}><ClipboardList className="size-4" /></Button>}
+        {canRecall && entry.status === "submitted" && <Button size="icon-sm" variant="outline" title="Recall entry to draft" aria-label="Recall entry to draft" disabled={busy} onClick={() => void perform(() => onStatusChange(entry.id, "draft", undefined, entry.revision))}><ClipboardList className="size-4" /></Button>}
         {canReview && entry.reviewEligible !== false && entry.status === "submitted" && <><Button size="icon-sm" variant="outline" title={entry.approvalEligible===false?"Approval requires business-account forwarding permission":"Approve entry"} aria-label="Approve entry" disabled={busy||entry.approvalEligible===false} onClick={() => onReview(entry, "approved")}><CheckCircle2 className="size-4" /></Button><Button size="icon-sm" variant="outline" title="Reject entry" aria-label="Reject entry" disabled={busy} onClick={() => onReview(entry, "rejected")}><XCircle className="size-4" /></Button></>}
-        <Button size="icon-sm" variant="ghost" title="Delete entry" aria-label="Delete entry" disabled={!canDelete || busy} onClick={() => onDelete(entry.id)}><Trash2 className="size-4" /></Button>
+        <Button size="icon-sm" variant="ghost" title="Delete entry" aria-label="Delete entry" disabled={!canDelete || busy} onClick={() => setDeleteConfirmationOpen(true)}><Trash2 className="size-4" /></Button>
       </div></td>
     </tr>
     {editing && <WindowSurface title="Edit time entry" disabled={busy} onBack={cancel}>

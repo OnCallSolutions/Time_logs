@@ -19,6 +19,16 @@ it("does not expose extraction for account-manager sample preview",()=>{
   render(<NoteInput previewOnly onParsed={()=>{}}/>)
   expect(screen.queryByRole("button",{name:"Extract entries"})).not.toBeInTheDocument()
 })
+it("keeps manager-generated samples read-only and display-only until cleared",async()=>{
+  const request=vi.fn(async()=>new Response(JSON.stringify({notes:"Sample Contractor A (ID: SAMPLE-CTR-001): 2 hours",previewOnly:true})))
+  vi.stubGlobal("fetch",request);render(<NoteInput onParsed={()=>{}}/>)
+  await userEvent.click(screen.getByRole("button",{name:"Try a sample"}))
+  expect(screen.getByRole("textbox",{name:"Time worked notes"})).toHaveAttribute("readonly")
+  expect(screen.queryByRole("button",{name:"Extract entries"})).not.toBeInTheDocument()
+  expect(screen.getByText(/Display-only sample/)).toBeInTheDocument()
+  await userEvent.click(screen.getByRole("button",{name:"Clear sample"}))
+  expect(screen.getByRole("textbox",{name:"Time worked notes"})).not.toHaveAttribute("readonly")
+})
 it("requests the selected multi-entry sample size",async()=>{
   const request=vi.fn(async()=>new Response(JSON.stringify({notes:"Twelve sample entries"})))
   vi.stubGlobal("fetch",request);render(<NoteInput onParsed={()=>{}}/>)

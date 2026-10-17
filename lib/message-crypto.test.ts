@@ -57,12 +57,13 @@ it("automatically encrypts for multiple devices and binds their envelopes to the
   await expect(decryptMessage(tampered,recipient.identity,keys[1].email,keys[0])).rejects.toThrow("signature")
   expect(await validateEnvelope(tampered,keys[0].email,keys[0].email,keys[1].email,keys.map(key=>key.email))).toBe(false)
 })
-it("closes sender editing at one hour while keeping admin exemption",()=>{
+it("allows only the sender to edit, with administrators exempt from the time limit",()=>{
   const message={id:"one",sender_email:keys[0].email,recipient_email:null,body:"text",created_at:"2026-10-08T12:00:00Z"}
   const deadline=Date.parse(message.created_at)+MESSAGE_EDIT_MINUTES*60000
   expect(MESSAGE_EDIT_MINUTES).toBe(60)
   expect(canEditMessage(message,keys[0].email,false,deadline-1)).toBe(true)
   expect(canEditMessage(message,keys[0].email,false,deadline)).toBe(false)
   expect(canEditMessage(message,keys[0].email,true,deadline+1)).toBe(true)
+  expect(canEditMessage(message,keys[1].email,true,deadline-1)).toBe(false)
   expect(canEditMessage({...message,deleted_at:"now"},keys[0].email,true)).toBe(false)
 })

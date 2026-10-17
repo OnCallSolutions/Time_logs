@@ -47,6 +47,7 @@ export default async function Page() {
       role={role ?? "contractor"}
       userName={session.user.name}
       userEmail={session.user.email}
+      organizationName={process.env.COMPANY_NAME?.trim() || "DevOnCall"}
     /></SessionBoundary>
   )
 }

@@ -56,6 +56,11 @@ async function initializeMessages(): Promise<void> {
     recipient_email TEXT NOT NULL, delivered_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), read_at TIMESTAMPTZ,
     PRIMARY KEY (message_id, recipient_email)
   )`
+  await sql`CREATE TABLE IF NOT EXISTS app_message_hidden_for (
+    message_id UUID NOT NULL REFERENCES app_messages(id) ON DELETE CASCADE,
+    account_email TEXT NOT NULL, hidden_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY(message_id,account_email)
+  )`
 }
 /**
  * Reuses schema initialization instead of running DDL on each inbox poll.
@@ -86,6 +91,7 @@ export async function listMessages(email:string,receivesBroadcast:boolean) {
   const identity = email.toLowerCase()
   await sql`INSERT INTO app_message_receipts (message_id,recipient_email)
     SELECT id,${identity} FROM app_messages WHERE sender_email <> ${identity} AND deleted_at IS NULL
+      AND NOT EXISTS(SELECT 1 FROM app_message_hidden_for h WHERE h.message_id=app_messages.id AND h.account_email=${identity})
       AND (recipient_email = ${identity} OR (recipient_email IS NULL AND (encrypted_payload->'keys' ? ${identity} OR (${receivesBroadcast} AND encrypted_payload IS NULL))))
     ORDER BY created_at DESC,id DESC LIMIT 100 ON CONFLICT DO NOTHING`
   return sql`SELECT m.id,m.sender_email,m.recipient_email,m.body,to_char(m.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS created_at,m.edited_at,m.deleted_at,m.encrypted_payload,m.priority,
@@ -94,8 +100,29 @@ export async function listMessages(email:string,receivesBroadcast:boolean) {
     (SELECT COUNT(*)::int FROM app_message_receipts WHERE message_id=m.id AND read_at IS NOT NULL) AS read_count
     FROM app_messages m LEFT JOIN app_message_receipts r ON r.message_id=m.id
       AND r.recipient_email=CASE WHEN m.sender_email=${identity} AND m.recipient_email IS NOT NULL THEN m.recipient_email ELSE ${identity} END
-    WHERE m.recipient_email = ${identity} OR m.sender_email = ${identity}
-      OR (m.recipient_email IS NULL AND (m.encrypted_payload->'keys' ? ${identity} OR (${receivesBroadcast} AND m.encrypted_payload IS NULL))) ORDER BY m.created_at DESC,m.id DESC LIMIT 100`
+    WHERE (m.recipient_email = ${identity} OR m.sender_email = ${identity}
+      OR (m.recipient_email IS NULL AND (m.encrypted_payload->'keys' ? ${identity} OR (${receivesBroadcast} AND m.encrypted_payload IS NULL))))
+      AND NOT EXISTS(SELECT 1 FROM app_message_hidden_for h WHERE h.message_id=m.id AND h.account_email=${identity})
+    ORDER BY m.created_at DESC,m.id DESC LIMIT 100`
+}
+
+/**
+ * Checks that two accounts share a visible conversation before revealing an avatar.
+ * @param viewer - Authenticated account requesting the other participant's image.
+ * @param participant - Account whose profile image is requested.
+ * @param receivesBroadcast - Whether the viewer may see legacy workforce announcements.
+ * @returns Promise<boolean> indicating an existing shared message relationship.
+ */
+export async function canViewMessageProfile(viewer:string,participant:string,receivesBroadcast:boolean):Promise<boolean>{
+  await ensureMessages()
+  const current=viewer.toLowerCase(),other=participant.toLowerCase()
+  if(current===other)return false
+  const rows=await sql`SELECT 1 FROM app_messages WHERE
+    ((sender_email=${current} AND recipient_email=${other}) OR (sender_email=${other} AND recipient_email=${current}))
+    OR (sender_email=${other} AND recipient_email IS NULL AND
+      (encrypted_payload->'keys' ? ${current} OR (${receivesBroadcast} AND encrypted_payload IS NULL)))
+    LIMIT 1`
+  return rows.length>0
 }
 
 /**
@@ -110,14 +137,33 @@ export async function readMessages(email: string, receivesBroadcast: boolean, id
   await sql`INSERT INTO app_message_receipts (message_id,recipient_email,read_at)
     SELECT id,${email.toLowerCase()},NOW() FROM app_messages WHERE id=ANY(${ids}::uuid[])
       AND sender_email<>${email.toLowerCase()} AND deleted_at IS NULL
+      AND NOT EXISTS(SELECT 1 FROM app_message_hidden_for h WHERE h.message_id=app_messages.id AND h.account_email=${email.toLowerCase()})
       AND (recipient_email=${email.toLowerCase()} OR (recipient_email IS NULL AND (encrypted_payload->'keys' ? ${email.toLowerCase()} OR (${receivesBroadcast} AND encrypted_payload IS NULL))))
     ON CONFLICT (message_id,recipient_email) DO UPDATE SET read_at=COALESCE(app_message_receipts.read_at,EXCLUDED.read_at)`
 }
 
 /**
+ * Hides a message only from the authenticated account while preserving other inboxes.
+ * @param email - Authenticated viewer identity.
+ * @param receivesBroadcast - Whether the viewer may see legacy broadcasts.
+ * @param id - Message UUID selected from the UI.
+ * @returns Promise<boolean> indicating a visible message was hidden for this account.
+ */
+export async function hideMessageFor(email:string,receivesBroadcast:boolean,id:string):Promise<boolean>{
+  await ensureMessages()
+  const identity=email.toLowerCase()
+  const rows=await sql`INSERT INTO app_message_hidden_for(message_id,account_email)
+    SELECT m.id,${identity} FROM app_messages m WHERE m.id=${id} AND m.deleted_at IS NULL
+      AND (m.sender_email=${identity} OR m.recipient_email=${identity} OR (m.recipient_email IS NULL AND
+        (m.encrypted_payload->'keys' ? ${identity} OR (${receivesBroadcast} AND m.encrypted_payload IS NULL))))
+    ON CONFLICT(message_id,account_email) DO NOTHING RETURNING message_id`
+  return rows.length>0
+}
+
+/**
  * Atomically edits or tombstones a scoped message with server-side deadlines.
  * @param email - Authenticated actor identity.
- * @param admin - Whether the actor may moderate visible messages without a deadline.
+ * @param admin - Whether the sender may edit their own message without a deadline.
  * @param id - Target message UUID.
  * @param body - Replacement plain text, or null to delete for all participants.
  * @param encrypted - Signed ciphertext for edits; prevents plaintext downgrade.
@@ -127,11 +173,11 @@ export async function changeMessage(email: string, admin: boolean, id: string, b
   await ensureMessages()
   const rows = body === null
     ? await sql`UPDATE app_messages SET body='[Message deleted]',encrypted_payload=NULL,deleted_at=NOW()
-      WHERE id=${id} AND deleted_at IS NULL AND (sender_email=${email.toLowerCase()} OR (${admin} AND recipient_email=${email.toLowerCase()})) RETURNING id`
+      WHERE id=${id} AND deleted_at IS NULL AND (sender_email=${email.toLowerCase()} OR ${admin})
+        AND (${admin} OR (sender_email=${email.toLowerCase()} AND created_at>NOW()-(${MESSAGE_EDIT_MINUTES} * INTERVAL '1 minute'))) RETURNING id`
     : await sql`UPDATE app_messages SET body=${encrypted?"[Encrypted message]":body},encrypted_payload=${encrypted?JSON.stringify(encrypted):null}::jsonb,edited_at=NOW()
-      WHERE id=${id} AND deleted_at IS NULL
+      WHERE id=${id} AND deleted_at IS NULL AND sender_email=${email.toLowerCase()}
         AND (encrypted_payload IS NULL OR ${encrypted!==undefined})
-        AND (sender_email=${email.toLowerCase()} OR (${admin} AND recipient_email=${email.toLowerCase()}))
         AND (${admin} OR created_at>NOW()-(${MESSAGE_EDIT_MINUTES} * INTERVAL '1 minute')) RETURNING id`
   return rows.length > 0
 }
@@ -154,8 +200,8 @@ export async function sendMessage(sender:string,recipient:string|null,body:strin
   return rows[0].id as string
 }
 
-/** @param email - Authenticated actor. @param admin - Moderation capability. @param id - Message UUID. @returns Scoped original message or null for unauthorized IDs. */
-export async function editableMessage(email:string,admin:boolean,id:string){
-  await ensureMessages();const rows=await sql`SELECT * FROM app_messages WHERE id=${id} AND deleted_at IS NULL AND (sender_email=${email.toLowerCase()} OR (${admin} AND recipient_email=${email.toLowerCase()}))`
+/** @param email - Authenticated actor. @param id - Message UUID. @returns Original message only when the authenticated actor is its sender. */
+export async function editableMessage(email:string,id:string){
+  await ensureMessages();const rows=await sql`SELECT * FROM app_messages WHERE id=${id} AND deleted_at IS NULL AND sender_email=${email.toLowerCase()}`
   return rows[0]??null
 }

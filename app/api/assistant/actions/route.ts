@@ -61,7 +61,7 @@ export async function POST(request: Request): Promise<Response> {
       const directory=await readAdminDirectory()
       if(!directory.ok)return Response.json({error:"Refresh the employee directory before changing rights."},{status:503})
       const target=(await directory.json() as {users:Array<{email:string;role:string;accessStatus:string;note?:string}>}).users.find(user=>user.email.toLowerCase()===action.email.toLowerCase())
-      if(!target||!["admin","manager","account_manager","employee","contractor"].includes(target.role)||!["active","denied","blocked"].includes(target.accessStatus))return Response.json({error:"That active directory record could not be confirmed."},{status:409})
+      if(!target||!["admin","manager","account_manager","employee","contractor"].includes(target.role)||!["active","denied","suspended","retired","blocked"].includes(target.accessStatus))return Response.json({error:"That active directory record could not be confirmed."},{status:409})
       return await updateAdminRights(new Request(request.url,{method:"PATCH",headers,body:JSON.stringify({email:target.email,role:target.role,accessStatus:target.accessStatus,note:target.note??"",permissions:action.permissions})}))
     }
     return Response.json({ clientAction: action }, { headers: { "Cache-Control": "no-store" } })

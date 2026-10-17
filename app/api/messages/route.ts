@@ -5,7 +5,7 @@
  */
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
-import { changeMessage,editableMessage,actorRoster,listMessages,readMessages,sendMessage } from "@/lib/collaboration"
+import { changeMessage,editableMessage,actorRoster,hideMessageFor,listMessages,readMessages,sendMessage } from "@/lib/collaboration"
 import { audienceEmails,messageAudiences } from "@/lib/message-audience"
 import { encryptedMessageSchema,validateEnvelope } from "@/lib/message-envelope"
 import { MESSAGE_EDIT_MINUTES } from "@/lib/message-policy"
@@ -31,13 +31,13 @@ export async function GET(request?:Request): Promise<Response> {
     const identities=await listAccountIdentities(messages.flatMap(message=>[message.sender_email,message.recipient_email,message.encrypted_payload?.author].filter((value):value is string=>typeof value==="string")))
     const official=new Map(identities.map(person=>[person.email,person.officialName]))
     const last=messages.at(-1)
-    return Response.json({messages:messages.map(message=>({...message,sender_name:message.sender_email.toLowerCase()===email.toLowerCase()?"You":official.get(String(message.sender_email))??"Company account",recipient_name:official.get(String(message.recipient_email))??(message.recipient_email?"Company account":"All recipients"),author_name:official.get(String(message.encrypted_payload?.author))??"Company account"})),next:messages.length===(before?50:100)&&last?{date:String(last.created_at),id:last.id}:null,email:email.toLowerCase(),role:access.role,editMinutes:MESSAGE_EDIT_MINUTES},{headers:{"Cache-Control":"no-store"}})
+    return Response.json({messages:messages.map(message=>({...message,sender_name:message.sender_email.toLowerCase()===email.toLowerCase()?"You":official.get(String(message.sender_email))??"Unknown sender",recipient_name:official.get(String(message.recipient_email))??(message.recipient_email?"Unknown recipient":"All recipients"),author_name:official.get(String(message.encrypted_payload?.author))??"Unknown sender"})),next:messages.length===(before?50:100)&&last?{date:String(last.created_at),id:last.id}:null,email:email.toLowerCase(),role:access.role,editMinutes:MESSAGE_EDIT_MINUTES},{headers:{"Cache-Control":"no-store"}})
   } catch { return Response.json({error:"Inbox unavailable."},{status:500}) }
 }
 
 /**
- * Acknowledges opened messages or edits a scoped message within the edit window.
- * @param req - Request with an explicit read action, legacy text, or signed encrypted edit.
+ * Acknowledges, locally hides, or edits a scoped message.
+ * @param req - Request with an explicit read, delete-for-me, or encrypted-edit action.
  * @returns Promise<Response> containing acknowledgment or safe validation failure.
  */
 export async function PATCH(req: Request): Promise<Response> {
@@ -47,15 +47,23 @@ export async function PATCH(req: Request): Promise<Response> {
     if (!email || !access.role) return Response.json({error:"Forbidden."},{status:403})
     const input = z.discriminatedUnion("action", [
       z.object({action:z.literal("read"),ids:z.array(z.string().uuid()).min(1).max(100)}),
+      z.object({action:z.literal("delete_for_me"),id:z.string().uuid()}),
       z.object({action:z.literal("edit"),id:z.string().uuid(),body:z.string().trim().min(1).max(4000).optional(),encrypted:encryptedMessageSchema.optional()}),
     ]).parse(await req.json())
     if (input.action === "read") {
       await readMessages(email,access.role === "employee" || access.role === "contractor",input.ids)
       return Response.json({ok:true})
     }
+    if(input.action==="delete_for_me"){
+      const hidden=await hideMessageFor(email,access.role==="employee"||access.role==="contractor",input.id)
+      if(!hidden)return Response.json({error:"Message unavailable or already hidden."},{status:409})
+      await recordAuditEvent({actorEmail:email,action:"message_deleted_for_me",targetType:"message",targetId:input.id,...getAuditContext(req)})
+      return Response.json({ok:true,scope:"me"})
+    }
     if (access.role !== "admin" && (!(access.role === "manager") || !access.permissions.send_messages)) return Response.json({error:"Forbidden."},{status:403})
-    const original=await editableMessage(email,access.role==="admin",input.id)
+    const original=await editableMessage(email,input.id)
     if(!original)return Response.json({error:"Message unavailable."},{status:409})
+    if(String(original.sender_email).toLowerCase()!==email.toLowerCase())return Response.json({error:"Only the original sender can edit this message."},{status:403})
     if(original.encrypted_payload && !input.encrypted)return Response.json({error:"Encrypted messages cannot be saved as plaintext."},{status:400})
     if(input.encrypted){
       if(!original.encrypted_payload)return Response.json({error:"Legacy messages require a separate encryption migration."},{status:400})
@@ -69,7 +77,7 @@ export async function PATCH(req: Request): Promise<Response> {
 }
 
 /**
- * Deletes message content for all participants, preserving a lifecycle marker.
+ * Unsends a message for all participants, preserving a lifecycle marker.
  * @param req - Request containing the message UUID; actor identity comes from auth.
  * @returns Promise<Response> indicating deletion or a safe authorization failure.
  */
@@ -79,8 +87,8 @@ export async function DELETE(req: Request): Promise<Response> {
     const access = await getEffectivePermissions(email)
     if (!email || !access.role || (access.role !== "admin" && (access.role !== "manager" || !access.permissions.send_messages))) return Response.json({error:"Forbidden."},{status:403})
     const {id} = z.object({id:z.string().uuid()}).parse(await req.json())
-    if (!await changeMessage(email,access.role === "admin",id,null)) return Response.json({error:"Message unavailable."},{status:409})
-    await recordAuditEvent({actorEmail:email,action:"message_deleted",targetType:"message",targetId:id,...getAuditContext(req)})
+    if (!await changeMessage(email,access.role === "admin",id,null)) return Response.json({error:"Only the sender may unsend within one hour; administrators may moderate a message."},{status:409})
+    await recordAuditEvent({actorEmail:email,action:"message_unsent_for_everyone",targetType:"message",targetId:id,...getAuditContext(req)})
     return Response.json({ok:true})
   } catch (error) { return Response.json({error:error instanceof z.ZodError || error instanceof SyntaxError ? "Invalid message request." : "Message deletion unavailable."},{status:error instanceof z.ZodError || error instanceof SyntaxError ? 400 : 500}) }
 }

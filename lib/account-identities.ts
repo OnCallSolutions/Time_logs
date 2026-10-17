@@ -64,6 +64,39 @@ export async function listAccountIdentities(emails?: string[]): Promise<AccountI
     FROM account_identities a JOIN company_memberships m USING(account_id) JOIN licensed_company c USING(company_id)
     WHERE ${emails === undefined} OR a.email=ANY(${emails?.map(normalizeEmail) ?? []}::text[])` as AccountIdentity[]
 }
+
+/** @param email - Account whose provisioner is needed for review routing. @returns Promise<string|null> with the creating account email, never exposed to clients. */
+export async function getAccountIdentityCreator(email:string):Promise<string|null>{
+  await ensureAccountIdentities()
+  const rows=await sql`SELECT created_by FROM account_identities WHERE email=${normalizeEmail(email)} LIMIT 1`
+  return typeof rows[0]?.created_by==="string"?rows[0].created_by:null
+}
+
+/**
+ * Ensures each known actor has a permanent company identity before directory display.
+ * New identities receive an internal unique number and a temporary distinct name;
+ * an administrator can replace that placeholder with the approved official name.
+ * @param emails - Existing actor emails gathered from trusted server-side sources.
+ * @param actor - Authenticated administrator responsible for directory provisioning.
+ * @returns Promise<AccountIdentity[]> with short and immutable long identifiers.
+ */
+export async function ensureAccountIdentitiesForActors(emails: string[], actor: string): Promise<AccountIdentity[]> {
+  await ensureAccountIdentities()
+  const normalizedEmails = [...new Set(emails.map(normalizeEmail))]
+  if (!normalizedEmails.length) return []
+  await sql`WITH created AS (
+    INSERT INTO account_identities(email,official_name,created_by)
+    SELECT address,'Name Not Set '||upper(substr(replace(gen_random_uuid()::text,'-',''),1,8)),${normalizeEmail(actor)}
+    FROM unnest(${normalizedEmails}::text[]) AS address
+    ON CONFLICT(email) DO NOTHING
+    RETURNING account_id
+  )
+  INSERT INTO company_memberships(account_id,company_id)
+  SELECT a.account_id,c.company_id FROM account_identities a CROSS JOIN licensed_company c
+  WHERE a.email=ANY(${normalizedEmails}::text[])
+  ON CONFLICT(account_id) DO NOTHING`
+  return listAccountIdentities(normalizedEmails)
+}
 /**
  * Creates a baseline contractor/employee account without modifying an existing one.
  * @param input - Validated official identity, baseline role, authenticated creator and recovery admins.

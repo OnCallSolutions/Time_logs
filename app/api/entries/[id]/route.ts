@@ -13,6 +13,7 @@ import { canReviewRole } from "@/lib/review-policy"
 import { createReviewAccess } from "@/lib/review-access"
 import { approveAndForward } from "@/lib/account-handoffs"
 import { listAccountIdentities } from "@/lib/account-identities"
+import { resolveSubmissionReviewer } from "@/lib/submission-reviewer"
 import {
   auditActionForStatus,
   changedFieldMetadata,
@@ -22,8 +23,10 @@ import {
   deleteTimeEntry,
   getTimeEntry,
   recordAuditEvent,
-  updateTimeEntry,
   rejectSubmittedEntry,
+  updateTimeEntryWithAudit,
+  submitTimeEntryWithAudit,
+  getTimesheetSubmissionDeadline,
 } from "@/lib/db"
 import type { EntryStatus, TimeEntry } from "@/lib/types"
 
@@ -178,7 +181,7 @@ export async function PATCH(
     }
 
     const { id } = await params
-    const patch = patchSchema.parse(await req.json())
+    let patch = patchSchema.parse(await req.json())
     if ((hasEntryFieldPatch(patch) && !access.permissions.edit_entries) ||
       ((patch.status === "approved" || patch.status === "rejected") && !access.canReview) ||
       ((patch.status === "draft" || patch.status === "submitted") && !access.permissions.submit_entries && !access.permissions.review_entries))
@@ -207,13 +210,13 @@ export async function PATCH(
     if(access.role==="manager"&&current.ownerEmail?.toLowerCase()!==access.email.toLowerCase()&&hasEntryFieldPatch(patch)&&!scope.reviewable)return Response.json({error:"Review assistance rights are required to change this evidence."},{status:403})
     if(patch.reviewManagerEmail!==undefined){
       if(patch.status!=="submitted"||current.ownerEmail?.toLowerCase()!==access.email.toLowerCase())return Response.json({error:"A manager can only be selected when submitting your own work."},{status:403})
-      if(patch.reviewManagerEmail&&await getEffectiveUserRole(patch.reviewManagerEmail)!=="manager")return Response.json({error:"Choose an active manager."},{status:400})
-      if(patch.reviewManagerEmail?.toLowerCase()===access.email.toLowerCase())return Response.json({error:"Your own time needs an independent reviewer."},{status:400})
     }
     if(patch.status==="submitted"&&(access.role==="contractor"||access.role==="employee")){
-      const manager=patch.reviewManagerEmail??current.reviewManagerEmail
-      const reviewer=manager?await getEffectivePermissions(manager):null
-      if(!reviewer||reviewer.role!=="manager"||!reviewer.permissions.review_entries||!reviewer.permissions.view_team)return Response.json({error:"Choose an active manager with review and team-view rights before submitting."},{status:400})
+      if(current.ownerEmail?.toLowerCase()!==access.email.toLowerCase())return Response.json({error:"Only the account owner can route a personal timesheet for review."},{status:403})
+      const reviewer=await resolveSubmissionReviewer(access.email)
+      if(!reviewer)return Response.json({error:"No active manager currently has both team-view and approval rights. Ask an administrator to assign a reviewer before submitting."},{status:400})
+      if(patch.reviewManagerEmail&&patch.reviewManagerEmail.toLowerCase()!==reviewer.email)return Response.json({error:"Reviewing manager is assigned by the company and cannot be changed during submission."},{status:403})
+      patch={...patch,reviewManagerEmail:reviewer.email}
     }
 
     if (patch.status === "approved" || patch.status === "rejected") {
@@ -252,6 +255,8 @@ export async function PATCH(
 
     if(patch.status==="approved"){
       if(access.role!=="account_manager"&&!access.permissions.send_to_accounts)return Response.json({error:"Approval requires permission to forward evidence to business accounts."},{status:403})
+      const ownerIdentity=current.ownerEmail?(await listAccountIdentities([current.ownerEmail]))[0]:null
+      if(!ownerIdentity)return Response.json({error:"Only a registered account can be approved into the business-accounts workflow."},{status:409})
       const ownerRole=current.ownerEmail?await getEffectiveUserRole(current.ownerEmail):null
       const revision=patch.expectedRevision??current.revision
       if(!revision)return Response.json({error:"Refresh this entry before approving."},{status:409})
@@ -261,39 +266,57 @@ export async function PATCH(
     }
     const revision=patch.expectedRevision??current.revision
     if(!revision)return Response.json({error:"Refresh this timesheet before saving a status or editing it."},{status:409})
+    if(patch.status==="submitted"){
+      const submissionDeadline=await getTimesheetSubmissionDeadline()
+      if(submissionDeadline&&Date.now()>=Date.parse(submissionDeadline))return Response.json({error:`The organization submission deadline passed on ${new Date(submissionDeadline).toLocaleString()}. Contact an administrator if an exception is needed.`},{status:409})
+      const submitted=await submitTimeEntryWithAudit(
+        access.email,
+        id,
+        patch as typeof patch & {status:"submitted"},
+        access.includeAll,
+        access.canReview ? access.email : undefined,
+        revision,
+        access.email,
+        current.status,
+        changedFieldMetadata(patch),
+        access.role,
+        getAuditContext(req),
+      )
+      if(!submitted){
+        const latestDeadline=await getTimesheetSubmissionDeadline()
+        if(latestDeadline&&Date.now()>=Date.parse(latestDeadline))return Response.json({error:`The organization submission deadline passed on ${new Date(latestDeadline).toLocaleString()}. Contact an administrator if an exception is needed.`},{status:409})
+        return Response.json({error:"Evidence changed. Refresh before submitting again."},{status:409})
+      }
+      return Response.json({entry:submitted})
+    }
     if(patch.status==="rejected"){
       const rejected=await rejectSubmittedEntry(id,access.email,revision,patch.reviewNote!.trim(),getAuditContext(req))
       if(!rejected)return Response.json({error:"Evidence changed or was already reviewed. Refresh before rejecting."},{status:409})
       return Response.json({entry:rejected})
     }
-    const entry = await updateTimeEntry(
+    const entry = await updateTimeEntryWithAudit(
       access.email,
       id,
       patch,
       access.includeAll,
       access.canReview ? access.email : undefined,
       revision,
+      {
+        actorEmail: access.email,
+        action: patch.status ? auditActionForStatus(patch.status) : "entry_updated",
+        metadata: {
+          fromStatus: current.status,
+          toStatus: patch.status ?? current.status,
+          ...changedFieldMetadata(patch),
+        },
+        context: getAuditContext(req),
+      },
     )
 
     if (!entry) {
       if(patch.expectedRevision)return Response.json({error:"Evidence changed. Refresh before recording this decision."},{status:409})
       return Response.json({ error: "Entry not found." }, { status: 404 })
     }
-
-    await recordAuditEvent({
-      actorEmail: access.email,
-      action: patch.status
-        ? auditActionForStatus(patch.status)
-        : "entry_updated",
-      targetType: "time_entry",
-      targetId: id,
-      metadata: {
-        fromStatus: current.status,
-        toStatus: entry.status,
-        ...changedFieldMetadata(patch),
-      },
-      ...getAuditContext(req),
-    })
 
     return Response.json({ entry })
   } catch (err) {

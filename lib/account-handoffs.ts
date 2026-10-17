@@ -56,6 +56,7 @@ export async function createHandoffs(ids:string[],actor:string,recipient:string,
       jsonb_build_object('contractor',contractor,'ownerEmail',owner_email,'workerCategory',COALESCE(${JSON.stringify(categories)}::jsonb->>id::text,'contractor'),'date',work_date,'hours',hours,'project',project,'description',description,'reviewedBy',reviewed_by,'reviewedAt',reviewed_at)
     FROM time_entries WHERE id=ANY(${ids}::uuid[]) AND status='approved'
       AND payout_eligible_at IS NULL
+      AND EXISTS(SELECT 1 FROM account_identities a WHERE lower(a.email)=lower(time_entries.owner_email))
       AND reviewed_by IS NOT NULL AND lower(reviewed_by)<>lower(owner_email)
       AND (${includeAll} OR lower(owner_email)=${actor.toLowerCase()})
     ON CONFLICT DO NOTHING RETURNING id,entry_id`
@@ -112,15 +113,16 @@ export async function approveAndForward(id:string,actor:string,revision:string,c
   const rows=await sql`WITH changed AS (
     UPDATE time_entries SET status='approved',reviewed_by=${actor.toLowerCase()},reviewed_at=now(),review_note=NULL,updated_at=now()
     WHERE id=${id}::uuid AND status='submitted' AND updated_at=${revision}::timestamptz
-      AND lower(owner_email)<>${actor.toLowerCase()} AND payout_eligible_at IS NULL RETURNING *
+      AND lower(owner_email)<>${actor.toLowerCase()} AND payout_eligible_at IS NULL
+      AND EXISTS(SELECT 1 FROM account_identities a WHERE lower(a.email)=lower(time_entries.owner_email)) RETURNING *
   ), forwarded AS (
     INSERT INTO account_handoffs(entry_id,assigned_to,handed_by,source_updated_at,evidence)
     SELECT id,'business_accounts',${actor.toLowerCase()},updated_at,
       jsonb_build_object('contractor',contractor,'ownerEmail',owner_email,'workerCategory',${category}::text,'date',work_date,'hours',hours,'project',project,'description',description,'reviewedBy',reviewed_by,'reviewedAt',reviewed_at)
     FROM changed RETURNING id,entry_id
   ), audited AS (
-    INSERT INTO audit_events(actor_email,action,target_type,target_id,metadata,ip_address,user_agent)
-    SELECT ${actor.toLowerCase()},'entry_approved','time_entry',entry_id::text,jsonb_build_object('handoffId',id,'forwardedToBusinessAccounts',true),${context.ipAddress},${context.userAgent}
+    INSERT INTO audit_events(actor_email,action,target_type,target_id,metadata,ip_address,user_agent,request_method,request_path,request_id)
+    SELECT ${actor.toLowerCase()},'entry_approved','time_entry',entry_id::text,jsonb_build_object('handoffId',id,'forwardedToBusinessAccounts',true),${context.ipAddress},${context.userAgent},${context.requestMethod},${context.requestPath},${context.requestId}
     FROM forwarded RETURNING target_id
   ) SELECT id,owner_email AS "ownerEmail",contractor_number AS "contractorNumber",contractor,work_date::text AS date,hours::float8 AS hours,project,description,status,
     reviewed_by AS "reviewedBy",reviewed_at::text AS "reviewedAt",review_note AS "reviewNote",review_manager_email AS "reviewManagerEmail",updated_at::text AS revision,false AS "reviewEligible",false AS "payoutEligible"
@@ -139,7 +141,7 @@ export type AccountChecks = { accuracy: boolean; compliance: boolean; housekeepi
  * @param note - Required human explanation, never AI-applied automatically.
  * @param checks - Explicit accuracy, compliance, and housekeeping acknowledgments.
  * @param manager - Active validated manager for a return-to-manager action.
- * @param context - Audit IP/user-agent, stored only in the security audit table.
+ * @param context - Request metadata, stored only in the security audit table.
  * @returns Promise<number> equal to the complete selection or zero for any stale item.
  */
 export async function actOnHandoffs(selection:{id:string;version:number}[],actor:string,action:AccountBatchAction,note:string,checks:AccountChecks,manager:string|null,context:AuditContext):Promise<number>{
@@ -172,9 +174,9 @@ export async function actOnHandoffs(selection:{id:string;version:number}[],actor
     UPDATE account_handoffs h SET review_state=${state},review_note=${note},review_checks=${JSON.stringify(checks)}::jsonb,
       account_reviewed_by=${actor.toLowerCase()},account_reviewed_at=now(),review_version=h.review_version+1
     FROM eligible x JOIN changed_entries e ON e.id=x.entry_id WHERE h.id=x.id RETURNING h.id
-  ) INSERT INTO audit_events(actor_email,action,target_type,target_id,metadata,ip_address,user_agent)
+  ) INSERT INTO audit_events(actor_email,action,target_type,target_id,metadata,ip_address,user_agent,request_method,request_path,request_id)
     SELECT ${actor.toLowerCase()},${action==="authorize_eligibility"?"account_eligibility_authorized":"account_timesheets_returned"},'account_handoff',id::text,
-      jsonb_build_object('state',${state}::text,'note',${note}::text,'checks',${JSON.stringify(checks)}::jsonb,'manager',${manager}::text,'eligibilityOnly',true),${context.ipAddress},${context.userAgent}
+      jsonb_build_object('state',${state}::text,'note',${note}::text,'checks',${JSON.stringify(checks)}::jsonb,'manager',${manager}::text,'eligibilityOnly',true),${context.ipAddress},${context.userAgent},${context.requestMethod},${context.requestPath},${context.requestId}
     FROM changed_handoffs RETURNING target_id`
   return rows.length
 }

@@ -9,6 +9,10 @@
     {
       "path": "/tanovo-time/api/security?scheduled=1",
       "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/tanovo-time/api/timesheet-period-reminders?scheduled=1",
+      "schedule": "0 6 * * *"
     }
   ]
 }

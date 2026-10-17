@@ -1,29 +1,33 @@
 /**
- * Provides technology-manager shortcuts for access administration and AI risks.
- * Existing entry management, approvals, reports, and audit tools remain available.
- * Permission changes stay in the existing explicit Edit and Save workflow.
+ * Defines the three top-level command groups in the technology admin dashboard.
+ * Each button opens a focused subcommand window managed by the parent panel.
  */
 "use client"
-import { ShieldCheck, Users,CalendarClock } from "lucide-react"
+import { BarChart3, ShieldCheck, Timer } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { AddPerson } from "./add-person"
 
 /**
- * Renders the technology administrator's operational navigation controls.
- * @param props.onDirectory - Callback opening employee and permission management.
- * @param props.onSecurity - Callback opening saved periodic AI security reports.
- * @returns JSX.Element containing technology-manager navigation buttons.
+ * Renders the admin dashboard's Admin, Reports, and Timesheets command groups.
+ * @param props.onAdmin - Opens patron, rights, lifecycle, and security controls.
+ * @param props.onReports - Opens log, analytics, and activity report choices.
+ * @param props.onTimesheets - Opens timesheet tracking controls.
+ * @returns JSX.Element containing only the three admin dashboard commands.
  */
-export function AdminWorkspace({ onDirectory, onSecurity,onLifecycle }: {
-  onDirectory: () => void; onSecurity: () => void;onLifecycle?:()=>void
+export function AdminWorkspace({ activeSection, onAdmin, onReports, onTimesheets }: {
+  activeSection: "admin" | "reports" | "timesheets" | null
+  onAdmin: () => void
+  onReports: () => void
+  onTimesheets: () => void
 }) {
-  return <section aria-label="Technology management" className="tech-surface flex flex-wrap items-center gap-3 border-y border-slate-200 bg-white py-2 text-slate-950">
-    <h2 className="text-sm font-semibold">Access and security</h2>
-    <div className="flex flex-wrap gap-2">
-      <AddPerson admin/>
-      <Button variant="outline" className="feature-control" data-feature="access" onClick={onDirectory}><Users className="size-4" />Employee access</Button>
-      <Button variant="outline" className="feature-control" data-feature="security" onClick={onSecurity}><ShieldCheck className="size-4" />AI security reports</Button>
-      {onLifecycle&&<Button variant="outline" className="feature-control" data-feature="access" onClick={onLifecycle}><CalendarClock className="size-4"/>Access lifecycle</Button>}
-    </div>
-  </section>
+  return <nav aria-label="Admin dashboard commands" className="admin-command-canvas flex min-h-12 w-full flex-wrap items-center gap-1 border-y border-sky-200 px-1 py-1 text-slate-950">
+    <Button aria-current={activeSection === "admin" ? "page" : undefined} variant="ghost" className="feature-control min-h-10 min-w-24 flex-1 justify-center border-transparent px-3 text-sky-950" data-feature="access" onClick={onAdmin}>
+      <ShieldCheck className="size-4" />Admin
+    </Button>
+    <Button aria-current={activeSection === "reports" ? "page" : undefined} variant="ghost" className="feature-control min-h-10 min-w-24 flex-1 justify-center border-transparent px-3 text-orange-950" data-feature="reports" onClick={onReports}>
+      <BarChart3 className="size-4" />Reports
+    </Button>
+    <Button aria-current={activeSection === "timesheets" ? "page" : undefined} variant="ghost" className="feature-control min-h-10 min-w-24 flex-1 justify-center border-transparent px-3 text-sky-950" data-feature="timesheets" onClick={onTimesheets}>
+      <Timer className="size-4" />Timesheets
+    </Button>
+  </nav>
 }

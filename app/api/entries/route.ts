@@ -39,7 +39,8 @@ const createSchema = z.object({
  *
  * The returned includeAll flag is true only for managers and administrators. API
  * handlers pass this flag to the database layer so owner scoping is enforced by
- * the SQL statement instead of trusting client-side navigation.
+ * the SQL statement instead of trusting client-side navigation. Entry-level
+ * rights checks run in bounded batches to avoid serial database round trips.
  *
  * @returns Access metadata for the signed-in user, or null when unauthorized.
  */
@@ -79,13 +80,18 @@ export async function GET() {
     let entries = await listTimeEntries(access.email, access.includeAll)
     const resolve = createReviewAccess(access.email, access)
     const eligible=[]
-    for(const entry of entries){
-      const scope = await resolve(entry)
-      if(scope.visible)eligible.push({...entry,reviewEligible:scope.reviewable,approvalEligible:scope.reviewable&&(access.role==="account_manager"||access.permissions.send_to_accounts)})
+    for(let offset=0;offset<entries.length;offset+=50){
+      const batch=entries.slice(offset,offset+50)
+      const scopes=await Promise.all(batch.map(entry=>resolve(entry)))
+      for(let index=0;index<batch.length;index++){
+        const entry=batch[index],scope=scopes[index]
+        if(scope.visible)eligible.push({...entry,reviewEligible:scope.reviewable,approvalEligible:scope.reviewable&&(access.role==="account_manager"||access.permissions.send_to_accounts)})
+      }
     }
     const identities=await listAccountIdentities(eligible.flatMap(entry=>entry.ownerEmail?[entry.ownerEmail]:[]))
+    const identityByEmail=new Map(identities.map(identity=>[identity.email,identity]))
     return Response.json({ entries:eligible.map(entry=>{
-      const identity=identities.find(person=>person.email===entry.ownerEmail?.toLowerCase())
+      const identity=entry.ownerEmail?identityByEmail.get(entry.ownerEmail.toLowerCase()):undefined
       return identity?{...entry,contractor:identity.officialName,contractorNumber:identity.contractorNumber,shortReference:identity.shortReference,companyCode:identity.companyCode,employeeId:identity.employeeId}:entry
     }) },{headers:{"Cache-Control":"no-store"}})
   } catch (err) {

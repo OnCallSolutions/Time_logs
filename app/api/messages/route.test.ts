@@ -7,12 +7,12 @@ vi.mock("@/lib/account-identities",()=>({listAccountIdentities:vi.fn(async()=>[]
 vi.mock("@/lib/message-history-store",()=>({historyPage:vi.fn(async()=>[])}))
 vi.mock("@/auth",()=>({auth:vi.fn()}))
 vi.mock("@/lib/effective-permissions",()=>({getEffectivePermissions:vi.fn()}))
-vi.mock("@/lib/collaboration",()=>({actorRoster:vi.fn(),listMessages:vi.fn(),sendMessage:vi.fn(),readMessages:vi.fn(),changeMessage:vi.fn(),editableMessage:vi.fn()}))
+vi.mock("@/lib/collaboration",()=>({actorRoster:vi.fn(),listMessages:vi.fn(),sendMessage:vi.fn(),readMessages:vi.fn(),hideMessageFor:vi.fn(),changeMessage:vi.fn(),editableMessage:vi.fn()}))
 vi.mock("@/lib/message-keys",()=>({publicMessageKeys:vi.fn()}))
 vi.mock("@/lib/db",()=>({recordAuditEvent:vi.fn()}))
 import {auth} from "@/auth"
 import {getEffectivePermissions} from "@/lib/effective-permissions"
-import {listMessages,sendMessage,actorRoster,readMessages,changeMessage,editableMessage} from "@/lib/collaboration"
+import {listMessages,sendMessage,actorRoster,readMessages,hideMessageFor,changeMessage,editableMessage} from "@/lib/collaboration"
 import {resolvePermissions} from "@/lib/permissions"
 import {listAccountIdentities} from "@/lib/account-identities"
 import {GET,POST,PATCH,DELETE} from "./route"
@@ -51,6 +51,25 @@ it("records read receipts with authenticated identity rather than request identi
   expect((await PATCH(request("PATCH",{action:"read",ids:[messageId],email:"victim@example.com"}))).status).toBe(200)
   expect(readMessages).toHaveBeenCalledWith("employee@example.com",true,[messageId])
 })
+it("deletes a message only from the authenticated viewer's inbox",async()=>{
+  vi.mocked(hideMessageFor).mockResolvedValue(true)
+  const response=await PATCH(request("PATCH",{action:"delete_for_me",id:messageId}))
+  expect(response.status).toBe(200)
+  expect(hideMessageFor).toHaveBeenCalledWith("employee@example.com",true,messageId)
+  expect(changeMessage).not.toHaveBeenCalled()
+})
+it("unsends for everyone only through the manager sender action",async()=>{
+  vi.mocked(getEffectivePermissions).mockResolvedValue({role:"manager",permissions:resolvePermissions("manager",{send_messages:true})})
+  vi.mocked(changeMessage).mockResolvedValue(true)
+  const response=await DELETE(request("DELETE",{id:messageId}))
+  expect(response.status).toBe(200)
+  expect(changeMessage).toHaveBeenCalledWith("employee@example.com",false,messageId,null)
+})
+it("returns a conflict when the sender window for unsending has expired",async()=>{
+  vi.mocked(getEffectivePermissions).mockResolvedValue({role:"manager",permissions:resolvePermissions("manager",{send_messages:true})})
+  vi.mocked(changeMessage).mockResolvedValue(false)
+  expect((await DELETE(request("DELETE",{id:messageId}))).status).toBe(409)
+})
 it("does not allow a recipient to edit or delete another sender's message",async()=>{
   expect((await PATCH(request("PATCH",{action:"edit",id:messageId,body:"Changed"}))).status).toBe(403)
   expect((await DELETE(request("DELETE",{id:messageId}))).status).toBe(403)
@@ -62,16 +81,25 @@ it("rejects an expired sender edit",async()=>{
   vi.mocked(changeMessage).mockResolvedValue(false)
   expect((await PATCH(request("PATCH",{action:"edit",id:messageId,body:"Changed"}))).status).toBe(409)
 })
-it("passes administrator deadline exemption to scoped storage",async()=>{
+it("allows an administrator to edit their own messages after the sender deadline",async()=>{
+  vi.mocked(auth).mockResolvedValue({user:{email:"admin@example.com"}} as never)
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"admin",permissions:resolvePermissions("admin")})
-  vi.mocked(editableMessage).mockResolvedValue({sender_email:"employee@example.com",recipient_email:null} as never)
+  vi.mocked(editableMessage).mockResolvedValue({sender_email:"admin@example.com",recipient_email:null} as never)
   vi.mocked(changeMessage).mockResolvedValue(true)
   expect((await PATCH(request("PATCH",{action:"edit",id:messageId,body:"Changed"}))).status).toBe(200)
-  expect(changeMessage).toHaveBeenCalledWith("employee@example.com",true,messageId,"Changed",undefined)
+  expect(changeMessage).toHaveBeenCalledWith("admin@example.com",true,messageId,"Changed",undefined)
+})
+it("does not let an administrator edit a message sent by someone else",async()=>{
+  vi.mocked(auth).mockResolvedValue({user:{email:"admin@example.com"}} as never)
+  vi.mocked(getEffectivePermissions).mockResolvedValue({role:"admin",permissions:resolvePermissions("admin")})
+  vi.mocked(editableMessage).mockResolvedValue({sender_email:"employee@example.com",recipient_email:null} as never)
+  expect((await PATCH(request("PATCH",{action:"edit",id:messageId,body:"Changed"}))).status).toBe(403)
+  expect(changeMessage).not.toHaveBeenCalled()
 })
 it("refuses downgrading encrypted messages to plaintext",async()=>{
+  vi.mocked(auth).mockResolvedValue({user:{email:"admin@example.com"}} as never)
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"admin",permissions:resolvePermissions("admin")})
-  vi.mocked(editableMessage).mockResolvedValue({encrypted_payload:{keys:{}}} as never)
+  vi.mocked(editableMessage).mockResolvedValue({sender_email:"admin@example.com",encrypted_payload:{keys:{}}} as never)
   expect((await PATCH(request("PATCH",{action:"edit",id:messageId,body:"Plaintext"}))).status).toBe(400)
   expect(changeMessage).not.toHaveBeenCalled()
 })

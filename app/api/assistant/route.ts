@@ -41,7 +41,7 @@ export async function POST(request: Request): Promise<Response> {
     const rosterIdentities=rosterActors.length?await listAccountIdentities(rosterActors.map(actor=>actor.email)):[]
     const roster=rosterActors.map(actor=>({email:actor.email,officialName:rosterIdentities.find(item=>item.email===actor.email.toLowerCase())?.officialName??"Company account",role:actor.role,active:actor.accessStatus==="active"}))
     const reviewers=access.permissions.submit_entries?await readSubmissionManagers():null
-    const reviewChoices=reviewers?.ok?(await reviewers.json() as {managers:Array<{email:string;displayName:string}>}).managers:[]
+    const reviewChoice=reviewers?.ok?(await reviewers.json() as {manager:{email:string;displayName:string;assignment:string}|null}).manager:null
     const { output } = await generateText({
       model: process.env.ASSISTANT_MODEL || "openai/gpt-4.1-mini", output: Output.object({ schema: assistantResponseSchema }),
       abortSignal: AbortSignal.timeout(22_000), maxRetries: 0, maxOutputTokens: 5000,
@@ -51,7 +51,7 @@ export async function POST(request: Request): Promise<Response> {
         "Never invent IDs, revisions, recipients, dates, hours or permissions. Ask when details are missing. " +
         "For timesheet changes copy the exact id and revision. For message receipts use only provided message IDs. " +
         "For rights changes select an exact email from the supplied authorized directory and only rights you currently hold if you are a manager. " +
-        "When submitting personal entries, select a reviewer only from supplied reviewingManagers. " +
+        "When submitting personal entries, use only the supplied reviewingManager assignment; never ask the actor to select another reviewer. " +
         "Propose at most five actions. " +
         "create_entries creates drafts owned by the current actor; all names must use their official name. " +
         "compose_message opens a draft for the user to send securely, it does not send. " +
@@ -59,7 +59,7 @@ export async function POST(request: Request): Promise<Response> {
         "The context contains at most 100 entries, so do not describe subset totals as company-wide totals. " +
         `Today is ${new Date().toISOString().slice(0,10)}. Return plain text without HTML or executable content.`,
       prompt: JSON.stringify({ actor: { email, name: identity?.officialName || session.user?.name || email, role: access.role, permissions: access.permissions },
-        totalVisible: entries.length, included: context.length, entries: context, inbox:messageContext,directory:roster,reviewingManagers:reviewChoices,conversation: input.messages, userSharedMessage: input.messageContext ?? null }),
+        totalVisible: entries.length, included: context.length, entries: context, inbox:messageContext,directory:roster,reviewingManager:reviewChoice,conversation: input.messages, userSharedMessage: input.messageContext ?? null }),
     })
     const current = await getEffectivePermissions(email)
     if (!current.role || JSON.stringify(current) !== JSON.stringify(access)) return Response.json({ error: "Your permissions changed. Ask again to refresh the context." }, { status: 409 })
