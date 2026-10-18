@@ -16,6 +16,7 @@ import { GET as readSubmissionManagers } from "@/app/api/submission-managers/rou
 import type { TimeEntry } from "@/lib/types"
 import { listIssues } from "@/lib/issues-store"
 import { listTimesheetPeriods } from "@/lib/db"
+import { getAiModel } from "@/lib/ai-models"
 export const maxDuration = 30
 
 /** @param request - Bounded same-origin chat request. @returns Promise<Response> with plain text and signed proposals; never executes model actions. */
@@ -30,12 +31,14 @@ export async function POST(request: Request): Promise<Response> {
     actorEmail=email
     const access = await getEffectivePermissions(email)
     if (!access.role) return Response.json({ error: "Forbidden." }, { status: 403 })
+    const navigationActions = ["home", "period-index", "log", "personal", "approvals", "report", "my-report", "activity", "admin", "permissions", "accounts", "periods", "messages"] as const
+    const availablePages = navigationActions.filter(destination => canOfferAction({ kind: "navigate", destination }, access))
     if (!await allowAssistantRequest(email)) return Response.json({ error: "Please wait a minute before asking again." }, { status: 429 })
     const latest=input.messages.at(-1)
     if(latest?.role!=="user")return Response.json({error:"Send a new user message to continue."},{status:400})
     const conversation=await getAssistantConversation(email,input.workspaceContext)
     await saveAssistantMessage(conversation.id,email,input.workspaceContext,"user",latest.content)
-    const modelName=process.env.ASSISTANT_MODEL||"openai/gpt-4.1-mini"
+    const modelName=getAiModel("assistant")
     runId=await startAssistantRun(email,input.workspaceContext,modelName,latest.content.length+(input.handoffContext?.length??0)+(input.messageContext?.length??0))
     const needsMessages=input.workspaceContext==="main"||/message/i.test(input.workspaceContext)
     const needsDirectory=input.workspaceContext==="main"||/admin|access|people|directory/i.test(input.workspaceContext)
@@ -75,10 +78,12 @@ export async function POST(request: Request): Promise<Response> {
         "Propose at most five actions. " +
         "create_entries creates drafts owned by the current actor; all names must use their official name. " +
         "compose_message opens a draft for the user to send securely, it does not send. " +
-        "For controls outside your action vocabulary offer navigation to the appropriate workspace; never claim support for executing them. " +
+        "You can propose only the typed commands in the response schema: navigate to an authorized workspace; create, edit or delete timesheet entries; submit, approve or reject entries; prepare a message draft; mark messages read or delete an authorized message; and change permitted account rights. " +
+        "Never pretend to click interface controls. Translate a requested click into one of these app commands; if no matching command exists, explain that and navigate to the relevant page when useful. Each command is shown in a chat review popup and executes only after the user confirms it. " +
         "The context contains at most 100 entries, so do not describe subset totals as company-wide totals. " +
         `Today is ${new Date().toISOString().slice(0,10)}. Return plain text without HTML or executable content.`,
       prompt: JSON.stringify({ actor: { email, name: identity?.officialName || session.user?.name || email, role: access.role, permissions: access.permissions },
+        availablePages,
         totalVisible: workspaceEntries.length, included: context.length, entries: context, inbox:messageContext,directory:roster,reviewingManager:reviewChoice,
         timesheetPeriods:timesheetPeriods.map(period=>({id:period.id,name:period.name,startDate:period.startDate,endDate:period.endDate})),selectedTimesheetPeriod:selectedPeriod??null,
         adminIssueRecords:needsIssueScrutiny?issueRecords.slice(0,200).map(issue=>({reference:issue.reference,reporterEmail:issue.reporterEmail,operation:issue.operation,route:issue.route,httpStatus:issue.httpStatus,errorMessage:issue.errorMessage,reporterDetails:issue.details,status:issue.status,priority:issue.priority,internalRepairNotes:issue.internalNote,similarReports:issue.similarReports,createdAt:issue.createdAt,updatedAt:issue.updatedAt})):undefined,

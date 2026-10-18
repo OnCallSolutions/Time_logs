@@ -13,7 +13,7 @@ export const assistantEntrySchema = z.object({
   hours: z.number().positive().max(24), project: z.string().trim().min(1).max(160), description: z.string().max(2000),
 }).strict()
 export const assistantActionSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("navigate"), destination: z.enum(["log", "approvals", "report", "admin", "permissions", "accounts", "messages"]) }).strict(),
+  z.object({ kind: z.literal("navigate"), destination: z.enum(["home", "period-index", "log", "personal", "approvals", "report", "my-report", "activity", "admin", "permissions", "accounts", "periods", "messages"]) }).strict(),
   z.object({ kind: z.literal("create_entries"), periodId:z.string().uuid(), periodName:z.string().trim().min(2).max(100), entries: z.array(assistantEntrySchema).min(1).max(30) }).strict(),
   z.object({ kind: z.literal("edit_entry"), id: z.string().uuid(), expectedRevision: z.string().min(1).max(100),
     fields: z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), hours: z.number().positive().max(24).optional(),
@@ -56,11 +56,18 @@ export function canOfferAction(action: AssistantAction, access: { role: UserRole
   if (action.kind === "update_entry") return ["approved", "rejected"].includes(action.status)
     ? p.review_entries || p.review_manager_entries : p.submit_entries
   switch (action.destination) {
-    case "accounts": return (role === "admin" || role === "account_manager") && p.view_accounts
-    case "admin": return role === "admin"
-    case "permissions": return (role === "admin" || role === "manager") && p.delegate_permissions
-    case "report": return p.view_reports
+    case "home":
+    case "messages": return true
+    case "period-index": return p.create_entries || p.view_all_timesheets || p.manage_timesheet_periods
+    case "log": return p.create_entries || p.view_all_timesheets
+    case "personal": return p.create_entries || p.view_personal_reports
     case "approvals": return p.review_entries || p.review_manager_entries || p.ai_review
-    default: return true
+    case "report": return p.view_reports
+    case "my-report": return p.view_personal_reports
+    case "activity": return p.view_personal_reports || role === "admin"
+    case "admin": return role === "admin"
+    case "permissions": return p.delegate_permissions && (role === "admin" || role === "manager")
+    case "accounts": return p.view_accounts && (role === "admin" || role === "account_manager")
+    case "periods": return p.manage_timesheet_periods
   }
 }

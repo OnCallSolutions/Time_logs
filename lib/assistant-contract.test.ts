@@ -21,6 +21,9 @@ it("uses live role rights to filter navigation and mutation proposals",()=>{
   const employee={role:"employee" as const,permissions:resolvePermissions("employee")}
   expect(canOfferAction({kind:"navigate",destination:"admin"},employee)).toBe(false)
   expect(canOfferAction({kind:"navigate",destination:"log"},employee)).toBe(true)
+  expect(canOfferAction({kind:"navigate",destination:"periods"},employee)).toBe(false)
+  expect(canOfferAction({kind:"navigate",destination:"my-report"},employee)).toBe(true)
+  expect(canOfferAction({kind:"navigate",destination:"activity"},employee)).toBe(true)
   expect(canOfferAction({kind:"compose_message",recipient:"manager@example.com",body:"Hi"},employee)).toBe(false)
   const manager={role:"manager" as const,permissions:resolvePermissions("manager")}
   expect(canOfferAction({kind:"compose_message",recipient:"employee@example.com",body:"Hi"},manager)).toBe(true)

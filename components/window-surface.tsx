@@ -154,9 +154,14 @@ export function WindowSurface({ title, onBack, disabled = false, children,sessio
     ["ne", "right-0 top-0 size-4 cursor-nesw-resize"], ["nw", "left-0 top-0 size-4 cursor-nwse-resize"],
     ["se", "bottom-0 right-0 size-4 cursor-nwse-resize"], ["sw", "bottom-0 left-0 size-4 cursor-nesw-resize"],
   ] as const
+  /** Switches between the bounded workspace and the full viewport. */
+  function toggleWindowSize() {
+    setExpanded(value => !value)
+  }
   return createPortal(
     <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title}
       data-window-expanded={expanded}
+      data-window-size={expanded ? "full" : "compact"}
       data-window-resizable={compact && resizable ? "true" : undefined}
       data-session-guard={sessionGuard?"true":undefined}
       className={`window-surface tech-surface fixed inset-0 z-[70] flex min-h-0 ${compactView ? "items-center justify-center bg-black/45 p-4" : "flex-col bg-background p-0"}`}>
@@ -165,9 +170,10 @@ export function WindowSurface({ title, onBack, disabled = false, children,sessio
           <Button variant="outline" size="sm" disabled={disabled} onClick={onBack} className="border-orange-200 bg-white/80 text-slate-800 hover:bg-orange-100"><ArrowLeft className="size-4" />Back</Button>
           <h1 className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-900">{title}</h1>
           {showSizeToggle&&<div className="flex items-center gap-1">
-            <Button variant="outline" size="icon-sm" title={expanded ? "Restore window" : "Expand window"}
-              aria-label={expanded ? "Restore window" : "Expand window"} onClick={() => setExpanded(value => !value)} className="border-sky-200 bg-white/80 text-sky-900 hover:bg-sky-100">
+            <Button variant="outline" size="sm" title={expanded ? "Restore to a resizable window" : "Expand to full screen"}
+              aria-label={expanded ? "Restore size" : "Expand"} aria-pressed={expanded} onClick={toggleWindowSize} className="border-sky-200 bg-white/80 text-sky-900 hover:bg-sky-100">
               {expanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+              {expanded ? "Restore size" : "Expand"}
             </Button>
           </div>}
         </div>

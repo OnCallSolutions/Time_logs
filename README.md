@@ -165,6 +165,12 @@ Keep secrets in `.env.local` locally and server-side environment settings on Ver
 | `AUTH_MICROSOFT_ENTRA_ID_SECRET` | Microsoft client secret value, not its secret ID |
 | `AUTH_MICROSOFT_ENTRA_ID_ISSUER` | Tenant issuer URL, normally `https://login.microsoftonline.com/<tenant-id>/v2.0` |
 | `AI_GATEWAY_API_KEY` | AI Gateway credential for local or externally authenticated AI requests |
+| `ASSISTANT_MODEL` | Optional model override for the main and contextual workspace assistant |
+| `TIMESHEET_EXTRACTION_MODEL` | Optional model override for timesheet note extraction |
+| `SUBMISSION_PREPARATION_MODEL` | Optional model override for personal submission-readiness advice |
+| `TIMESHEET_REVIEW_MODEL` | Optional model override for manager timesheet-review recommendations |
+| `ACCOUNT_REVIEW_MODEL` | Optional model override for account-evidence review |
+| `SECURITY_REVIEW_MODEL` | Optional model override for scheduled security monitoring |
 | `ALLOWED_EMAILS` | Optional comma-separated baseline access list |
 | `CONTRACTOR_EMAILS` | Optional outsourced-contractor access list; baseline `ALLOWED_EMAILS` also resolves to contractors |
 | `ADMIN_EMAILS` | Admin bootstrap/recovery identities |
@@ -172,7 +178,6 @@ Keep secrets in `.env.local` locally and server-side environment settings on Ver
 | `EMPLOYEE_EMAILS` | Employee identities in `Development` |
 | `WORKER_EMAILS` | Legacy employee-list compatibility |
 | `ACCOUNT_MANAGER_EMAILS` | Optional account-manager role list; control rights require separate admin grants |
-| `ACCOUNT_REVIEW_MODEL` | Optional account-review model override |
 | `CRON_SECRET` | Server-only authentication token for scheduled security monitoring in `Development` |
 
 Configure explicit access lists for restricted environments. Without environment access lists, the current policy may allow authenticated Microsoft accounts by default. In `Development`, managed active/denied/blocked assignments participate in access resolution; environment recovery admins remain a recovery path.

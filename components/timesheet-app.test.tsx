@@ -586,7 +586,7 @@ describe("TimesheetApp admin directory", () => {
     await user.click(within(dialog).getByText("Team review and reporting"))
     expect(within(dialog).getByLabelText("Export visible timesheets")).toBeInTheDocument()
     expect(within(dialog).getByRole("button", { name: "Account manager" }).parentElement).toHaveClass("role-choice-grid")
-    await user.click(within(dialog).getByRole("button", { name: "Restore window" }))
+    await user.click(within(dialog).getByRole("button", { name: "Restore size" }))
     const resizeEdge = dialog.querySelector('[data-resize-edge="e"]') as HTMLElement
     fireEvent.pointerDown(resizeEdge, { pointerId: 7, clientX: 100, clientY: 100 })
     fireEvent.pointerMove(resizeEdge, { pointerId: 7, clientX: 120, clientY: 100 })

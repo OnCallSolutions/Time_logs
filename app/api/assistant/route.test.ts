@@ -54,6 +54,7 @@ it("loads persisted history and only submitted entries for the active approvals 
   expect(getAssistantConversation).toHaveBeenCalledWith("manager@example.com","Approvals")
   expect(readMessages).not.toHaveBeenCalled()
   const generation=vi.mocked(generateText).mock.calls[0][0]
+  expect(generation.model).toBe("openai/gpt-5.4-mini")
   const supplied=JSON.parse(generation.prompt as string)
   expect(supplied.entries).toHaveLength(1)
   expect(supplied.entries[0].status).toBe("submitted")

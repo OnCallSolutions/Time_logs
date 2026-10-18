@@ -12,6 +12,7 @@ import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { listTimesheetPeriods } from "@/lib/db"
 import { checkApiRateLimit } from "@/lib/api-rate-limit"
+import { getAiModel } from "@/lib/ai-models"
 
 export const maxDuration = 30
 const MAX_REQUEST_BYTES=16_384
@@ -99,7 +100,7 @@ export async function POST(req: Request) {
     const today = new Date().toISOString().slice(0, 10)
 
     const { output } = await generateText({
-      model: "openai/gpt-4.1-mini",
+      model: getAiModel("timesheetExtraction"),
       output: Output.object({ schema }),
       system:
         "You are a meticulous timesheet assistant. Extract every distinct unit of work logged in the notes into structured time entries. " +

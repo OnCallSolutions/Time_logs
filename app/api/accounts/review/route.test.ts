@@ -38,6 +38,7 @@ it("pseudonymizes identities and does not modify queue state",async()=>{
   expect(prompt).not.toContain("supplier@example.com")
   expect(prompt).not.toContain("manager@example.com")
   expect(prompt).toContain("person-1")
+  expect(vi.mocked(generateText).mock.calls[0][0].model).toBe("openai/gpt-5.4-mini")
 })
 it("invalidates advice if the source changes during model execution",async()=>{
   vi.mocked(listHandoffs).mockResolvedValueOnce([{id,current:true,review_state:"pending",review_version:0,evidence:{ownerEmail:"supplier@example.com",reviewedBy:"manager@example.com"}}] as never).mockResolvedValueOnce([])

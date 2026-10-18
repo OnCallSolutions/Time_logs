@@ -22,7 +22,9 @@ it("submits a question and only navigates after confirming the returned proposal
   expect(fetch.mock.calls[0][0]).toBe("/tanovo-time/api/assistant/conversations")
   expect(fetch.mock.calls[1][0]).toBe("/tanovo-time/api/timesheet-periods")
   expect(fetch.mock.calls[2][1]).toMatchObject({ method: "POST", body: JSON.stringify({ messages: [{ role: "user", content: "Open reports" }], workspaceContext:"main",messageContext: undefined,periodId:"10000000-0000-4000-8000-000000000001" }) })
-  await user.click(screen.getByRole("button", { name: "Confirm action" }))
+  await user.click(screen.getByRole("button", { name: "Review command" }))
+  const confirmation=screen.getByRole("dialog",{name:"Review command"})
+  await user.click(within(confirmation).getByRole("button",{name:"Open page"}))
   await waitFor(() => expect(onNavigate).toHaveBeenCalledWith("report",expect.any(String)))
   expect(JSON.parse(onNavigate.mock.calls[0][1])).toMatchObject({sourceWorkspace:"main",messages:[{role:"user",content:"Open reports"},{role:"assistant",content:"Open your reports?"}]})
   expect(fetch).toHaveBeenCalledTimes(4)
@@ -30,7 +32,7 @@ it("submits a question and only navigates after confirming the returned proposal
   expect(onRefresh).not.toHaveBeenCalled()
 })
 
-it("requires a separate explicit confirmation for an assistant-proposed deletion", async () => {
+it("requires an in-chat popup confirmation before executing an assistant-proposed deletion", async () => {
   const fetch = vi.fn()
     .mockResolvedValueOnce(Response.json({id:"123e4567-e89b-42d3-a456-426614174000",messages:[]}))
     .mockResolvedValueOnce(Response.json({periods:[{id:"10000000-0000-4000-8000-000000000001",name:"Current period",startDate:"2026-01-01",endDate:"2026-12-31"}]}))
@@ -41,9 +43,9 @@ it("requires a separate explicit confirmation for an assistant-proposed deletion
   await waitFor(()=>expect(screen.getByRole("textbox",{name:"Ask DevOnCall"})).toBeEnabled())
   await user.type(screen.getByRole("textbox", { name: "Ask DevOnCall" }), "Delete this entry")
   await user.click(screen.getByRole("button", { name: "Send to assistant" }))
-  await user.click(await screen.findByRole("button", { name: "Review deletion" }))
+  await user.click(await screen.findByRole("button", { name: "Review command" }))
   expect(fetch).toHaveBeenCalledTimes(3)
-  const confirmation = screen.getByRole("dialog", { name: "Confirm AI-proposed deletion" })
+  const confirmation = screen.getByRole("dialog", { name: "Review command" })
   await user.click(within(confirmation).getByRole("button", { name: "Cancel" }))
   expect(fetch).toHaveBeenCalledTimes(3)
 })

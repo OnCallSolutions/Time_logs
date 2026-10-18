@@ -1,5 +1,20 @@
 # AI-assisted Timesheets and Review
 
+## Assistant Commands
+
+The workspace assistant accepts natural-language requests and maps them to a
+closed set of app commands: open a role-authorized page; create, edit, delete,
+submit, approve, or reject timesheet entries; prepare a message draft; manage
+message read state; or update delegable account rights. Each proposed command
+opens a review popup in chat. The user must confirm there before the server
+revalidates permissions, record revisions, and executes the same business
+handler used by the regular application.
+
+The assistant does not automate DOM clicks, accept arbitrary scripts, or use
+coordinates. A request that has no matching app command is explained rather than
+simulated. Page navigation is an allowlisted action filtered by current role and
+permissions; it cannot grant access to a page or record.
+
 Personal samples use the authenticated session name (email fallback), never a
 client-provided identity. Personal extraction likewise binds the display name to
 that identity. Samples are synthetic demonstrations, not proof of work.
@@ -68,6 +83,26 @@ Configuration, throttling, timeout, and generic failure responses use safe codes
 and never include raw provider bodies or credentials. Access is rechecked after
 analysis. Owner-role lookups are reused only within the current request, not
 across requests or accounts.
+
+## Model Routing
+
+Each server-side workflow has its own environment override, resolved by
+`lib/ai-models.ts`: `ASSISTANT_MODEL`, `TIMESHEET_EXTRACTION_MODEL`,
+`SUBMISSION_PREPARATION_MODEL`, `TIMESHEET_REVIEW_MODEL`, `ACCOUNT_REVIEW_MODEL`,
+and `SECURITY_REVIEW_MODEL`. They default independently to
+`openai/gpt-5.4-mini`, a model currently listed by AI Gateway with structured
+output support and catalog metadata `no_training: all` / `zdr: all`. The live
+catalog is authoritative; verify availability and provider policy before changing
+overrides. Values must be `provider/model` identifiers, never URLs or client input.
+
+The main and contextual window assistant share the assistant workflow model;
+page-specific extraction, submission, manager review, account review, and security
+monitoring calls use their own setting. Configure overrides as server-side
+environment variables per Vercel environment or in local `.env.local`. The
+AI Gateway credential remains `AI_GATEWAY_API_KEY` locally/externally; linked
+Vercel deployments may use the platform OIDC credential. Model selection does not
+change caller permissions or confirmation requirements. Run `pnpm test` after
+model-routing changes; mocked tests prove routing only, not live provider access.
 
 Logic and UI are integrated on `Development`; release PRs target `main`. Tests use
 synthetic identities and mocked model/database calls. Live deployment validation

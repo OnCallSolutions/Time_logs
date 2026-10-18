@@ -40,6 +40,7 @@ it("returns advice for owned evidence with no submission mutation", async () => 
   expect(result.items[0].revision).toBe(entry.revision)
   expect(result.destination).toBe("manager")
   expect(listTimeEntries).toHaveBeenCalledWith("own@example.com", false)
+  expect(vi.mocked(generateText).mock.calls[0][0].model).toBe("openai/gpt-5.4-mini")
   expect(vi.mocked(generateText).mock.calls[0][0].prompt).not.toContain("own@example.com")
 })
 it("denies revoked submission rights before database/model access", async () => {

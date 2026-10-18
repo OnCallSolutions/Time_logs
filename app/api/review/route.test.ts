@@ -44,4 +44,5 @@ it("loads each owner's effective role only once within a request",async()=>{
   vi.mocked(listTimeEntries).mockResolvedValue([{id:"one",ownerEmail:"person@example.com",status:"submitted"},{id:"two",ownerEmail:"person@example.com",status:"submitted"}] as never)
   vi.mocked(generateText).mockResolvedValue({output:{recommendations:[]}} as never)
   expect((await POST()).status).toBe(200);expect(getEffectiveUserRole).toHaveBeenCalledTimes(2)
+  expect(vi.mocked(generateText).mock.calls[0][0].model).toBe("openai/gpt-5.4-mini")
 })

@@ -22,7 +22,9 @@ updates, and changed source approvals cannot be marked ready.
 
 Grant `ai_accounts` together with visibility to enable analysis. The server uses
 the existing AI Gateway credential and optional `ACCOUNT_REVIEW_MODEL` (default
-`openai/gpt-4.1-mini`). Do not expose credentials through `NEXT_PUBLIC_*` variables.
+`openai/gpt-5.4-mini`). Do not expose credentials through `NEXT_PUBLIC_*` variables.
+See [AI workflow model routing](AI_WORKFLOW.md#model-routing) for the other
+per-workflow model settings.
 Emails are pseudonymized; work descriptions are still sent to the model and may
 contain personal information. Review the organization's data policy before use.
 AI recommendations are advisory, not persisted, and never mutate review states
