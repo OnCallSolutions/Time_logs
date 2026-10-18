@@ -157,6 +157,8 @@ export type AuditAction =
   | "authentication_succeeded"
   | "authentication_failed"
   | "authentication_signed_out"
+  | "api_rate_limit_exceeded"
+  | "terms_of_use_accepted"
   | "client_error_reported"
   | "user_issue_submitted"
   | "issue_updated"

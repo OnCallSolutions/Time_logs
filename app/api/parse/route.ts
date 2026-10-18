@@ -11,8 +11,30 @@ import { listAccountIdentities } from "@/lib/account-identities"
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { listTimesheetPeriods } from "@/lib/db"
+import { checkApiRateLimit } from "@/lib/api-rate-limit"
 
 export const maxDuration = 30
+const MAX_REQUEST_BYTES=16_384
+
+class RequestTooLargeError extends Error{}
+
+async function readJsonBody(request:Request):Promise<unknown>{
+  const reader=request.body?.getReader()
+  if(!reader)return {}
+  const chunks:Uint8Array[]=[]
+  let size=0
+  while(true){
+    const {done,value}=await reader.read()
+    if(done)break
+    size+=value.byteLength
+    if(size>MAX_REQUEST_BYTES){await reader.cancel();throw new RequestTooLargeError()}
+    chunks.push(value)
+  }
+  const body=new Uint8Array(size)
+  let offset=0
+  for(const chunk of chunks){body.set(chunk,offset);offset+=chunk.byteLength}
+  return JSON.parse(new TextDecoder().decode(body))
+}
 
 const entrySchema = z.object({
   contractor: z
@@ -55,11 +77,14 @@ const schema = z.object({
  */
 export async function POST(req: Request) {
   try {
+    if(Number(req.headers.get("content-length")??0)>MAX_REQUEST_BYTES)return Response.json({error:"Extraction request is too large."},{status:413})
     const session=await auth()
     const email = session?.user?.email
     if (!email || !(await getEffectivePermissions(email)).permissions.create_entries)
       return Response.json({error:"Forbidden."},{status:403})
-    const input=z.object({notes:z.string().trim().min(1),periodId:z.string().uuid()}).strict().parse(await req.json())
+    const rate=await checkApiRateLimit(email,"timesheet-extraction",5,req)
+    if(!rate.allowed)return Response.json({error:"Too many extraction requests. Wait a minute before trying again."},{status:429,headers:{"Retry-After":"60","Cache-Control":"no-store"}})
+    const input=z.object({notes:z.string().trim().min(1).max(12_000),periodId:z.string().uuid()}).strict().parse(await readJsonBody(req))
     const {notes,periodId}=input
 
     if (!notes || !notes.trim()) {
@@ -94,6 +119,7 @@ export async function POST(req: Request) {
     const identity=(await listAccountIdentities([email]))[0]
     return Response.json({ entries: output.entries.map(entry=>ownOnly?{...entry,contractor:identity?.officialName||session?.user?.name?.trim()||email}:entry),periodId:period.id })
   } catch (err) {
+    if(err instanceof RequestTooLargeError)return Response.json({error:"Extraction request is too large."},{status:413})
     if(err instanceof z.ZodError||err instanceof SyntaxError)return Response.json({error:"Enter notes and select a valid configured timesheet period."},{status:400})
     const message = err instanceof Error ? err.message : String(err)
     console.error("[parse] AI extraction failed")

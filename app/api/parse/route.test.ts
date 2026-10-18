@@ -9,9 +9,11 @@ vi.mock("ai", () => ({ generateText: vi.fn(), Output: { object: vi.fn() } }))
 vi.mock("@/auth", () => ({ auth: vi.fn() }))
 vi.mock("@/lib/effective-permissions", () => ({ getEffectivePermissions: vi.fn() }))
 vi.mock("@/lib/db",()=>({listTimesheetPeriods:vi.fn()}))
+vi.mock("@/lib/api-rate-limit",()=>({checkApiRateLimit:vi.fn(async()=>({allowed:true,hits:1}))}))
 import { generateText } from "ai"
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
+import { checkApiRateLimit } from "@/lib/api-rate-limit"
 import { listTimesheetPeriods } from "@/lib/db"
 import { resolvePermissions } from "@/lib/permissions"
 import { POST } from "./route"
@@ -46,4 +48,18 @@ it("rejects AI dates outside the selected configured period before they can be s
   const response=await POST(new Request("http://localhost/api/parse",{method:"POST",body:JSON.stringify({notes:"2 hours on October 31",periodId:"10000000-0000-4000-8000-000000000001"})}))
   expect(response.status).toBe(422)
   expect(generateText).toHaveBeenCalledOnce()
+})
+
+it("throttles extraction requests and provides a retry delay",async()=>{
+  vi.mocked(checkApiRateLimit).mockResolvedValue({allowed:false,hits:6})
+  const response=await POST(new Request("http://localhost/api/parse",{method:"POST",body:JSON.stringify({notes:"Work",periodId:"10000000-0000-4000-8000-000000000001"})}))
+  expect(response.status).toBe(429)
+  expect(response.headers.get("retry-after")).toBe("60")
+  expect(generateText).not.toHaveBeenCalled()
+})
+
+it("rejects oversized streamed JSON even without a Content-Length header",async()=>{
+  const response=await POST(new Request("http://localhost/api/parse",{method:"POST",body:JSON.stringify({notes:"x".repeat(20_000),periodId:"10000000-0000-4000-8000-000000000001"})}))
+  expect(response.status).toBe(413)
+  expect(generateText).not.toHaveBeenCalled()
 })

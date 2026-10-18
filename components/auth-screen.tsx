@@ -7,6 +7,7 @@ import { ArrowUpRight,LockKeyhole,ShieldCheck } from "lucide-react"
 import { Brand } from "@/components/brand"
 import { AuthSubmitButton } from "@/components/auth-submit-button"
 import { SignOutButton } from "@/components/sign-out-button"
+import { basePath } from "@/lib/paths"
 /**
  * Renders the sign-in form or a clear access-denied account state.
  * @param props.action - Existing Microsoft authentication server action.
@@ -33,6 +34,6 @@ export function AuthScreen({action,email}:{action?:()=>Promise<void>;email?:stri
         <p className="mt-2 text-xs leading-6">Use the account approved by your technology manager. If Microsoft rejects the account, check its organization access with your manager.</p>
       </details>
     </div>
-    <footer className="border-t border-border bg-white px-5 py-4 text-center text-xs text-muted-foreground">DevOnCall / Tanovo Time</footer>
+    <footer className="flex flex-wrap items-center justify-center gap-3 border-t border-border bg-white px-5 py-4 text-xs text-muted-foreground"><span>DevOnCall / Tanovo Time</span><a href={`${basePath}/terms-of-use`} className="underline underline-offset-2 hover:text-slate-900">Terms of Use</a></footer>
   </main>
 }
