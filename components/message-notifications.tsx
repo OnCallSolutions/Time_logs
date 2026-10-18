@@ -1,7 +1,7 @@
 /**
- * Provides the account-scoped notification center and private new-message alerts.
- * The center exposes unread-message actions and preferences without revealing
- * message bodies; notification sounds are created only after explicit opt-in.
+ * Keeps operational notifications separate from casual private messages.
+ * The notification center contains deadline reminders; message alerts remain
+ * separate and never become notification-center items.
  */
 "use client"
 import { useCallback, useEffect, useRef, useState } from "react"
@@ -59,23 +59,16 @@ export function MessageNotifications({inbox,onOpen}:{inbox:MessageInbox;onOpen:(
   }
   /** Acknowledges all currently loaded unread incoming messages in API-sized batches. @returns Promise<void> after the inbox is refreshed. */
   async function markAllRead():Promise<void>{
-    const ids=inbox.messages.filter(message=>message.sender_email.toLowerCase()!==inbox.email&&!message.deleted_at&&!message.read_at).map(message=>message.id)
     const reminderIds=periodReminders.filter(reminder=>!reminder.read_at).map(reminder=>reminder.id)
-    if((!ids.length&&!reminderIds.length)||markingRead)return
+    if(!reminderIds.length||markingRead)return
     setMarkingRead(true);setActionError(null)
     try{
-      for(let offset=0;offset<ids.length;offset+=100){
-        const response=await fetch(apiPath("/api/messages"),{method:"PATCH",cache:"no-store",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"read",ids:ids.slice(offset,offset+100)})})
-        if(!response.ok)throw new Error("Some messages could not be marked as read. Please retry.")
-      }
-      if(reminderIds.length){const response=await fetch(apiPath("/api/timesheet-period-reminders"),{method:"PATCH",cache:"no-store",headers:{"Content-Type":"application/json"},body:JSON.stringify({ids:reminderIds})});if(!response.ok)throw new Error("Some deadline reminders could not be marked as read.")}
+      const response=await fetch(apiPath("/api/timesheet-period-reminders"),{method:"PATCH",cache:"no-store",headers:{"Content-Type":"application/json"},body:JSON.stringify({ids:reminderIds})});if(!response.ok)throw new Error("Some deadline reminders could not be marked as read.")
       setPeriodReminders(previous=>previous.map(reminder=>({...reminder,read_at:reminder.read_at??new Date().toISOString()})))
-      inbox.dismissNotification();inbox.refresh()
     }catch(error){setActionError(error instanceof Error?error.message:"Unable to update notifications.")}
     finally{setMarkingRead(false)}
   }
-  const unread=inbox.messages.filter(message=>message.sender_email.toLowerCase()!==inbox.email&&!message.deleted_at&&!message.read_at)
-  const unreadCount=inbox.unread+periodReminders.filter(reminder=>!reminder.read_at).length
+  const unreadCount=periodReminders.filter(reminder=>!reminder.read_at).length
   function openMessages():void{setCenterOpen(false);inbox.dismissNotification();onOpen()}
   return <>
     <Button variant="ghost" size="icon-lg" aria-label={`Notifications, ${unreadCount} unread`} title="Notifications" className="relative" onClick={()=>setCenterOpen(true)}>
@@ -85,18 +78,15 @@ export function MessageNotifications({inbox,onOpen}:{inbox:MessageInbox;onOpen:(
     {centerOpen&&<WindowSurface title="Notification center" onBack={()=>setCenterOpen(false)}>
       <section className="flex min-h-0 w-full flex-col overflow-hidden bg-white text-slate-950">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-orange-200 bg-orange-50 px-4 py-3">
-          <div><h2 className="font-semibold">Notifications</h2><p className="text-xs text-orange-950">{unreadCount} unread across messages and timesheet reminders</p></div>
-          <div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" disabled={!unreadCount||markingRead} onClick={()=>void markAllRead()}><CheckCheck className="size-4"/>{markingRead?"Updating...":"Mark all as read"}</Button><Button size="sm" onClick={openMessages}>Open messages</Button></div>
+          <div><h2 className="font-semibold">Notifications</h2><p className="text-xs text-orange-950">{unreadCount} unread deadline notifications</p></div>
+          <div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" disabled={!unreadCount||markingRead} onClick={()=>void markAllRead()}><CheckCheck className="size-4"/>{markingRead?"Updating...":"Mark all as read"}</Button></div>
         </header>
         <div className="min-h-0 flex-1 overflow-auto overscroll-contain p-4">
-          <h3 className="mb-2 text-xs font-semibold uppercase text-slate-600">Unread</h3>
-          {inbox.loading?<p role="status" className="py-6 text-center text-sm text-slate-500">Loading notifications...</p>:unread.length===0?<p className="border-y border-slate-200 py-8 text-center text-sm text-slate-600">You’re all caught up.</p>:<ul className="divide-y divide-slate-200">{unread.slice(0,100).map(message=><li key={message.id}><button type="button" onClick={openMessages} className="flex w-full items-center justify-between gap-3 py-3 text-left hover:bg-orange-50"><span className="min-w-0"><span className="block truncate text-sm font-medium">{message.priority==="high"?"High priority · ":""}{message.sender_name||message.author_name||"Organization message"}</span><span className="mt-1 block text-xs text-slate-500">{formatNotificationDate(message.created_at)}</span></span><span className="size-2 shrink-0 rounded-full bg-orange-500" aria-label="Unread"/></button></li>)}</ul>}
-          {unread.length>100&&<p className="mt-2 text-xs text-slate-500">Showing the latest 100 unread notifications. Open Messages to review the full inbox.</p>}
-          <h3 className="mb-2 mt-5 border-t border-slate-200 pt-4 text-xs font-semibold uppercase text-slate-600">Timesheet reminders</h3>
+          <h3 className="mb-2 text-xs font-semibold uppercase text-slate-600">Timesheet deadline alerts</h3>
           {periodReminders.length===0?<p className="border-y border-slate-200 py-5 text-center text-sm text-slate-600">No deadline reminders.</p>:<ul className="divide-y divide-slate-200">{periodReminders.slice(0,50).map(reminder=><li key={reminder.id} className={`py-3 ${reminder.read_at?"opacity-70":"bg-orange-50/60"}`}><p className="text-sm font-medium">{reminder.title}<span className="ml-2 text-xs font-normal text-orange-800">{reminder.sender_label}</span></p><p className="mt-1 text-sm text-slate-700">{reminder.body}</p><p className="mt-1 text-xs text-slate-500">{formatNotificationDate(reminder.created_at)}</p></li>)}</ul>}
           {actionError&&<p role="alert" className="mt-3 text-sm text-red-700">{actionError}</p>}
           <section aria-labelledby="notification-preferences-title" className="mt-5 border-t border-slate-200 pt-4">
-            <h3 id="notification-preferences-title" className="mb-3 text-sm font-semibold">Preferences</h3>
+            <h3 id="notification-preferences-title" className="mb-3 text-sm font-semibold">Message alert preferences</h3>
             <div className="flex flex-wrap gap-x-6 gap-y-3 text-sm">
               <label className="flex items-center gap-2"><input type="checkbox" checked={popup} onChange={event=>save(sound,event.target.checked)}/>Message popups</label>
               <label className="flex items-center gap-2"><input type="checkbox" checked={sound} onChange={async event=>{const enabled=event.target.checked;if(enabled&&!await enableAudio())return;save(enabled,popup)}}/><Volume2 className="size-4"/>Message sound</label>

@@ -20,20 +20,21 @@ const inbox={
   ],
 }
 
-beforeEach(()=>{vi.clearAllMocks();vi.stubGlobal("fetch",vi.fn().mockResolvedValue({ok:true}))})
+beforeEach(()=>{vi.clearAllMocks();vi.stubGlobal("fetch",vi.fn().mockImplementation(async(_input:string,init?:RequestInit)=>({ok:true,json:async()=>init?.method==="PATCH"?{ok:true}:{reminders:[{id:"deadline-1",title:"Timesheet deadline approaching",body:"October 2026 is due soon.",sender_label:"Business Accounts",created_at:"2026-10-16T13:00:00.000Z",read_at:null}]}})))})
 
-it("opens a privacy-safe unread center and can mark all loaded messages read",async()=>{
+it("keeps deadline notifications separate from casual messages and marks only reminders read",async()=>{
   const user=userEvent.setup()
   render(<MessageNotifications inbox={inbox} onOpen={onOpen}/> )
-  await user.click(screen.getByRole("button",{name:"Notifications, 2 unread"}))
+  await user.click(await screen.findByRole("button",{name:"Notifications, 1 unread"}))
   const center=screen.getByRole("dialog",{name:"Notification center"})
-  expect(within(center).getByText(/Morgan Manager/)).toBeVisible()
-  expect(within(center).getByText(/Avery Employee/)).toBeVisible()
+  expect(within(center).getByText(/October 2026 is due soon/)).toBeVisible()
+  expect(within(center).queryByText(/Morgan Manager|Avery Employee/)).not.toBeInTheDocument()
   expect(center).not.toHaveTextContent("private body")
   await user.click(within(center).getByRole("button",{name:"Mark all as read"}))
-  expect(fetch).toHaveBeenCalledWith("/tanovo-time/api/messages",expect.objectContaining({method:"PATCH",body:JSON.stringify({action:"read",ids:["1","2"]})}))
-  expect(dismissNotification).toHaveBeenCalledOnce()
-  expect(refresh).toHaveBeenCalledOnce()
+  expect(fetch).toHaveBeenCalledWith("/tanovo-time/api/timesheet-period-reminders",expect.objectContaining({method:"PATCH",body:JSON.stringify({ids:["deadline-1"]})}))
+  expect(fetch).not.toHaveBeenCalledWith("/tanovo-time/api/messages",expect.anything())
+  expect(dismissNotification).not.toHaveBeenCalled()
+  expect(refresh).not.toHaveBeenCalled()
 })
 
 it("activates sound only after the preference click and plays a tone for a new alert",async()=>{
@@ -56,7 +57,7 @@ it("activates sound only after the preference click and plays a tone for a new a
   localStorage.removeItem("message-alerts:admin@example.com")
   const view=render(<MessageNotifications inbox={inbox} onOpen={onOpen}/> )
 
-  await user.click(screen.getByRole("button",{name:"Notifications, 2 unread"}))
+  await user.click(await screen.findByRole("button",{name:"Notifications, 1 unread"}))
   const center=screen.getByRole("dialog",{name:"Notification center"})
   await user.click(within(center).getByRole("button",{name:"Test sound"}))
   await waitFor(()=>expect(oscillator.start).toHaveBeenCalledOnce())
