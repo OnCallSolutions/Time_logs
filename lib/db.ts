@@ -1682,8 +1682,8 @@ export async function submitTimeEntryWithAudit(
         'changedFields', ${JSON.stringify(metadata.changedFields ?? [])}::jsonb,
         'hasReviewNote', ${metadata.hasReviewNote === true}::boolean
       ),
-      ${context.ipAddress}, ${context.userAgent}, ${context.requestMethod},
-      ${context.requestPath}, ${context.requestId}
+      ${context.ipAddress}::text, ${context.userAgent}::text, ${context.requestMethod}::text,
+      ${context.requestPath}::text, ${context.requestId}::text
     FROM changed
     RETURNING target_id
   )
