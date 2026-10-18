@@ -5,6 +5,7 @@
  * seniority ordering and the required Edit -> modal choices -> Save workflow.
  */
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import type { ReactNode } from "react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { signIn } from "next-auth/react"
@@ -26,7 +27,7 @@ vi.mock("@/components/note-input", () => ({
 }))
 
 vi.mock("@/components/entries-log", () => ({
-  EntriesLog: () => <div data-testid="entries-log" />,
+  EntriesLog: ({periodToolbarCenter}:{periodToolbarCenter?:ReactNode}) => <div data-testid="entries-log">{periodToolbarCenter}</div>,
 }))
 
 vi.mock("@/components/manager-report", () => ({
@@ -301,8 +302,7 @@ describe("TimesheetApp admin directory", () => {
     const roster = screen.getByRole("region", { name: "People and access" })
     expect(within(roster).getByRole("heading", { name: "People and access" })).toBeVisible()
     expect(roster).toHaveTextContent("Resolve identity, access, and account health issues")
-    expect(within(roster).getByRole("table")).not.toBeVisible()
-    await user.click(within(roster).getByText("Patron directory"))
+    expect(within(roster).getByRole("table")).toBeVisible()
     expect(within(roster).getAllByRole("row")).toHaveLength(4)
     await user.selectOptions(within(roster).getByLabelText("Filter patrons by role"), "manager")
     expect(within(roster).getAllByRole("row")).toHaveLength(2)
@@ -336,6 +336,7 @@ describe("TimesheetApp admin directory", () => {
     expect(within(periodWindow).getByRole("button",{name:"Create period"})).toBeVisible()
     await user.click(within(periodWindow).getByRole("button", { name: "Back" }))
     await user.click(within(periodIndex).getByRole("button", { name: /October 2026/ }))
+    await user.click(within(timesheets).getByRole("button", { name: /Open timesheets/ }))
     const entryWindow = await screen.findByRole("dialog", { name: "Timesheet view" })
     expect(within(entryWindow).getByTestId("entries-log")).toBeInTheDocument()
     expect(within(entryWindow).getByRole("button", { name: "Log time" })).toBeVisible()

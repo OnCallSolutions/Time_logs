@@ -8,6 +8,7 @@ import { ArrowRight, BarChart3, CalendarClock, CheckCircle2, ClipboardList, Cloc
 import type { EntryStatus, TimeEntry } from "@/lib/types"
 import { Button } from "@/components/ui/button"
 import { getRoleActions, type RoleActionId } from "@/lib/role-actions"
+import { ManagerTeamDirectory } from "@/components/manager-team-directory"
 
 /**
  * Provides a role-specific workspace home without rendering raw entry rows.
@@ -24,7 +25,7 @@ import { getRoleActions, type RoleActionId } from "@/lib/role-actions"
  * @param props.onLogTime - Opens the time-entry capture workflow.
  * @returns A compact workspace home tailored to the active role.
  */
-export function RoleWorkspaceHome({ role, entries, teamEntries = [], pending, canCreate, canReview, canReports, canManageProjects = false, canCreateProjects = false, canManageAccess = false, canViewActivity = false, canManagePeriods = false, canViewAllTimesheets = false, canViewAccounts = false, onTimesheets, onReviews, onLogTime, onReport, onProjects, onTeamAccess, onActivity, onPeriodSettings, onFinalApprovals }: {
+export function RoleWorkspaceHome({ role, entries, teamEntries = [], pending, canCreate, canReview, canReports, canManageProjects = false, canCreateProjects = false, canManageAccess = false, canViewActivity = false, canManagePeriods = false, canViewAllTimesheets = false, canViewAccounts = false, canViewTeamDirectory = false, onTimesheets, onReviews, onLogTime, onReport, onProjects, onTeamAccess, onActivity, onPeriodSettings, onFinalApprovals }: {
   role: "contractor" | "employee" | "manager" | "account_manager"
   entries: TimeEntry[]
   teamEntries?: TimeEntry[]
@@ -39,6 +40,7 @@ export function RoleWorkspaceHome({ role, entries, teamEntries = [], pending, ca
   canManagePeriods?: boolean
   canViewAllTimesheets?: boolean
   canViewAccounts?: boolean
+  canViewTeamDirectory?: boolean
   onTimesheets: () => void
   onReviews: () => void
   onLogTime: () => void
@@ -77,6 +79,7 @@ export function RoleWorkspaceHome({ role, entries, teamEntries = [], pending, ca
     <nav aria-label={`${role} dashboard actions`} className="flex flex-wrap gap-1 border-b border-current/10 px-2 py-1.5">
       {actions.map(action => { const Icon = icon[action.id]; const handler = handlers[action.id]; return handler ? <Button key={action.id} size="sm" variant={action.id === "log_time" || action.id === "final_approvals" ? "default" : "outline"} className="h-7 px-2 text-xs" onClick={handler}><Icon className="size-3.5"/>{action.label}<ArrowRight className="size-3"/></Button> : null })}
     </nav>
+    {isManager&&canViewTeamDirectory&&<ManagerTeamDirectory/>}
     {isAccountManager&&<section aria-label="My timesheet summary" className="grid grid-cols-2 gap-px border-b border-blue-200 bg-blue-200 sm:grid-cols-4">
       <div className="bg-white/80 px-2.5 py-1.5"><p className="text-[10px] text-slate-600">My entries</p><p className="text-sm font-semibold tabular-nums">{personal.length}</p></div>
       <div className="bg-white/80 px-2.5 py-1.5"><p className="text-[10px] text-slate-600">Awaiting review</p><p className="text-sm font-semibold tabular-nums">{personal.filter(entry=>entry.status==="submitted").length}</p></div>
