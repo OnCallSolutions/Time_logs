@@ -17,7 +17,7 @@ async function ensureTermsTable():Promise<void>{
 
 export async function hasAcceptedCurrentTerms(email:string):Promise<boolean>{
   await ensureTermsTable()
-  const rows=await sql`SELECT 1 FROM terms_acceptances WHERE email=${email.toLowerCase()} AND version=${CURRENT_TERMS_VERSION} LIMIT 1`
+  const rows=await sql`SELECT 1 FROM terms_acceptances WHERE email=${email.toLowerCase()} LIMIT 1`
   return rows.length>0
 }
 
