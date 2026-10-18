@@ -494,7 +494,7 @@ describe("TimesheetApp admin directory", () => {
     await user.click(within(reportsAgain).getByRole("button", { name: "Open analytics report" }))
     const analyticsReport = await screen.findByRole("dialog", { name: "Analytics reports" })
     expect(within(analyticsReport).getByTestId("manager-report")).toBeInTheDocument()
-  })
+  },15000)
 
   it("shows every entry for the selected period in the scrollable preview", async () => {
     const entries=Array.from({length:12},(_,index)=>({

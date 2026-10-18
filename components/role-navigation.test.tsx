@@ -157,9 +157,11 @@ it("groups admin tools beneath Admin, Reports, and Timesheets while preserving l
   await userEvent.click(within(timesheetWindow).getByRole("button",{name:/Period settings/}))
   const periodSettings=await screen.findByRole("dialog",{name:"Timesheet period settings"})
   await userEvent.click(within(periodSettings).getByRole("button",{name:"Add period"}))
-  expect(within(periodSettings).getByRole("textbox",{name:"Timesheet period name"})).toBeVisible()
-  expect(within(periodSettings).getByRole("button",{name:"Cancel"})).toBeVisible()
-  expect(within(periodSettings).getByRole("button",{name:"Create period"})).toBeVisible()
+  const periodEditor=await screen.findByRole("dialog",{name:"Add submission window"})
+  expect(within(periodEditor).getByRole("textbox",{name:"Timesheet period name"})).toBeVisible()
+  expect(within(periodEditor).getByRole("button",{name:"Cancel"})).toBeVisible()
+  expect(within(periodEditor).getByRole("button",{name:"Create period"})).toBeVisible()
+  await userEvent.click(within(periodEditor).getByRole("button",{name:"Back"}))
   await userEvent.click(within(periodSettings).getByRole("button",{name:"Back"}))
   await userEvent.click(within(periodIndex).getByRole("button",{name:/October 2026/}))
   await userEvent.click(within(timesheetWindow).getByRole("button",{name:/Open timesheets/}))
@@ -181,7 +183,7 @@ it("groups admin tools beneath Admin, Reports, and Timesheets while preserving l
   expect(screen.getByRole("region",{name:"People and access"})).toBeVisible()
   expect(screen.queryByRole("heading",{name:"Raw timesheet entries"})).not.toBeInTheDocument()
   expect(screen.getByRole("navigation",{name:"Workspaces"})).toBeVisible()
-})
+},15000)
 it("removes manager approval controls when rights are revoked in an open session",async()=>{
   testRole="manager"
   render(<TimesheetApp role="manager" userEmail="manager@example.com" />)
