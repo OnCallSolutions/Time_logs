@@ -12,9 +12,9 @@ it("keeps multiple same-project work units as separate entries",()=>{
   render(<EntriesLog entries={[row,{...row,id:"two",hours:3,description:"Testing"}]} onUpdate={vi.fn()} onStatusChange={vi.fn()} onDelete={vi.fn()} onClear={vi.fn()}/>)
   expect(screen.getByText((_,node)=>node?.tagName==="TH"&&node.textContent==="Project: Project A 2 entries · 5h")).toBeVisible()
   const projectHeader=screen.getByText((_,node)=>node?.tagName==="TH"&&node.textContent==="Project: Project A 2 entries · 5h")
-  expect(projectHeader.closest("tr")).toHaveClass("bg-emerald-800")
-  expect(projectHeader.closest("tr")).not.toHaveClass("hover:bg-emerald-950")
-  expect(screen.getByLabelText("Entry Documentation")).toHaveClass("hover:!bg-blue-950")
+  expect(projectHeader.closest("tr")).toHaveClass("bg-sky-100")
+  expect(projectHeader.closest("tr")).not.toHaveClass("hover:bg-sky-800")
+  expect(screen.getByLabelText("Entry Documentation")).toHaveClass("hover:!bg-orange-800")
   expect(screen.getAllByRole("button",{name:"Edit entry"})).toHaveLength(2)
   expect(screen.queryByRole("spinbutton",{name:"Hours"})).not.toBeInTheDocument()
   expect(screen.getAllByText("Person")).toHaveLength(2)
@@ -61,7 +61,7 @@ it("filters timesheets by text, status, project and date, with selectable sort a
   await user.type(screen.getByRole("textbox",{name:"Search entries"}),"Build release")
   expect(screen.getByText("Build release")).toBeVisible()
   expect(screen.queryByText("Design notes")).not.toBeInTheDocument()
-  await user.click(screen.getByText("More filters and grouping"))
+  expect(screen.getByLabelText("Entries from date")).toBeVisible()
   await user.click(screen.getByRole("button",{name:"Reset timesheet view"}))
 
   await user.selectOptions(screen.getByRole("combobox",{name:"Filter entry project"}),"Beta")
@@ -76,7 +76,7 @@ it("filters timesheets by text, status, project and date, with selectable sort a
   expect(screen.queryByText("Test suite")).not.toBeInTheDocument()
   expect(screen.getByText("Build release")).toBeVisible()
   await user.selectOptions(screen.getByRole("combobox",{name:"Filter entry status"}),"submitted")
-  expect(screen.getByText("1 visible")).toBeVisible()
+  expect(screen.getByText(/1 visible/)).toBeVisible()
 })
 
 it("shows only the active period by default and retrieves archived entries on request",async()=>{
@@ -266,10 +266,17 @@ it("does not merge identical display names belonging to different owners",()=>{
   expect(screen.getAllByText("Person")).toHaveLength(2)
 })
 
+it("can hide the duplicate heading while keeping the timesheet controls visible",()=>{
+  setup({hideHeader:true})
+  expect(screen.queryByRole("heading",{name:"Time entries"})).not.toBeInTheDocument()
+  expect(screen.getByRole("textbox",{name:"Search entries"})).toBeVisible()
+  expect(screen.getByRole("table")).toBeVisible()
+})
+
 it("selects individual, matching, or all owned eligible entries without selecting others",async()=>{
   setup({canSubmit:true,entries:[entry,{...entry,id:"two",description:"Testing"},{...entry,id:"locked",status:"submitted"},{...entry,id:"other",ownerEmail:"other@example.com"}]})
   await userEvent.click(screen.getByText(/More controls/))
-  await userEvent.click(screen.getByText("Bulk actions"))
+  expect(screen.getByText(/Bulk actions/)).toBeVisible()
   await userEvent.click(screen.getByRole("checkbox",{name:"Select entry one"}))
   expect(screen.getByRole("button",{name:"Submit selected (1)"})).toBeEnabled()
   expect(screen.getByRole("checkbox",{name:"Select entry locked"})).toBeDisabled()
