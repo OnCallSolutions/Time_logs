@@ -23,8 +23,8 @@ const statusStyles: Record<EntryStatus, string> = {
 const statusRowStyles:Record<EntryStatus,string>={
   draft:"border-l-4 border-l-slate-400 bg-slate-50/70",
   submitted:"border-l-4 border-l-blue-500 bg-blue-50/45",
-  approved:"border-l-4 border-l-emerald-500 bg-emerald-50/45",
-  rejected:"border-l-4 border-l-red-500 bg-red-50/45",
+  approved:"border-l-4 border-l-emerald-600 bg-emerald-100",
+  rejected:"border-l-4 border-l-red-600 bg-red-100",
 }
 
 /**

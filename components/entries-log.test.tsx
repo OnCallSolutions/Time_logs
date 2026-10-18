@@ -25,6 +25,17 @@ it("keeps multiple same-project work units as separate entries",()=>{
   expect(screen.getAllByText("Draft").find((node)=>node.tagName==="SPAN")).toHaveClass("rounded-full","text-[10px]")
 })
 
+it("uses distinct green and red row fills for approved and rejected entries",()=>{
+  render(<EntriesLog entries={[
+    {...entry,id:"approved",description:"Approved work",status:"approved"},
+    {...entry,id:"rejected",description:"Rejected work",status:"rejected"},
+    {...entry,id:"draft",description:"Draft work",status:"draft"},
+  ]} onUpdate={vi.fn()} onStatusChange={vi.fn()} onDelete={vi.fn()} onClear={vi.fn()}/> )
+  expect(screen.getByLabelText("Entry Approved work")).toHaveClass("bg-emerald-100","border-l-emerald-600")
+  expect(screen.getByLabelText("Entry Rejected work")).toHaveClass("bg-red-100","border-l-red-600")
+  expect(screen.getByLabelText("Entry Draft work")).toHaveClass("bg-slate-50/70")
+})
+
 it("leaves edge scrolling to the browser so wheel momentum is not replaced with jumps",()=>{
   const {container}=render(<section style={{overflowY:"auto"}}><EntriesLog entries={[{id:"scroll",contractor:"Person",project:"Project",date:"2026-10-10",hours:2,description:"Work",status:"draft"}]} onUpdate={vi.fn()} onStatusChange={vi.fn()} onDelete={vi.fn()} onClear={vi.fn()}/></section>)
   const parent=container.querySelector("section")!,tableScroller=screen.getByLabelText("Scrollable time entries")
@@ -99,6 +110,21 @@ it("shows only the active period by default and retrieves archived entries on re
   expect(screen.queryByText("Current work")).not.toBeInTheDocument()
   await userEvent.selectOptions(screen.getByRole("combobox",{name:"Timesheet period"}),"archive")
   expect(screen.getByText("Archived work")).toBeVisible()
+})
+
+it("centers patron bulk selection, manual submission, and AI preparation above the entries",async()=>{
+  const now=new Date(),today=[now.getFullYear(),String(now.getMonth()+1).padStart(2,"0"),String(now.getDate()).padStart(2,"0")].join("-")
+  vi.stubGlobal("fetch",vi.fn((url:string)=>Promise.resolve(new Response(JSON.stringify(url.includes("timesheet-periods")?{periods:[{id:"current",name:"Current",startDate:today,endDate:today,submissionDeadline:"2099-12-31T23:59:00.000Z",managerGraceDays:3}]}:{requests:[]}),{status:200,headers:{"Content-Type":"application/json"}}))))
+  render(<EntriesLog periodView showPatronBulkActions canSubmit userEmail="person@example.com" entries={[{...entry,date:today}]} onUpdate={vi.fn()} onStatusChange={vi.fn()} onDelete={vi.fn()} onClear={vi.fn()}/> )
+  const center=await screen.findByLabelText("Bulk timesheet submission")
+  expect(within(center).getByRole("button",{name:"Select eligible (1)"})).toBeEnabled()
+  expect(within(center).getByRole("button",{name:"Submit selected (0)"})).toBeDisabled()
+  expect(within(center).getByRole("button",{name:"AI prepare selected (0)"})).toBeDisabled()
+  await userEvent.click(within(center).getByRole("button",{name:"Select eligible (1)"}))
+  expect(within(center).getByRole("button",{name:"Submit selected (1)"})).toBeEnabled()
+  expect(within(center).getByRole("button",{name:"AI prepare selected (1)"})).toBeEnabled()
+  await userEvent.click(screen.getByText("More controls"))
+  expect(within(screen.getByLabelText("More timesheet controls")).queryByRole("button",{name:/Submit selected/})).not.toBeInTheDocument()
 })
 
 it("shows the exact submit-by deadline for the selected period",async()=>{

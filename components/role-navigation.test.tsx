@@ -21,6 +21,7 @@ const entries = [
 ]
 let servedEntries=entries
 beforeEach(()=>{
+  window.sessionStorage.clear()
   testRole = "employee"; overrides = {}
   servedEntries=entries
   vi.stubGlobal("fetch",vi.fn(async (url:string,init?:RequestInit)=> {

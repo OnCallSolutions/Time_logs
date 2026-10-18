@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Activity, CalendarClock, CheckCircle2, ChevronRight, Clock3, Pencil, RefreshCw } from "lucide-react"
+import { Activity, CalendarClock, CheckCircle2, ChevronRight, Clock3, Pencil, RefreshCw, Timer } from "lucide-react"
 import { apiPath } from "@/lib/paths"
 import type { TimeEntry, UserRole } from "@/lib/types"
 import { Button } from "@/components/ui/button"
@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button"
 type Period={id:string;name:string;startDate:string;endDate:string;submissionDeadline:string}
 
 /** Gives each role a period archive before opening its raw timesheet records. */
-export function TimesheetPeriodLanding({entries,onSelect,onLogTime,onRefresh,canCreate=false,personalReadiness=false,role}:{entries:TimeEntry[];onSelect:(periodId:string)=>void;onLogTime?:()=>void;onRefresh?:()=>void;canCreate?:boolean;personalReadiness?:boolean;role?:UserRole}){
+export function TimesheetPeriodLanding({entries,onSelect,onLogTime,onRefresh,onRequestExtension,canRequestExtension=false,canCreate=false,personalReadiness=false,role}:{entries:TimeEntry[];onSelect:(periodId:string)=>void;onLogTime?:()=>void;onRefresh?:()=>void;onRequestExtension?:()=>void;canRequestExtension?:boolean;canCreate?:boolean;personalReadiness?:boolean;role?:UserRole}){
   const [periods,setPeriods]=useState<Period[]>([])
   const [loading,setLoading]=useState(true)
   const [error,setError]=useState("")
@@ -52,7 +52,7 @@ export function TimesheetPeriodLanding({entries,onSelect,onLogTime,onRefresh,can
   return <section aria-label="Timesheet periods" className="flex min-h-0 min-w-0 w-full flex-1 flex-col gap-2">
     <header className="flex flex-wrap items-center justify-between gap-2 border-b border-sky-200 bg-gradient-to-r from-sky-50 via-white to-emerald-50 px-3 py-2">
       <div><h2 className="text-sm font-semibold text-sky-950">Timesheet periods</h2><p className="text-xs text-slate-600">Choose a period to open its raw time entries and submission controls.</p></div>
-      <div className="flex gap-1.5">{canCreate&&onLogTime&&<Button size="sm" onClick={onLogTime}><Pencil className="size-3.5"/>Log time</Button>}{onRefresh&&<Button size="sm" variant="outline" onClick={onRefresh}><RefreshCw className="size-3.5"/>Refresh</Button>}</div>
+      <div className="flex gap-1.5">{canRequestExtension&&(role==="employee"||role==="contractor")&&onRequestExtension&&<Button size="sm" variant="outline" title="Request additional submission time from your account manager" onClick={onRequestExtension}><Timer className="size-3.5"/>Extensions</Button>}{canCreate&&onLogTime&&<Button size="sm" onClick={onLogTime}><Pencil className="size-3.5"/>Log time</Button>}{onRefresh&&<Button size="sm" variant="outline" onClick={onRefresh}><RefreshCw className="size-3.5"/>Refresh</Button>}</div>
     </header>
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-slate-200 px-1 pb-2 text-xs"><span>{entries.length} visible entries</span><span>{entries.reduce((sum,entry)=>sum+Number(entry.hours||0),0).toLocaleString(undefined,{maximumFractionDigits:2})} hours</span><span className="text-emerald-800">{entries.filter(entry=>entry.status==="approved").length} approved</span><span className="text-blue-800">{entries.filter(entry=>entry.status==="submitted").length} awaiting review</span><span className="text-orange-800">{entries.filter(entry=>entry.status==="draft").length} drafts</span></div>
     {error&&<p role="alert" className="border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>}

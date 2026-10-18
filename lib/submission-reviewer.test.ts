@@ -10,7 +10,7 @@ vi.mock("@/lib/effective-permissions",()=>({getEffectivePermissions:vi.fn()}))
 import { getAccountIdentityCreator } from "@/lib/account-identities"
 import { actorRoster } from "@/lib/collaboration"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
-import { resolveSubmissionReviewer } from "./submission-reviewer"
+import { resolveAccountManagerReviewer,resolveSubmissionReviewer } from "./submission-reviewer"
 import { resolvePermissions } from "./permissions"
 
 beforeEach(()=>{
@@ -61,4 +61,16 @@ it("does not assign an owner as their own reviewer and returns null without an a
   vi.mocked(actorRoster).mockResolvedValue([{email:"person@example.com",role:"manager",accessStatus:"active",displayName:"Person"}])
   vi.mocked(getAccountIdentityCreator).mockResolvedValue("person@example.com")
   expect(await resolveSubmissionReviewer("person@example.com")).toBeNull()
+})
+
+it("routes extension requests only to an active account manager with review permission",async()=>{
+  vi.mocked(actorRoster).mockResolvedValue([
+    {email:"disabled@example.com",role:"account_manager",accessStatus:"suspended",displayName:"Disabled"},
+    {email:"manager@example.com",role:"manager",accessStatus:"active",displayName:"Manager"},
+    {email:"accounts@example.com",role:"account_manager",accessStatus:"active",displayName:"Accounts"},
+  ])
+  vi.mocked(getEffectivePermissions).mockImplementation(async email=>email==="accounts@example.com"
+    ?{role:"account_manager",permissions:resolvePermissions("account_manager")}
+    :{role:"manager",permissions:resolvePermissions("manager")})
+  expect(await resolveAccountManagerReviewer("patron@example.com")).toEqual({email:"accounts@example.com",displayName:"Accounts",assignment:"available_manager"})
 })

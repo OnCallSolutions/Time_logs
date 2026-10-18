@@ -263,6 +263,19 @@ describe("TimesheetApp admin directory", () => {
     expect(screen.getByRole("region",{name:"People and access"})).toBeVisible()
   })
 
+  it("restores the same workspace page after a refresh",async()=>{
+    const user=userEvent.setup()
+    const props={role:"admin" as const,userEmail:"admin@example.com",userName:"Admin User"}
+    const firstRender=render(<TimesheetApp {...props}/> )
+    await user.click(within(await screen.findByRole("navigation",{name:"Workspaces"})).getByRole("button",{name:"Timesheets"}))
+    await screen.findByRole("dialog",{name:"Timesheets"})
+    expect(JSON.parse(window.sessionStorage.getItem("tanovo-time:workspace-page:admin@example.com")??"{}")).toMatchObject({view:"admin",adminStartSection:"timesheets",pageWindow:true})
+
+    firstRender.unmount()
+    render(<TimesheetApp {...props}/> )
+    expect(await screen.findByRole("dialog",{name:"Timesheets"})).toBeVisible()
+  })
+
   it("shows colorful audit categories in a full-screen activity window and reveals sensitive metadata on selection", async () => {
     const user = userEvent.setup()
     render(<TimesheetApp role="admin" userEmail="admin@example.com" userName="Admin User" />)

@@ -348,6 +348,35 @@
   scroll-behavior: smooth;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-y: auto;
+  scrollbar-gutter: stable;
+  scrollbar-width: auto;
+  scrollbar-color: #64748b #e2e8f0;
+}
+
+.timesheet-scroll-region::-webkit-scrollbar {
+  width: 14px;
+  height: 14px;
+}
+
+.timesheet-scroll-region::-webkit-scrollbar-track {
+  background: #e2e8f0;
+  border-left: 1px solid #cbd5e1;
+  border-top: 1px solid #cbd5e1;
+}
+
+.timesheet-scroll-region::-webkit-scrollbar-thumb {
+  background: #64748b;
+  border: 3px solid #e2e8f0;
+  border-radius: 8px;
+}
+
+.timesheet-scroll-region::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+.timesheet-workspace-frame {
+  border: 2px solid #64748b;
+  border-bottom-width: 4px;
 }
 
 /* Let wheel input follow the pointer's nearest scroll area, then chain at its edge. */

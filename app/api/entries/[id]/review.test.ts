@@ -7,14 +7,14 @@ vi.mock("@/lib/account-identities",()=>({listAccountIdentities:vi.fn(async()=>[]
 vi.mock("@/auth",()=>({auth:vi.fn()}))
 vi.mock("@/lib/effective-permissions",()=>({getEffectivePermissions:vi.fn()}))
 vi.mock("@/lib/access",()=>({getEffectiveUserRole:vi.fn()}))
-vi.mock("@/lib/db",()=>({getTimeEntry:vi.fn(),getTimesheetSubmissionDeadline:vi.fn(async()=>null),isTimesheetDateArchived:vi.fn(async()=>false),updateTimeEntryWithAudit:vi.fn(),submitTimeEntryWithAudit:vi.fn(),rejectSubmittedEntry:vi.fn(),deleteTimeEntry:vi.fn(),recordAuditEvent:vi.fn()}))
+vi.mock("@/lib/db",()=>({getTimeEntry:vi.fn(),getTimesheetSubmissionDeadline:vi.fn(async()=>null),hasActiveTimesheetExtension:vi.fn(async()=>false),isTimesheetDateArchived:vi.fn(async()=>false),updateTimeEntryWithAudit:vi.fn(),submitTimeEntryWithAudit:vi.fn(),rejectSubmittedEntry:vi.fn(),deleteTimeEntry:vi.fn(),recordAuditEvent:vi.fn()}))
 vi.mock("@/lib/review-requests",()=>({listReviewRequests:vi.fn(async()=>[])}))
 vi.mock("@/lib/account-handoffs",()=>({approveAndForward:vi.fn()}))
 vi.mock("@/lib/submission-reviewer",()=>({resolveSubmissionReviewer:vi.fn()}))
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { getEffectiveUserRole } from "@/lib/access"
-import { getTimeEntry,getTimesheetSubmissionDeadline,isTimesheetDateArchived,updateTimeEntryWithAudit,submitTimeEntryWithAudit,deleteTimeEntry,rejectSubmittedEntry } from "@/lib/db"
+import { getTimeEntry,getTimesheetSubmissionDeadline,hasActiveTimesheetExtension,isTimesheetDateArchived,updateTimeEntryWithAudit,submitTimeEntryWithAudit,deleteTimeEntry,rejectSubmittedEntry } from "@/lib/db"
 import { resolvePermissions } from "@/lib/permissions"
 import { PATCH,DELETE } from "./route"
 import { approveAndForward } from "@/lib/account-handoffs"
@@ -133,10 +133,25 @@ it("blocks submission at the organization deadline",async()=>{
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"contractor",permissions:resolvePermissions("contractor")})
   vi.mocked(getTimeEntry).mockResolvedValue({id:"entry",ownerEmail:"contractor@example.com",status:"draft",revision:"current"} as never)
   vi.mocked(getTimesheetSubmissionDeadline).mockResolvedValue("2020-01-01T00:00:00.000Z")
+  vi.mocked(hasActiveTimesheetExtension).mockResolvedValue(false)
   const response=await PATCH(new Request("http://localhost/api/entries/entry",{method:"PATCH",body:JSON.stringify({status:"submitted",expectedRevision:"current"})}),{params:Promise.resolve({id:"entry"})})
   expect(response.status).toBe(409)
   expect((await response.json()).error).toMatch(/deadline passed/i)
   expect(submitTimeEntryWithAudit).not.toHaveBeenCalled()
+})
+it("allows a patron with an active manager-approved extension past the organization deadline",async()=>{
+  vi.mocked(auth).mockResolvedValue({user:{email:"contractor@example.com"}} as never)
+  vi.mocked(getEffectiveUserRole).mockResolvedValue("contractor")
+  vi.mocked(getEffectivePermissions).mockResolvedValue({role:"contractor",permissions:resolvePermissions("contractor")})
+  vi.mocked(getTimeEntry).mockResolvedValue({id:"entry",ownerEmail:"contractor@example.com",date:"2026-10-15",status:"draft",revision:"current"} as never)
+  vi.mocked(isTimesheetDateArchived).mockResolvedValue(true)
+  vi.mocked(getTimesheetSubmissionDeadline).mockResolvedValue("2020-01-01T00:00:00.000Z")
+  vi.mocked(hasActiveTimesheetExtension).mockResolvedValue(true)
+  vi.mocked(submitTimeEntryWithAudit).mockResolvedValue({id:"entry",ownerEmail:"contractor@example.com",status:"submitted"} as never)
+  const response=await PATCH(new Request("http://localhost/api/entries/entry",{method:"PATCH",body:JSON.stringify({status:"submitted",expectedRevision:"current"})}),{params:Promise.resolve({id:"entry"})})
+  expect(response.status).toBe(200)
+  expect(hasActiveTimesheetExtension).toHaveBeenCalledWith("contractor@example.com","2026-10-15")
+  expect(submitTimeEntryWithAudit).toHaveBeenCalledOnce()
 })
 it("rejects manager-to-manager approval",async()=>{
   vi.mocked(getTimeEntry).mockResolvedValue({id:"entry",ownerEmail:"other@example.com",status:"submitted"} as never)

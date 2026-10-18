@@ -133,6 +133,8 @@ export function EntriesLog({
   periodView = false,
   initialPeriodSelection,
   periodToolbarCenter,
+  showPatronBulkActions=false,
+  refreshKey=0,
   hideHeader = false,
   description = "Review your saved entries.",
   entries,
@@ -159,6 +161,8 @@ export function EntriesLog({
   periodView?: boolean
   initialPeriodSelection?: string
   periodToolbarCenter?: ReactNode
+  showPatronBulkActions?: boolean
+  refreshKey?: number
   hideHeader?: boolean
   description?: string
   entries: TimeEntry[]
@@ -182,6 +186,7 @@ export function EntriesLog({
   const [clearConfirmationOpen, setClearConfirmationOpen] = useState(false)
   const [submissionDeadline,setSubmissionDeadline]=useState<string|null>(null)
   const [periods,setPeriods]=useState<Array<{id:string;name:string;startDate:string;endDate:string;submissionDeadline:string;managerGraceDays:number}>>([])
+  const [extensionRequests,setExtensionRequests]=useState<Array<{periodId:string;status:string;approvedUntil:string|null}>>([])
   const [periodSelection,setPeriodSelection]=useRetainedViewState(stateKey?`${stateKey}:period`:undefined,`current`)
   useEffect(()=>{if(initialPeriodSelection)setPeriodSelection(initialPeriodSelection)},[initialPeriodSelection,setPeriodSelection])
   const [periodsLoaded,setPeriodsLoaded]=useState(false)
@@ -192,15 +197,17 @@ export function EntriesLog({
     const controller=new AbortController()
     fetch(apiPath("/api/timesheet-periods"),{cache:"no-store",signal:controller.signal}).then(async response=>{
       const data=await response.json();if(response.ok)setPeriods(data.periods??[])
+      if(canSubmit){const extensionResponse=await fetch(apiPath("/api/submission-extensions"),{cache:"no-store",signal:controller.signal});const extensionData=await extensionResponse.json();if(extensionResponse.ok)setExtensionRequests(extensionData.requests??[])}
       if(response.ok&&!(data.periods??[]).length){const legacy=await fetch(apiPath("/api/submission-deadline"),{cache:"no-store",signal:controller.signal});const boundary=await legacy.json();if(legacy.ok)setSubmissionDeadline(boundary.deadline??null)}
     }).catch(()=>{}).finally(()=>{if(!controller.signal.aborted){setDeadlineLoaded(true);setPeriodsLoaded(true)}})
     return()=>controller.abort()
-  },[canSubmit,periodView])
+  },[canSubmit,periodView,refreshKey])
   const now=Date.now()
   const todayDate=new Date()
   const today=[todayDate.getFullYear(),String(todayDate.getMonth()+1).padStart(2,"0"),String(todayDate.getDate()).padStart(2,"0")].join("-")
   const activePeriod=periods.find(period=>period.startDate<=today&&period.endDate>=today)
   const selectedPeriod=periodSelection==="current"?activePeriod:periods.find(period=>period.id===periodSelection)
+  const hasExtensionForEntry=(entry:TimeEntry)=>extensionRequests.some(request=>request.status==="approved"&&!!request.approvedUntil&&now<=Date.parse(request.approvedUntil)&&periods.some(period=>period.id===request.periodId&&entry.date>=period.startDate&&entry.date<=period.endDate))
   const ownerEntryIsArchived=(entry:TimeEntry)=>readOnlyArchivedForOwner&&(!periodsLoaded||periods.some(period=>period.endDate<today&&entry.date>=period.startDate&&entry.date<=period.endDate))
   const periodEntries=!periodView?entries:!periodsLoaded?[]:periods.length===0?entries:periodSelection==="current"?(activePeriod?entries.filter(entry=>entry.date>=activePeriod.startDate&&entry.date<=activePeriod.endDate):[]):periodSelection==="archived"?entries.filter(entry=>periods.some(period=>period.endDate<today&&entry.date>=period.startDate&&entry.date<=period.endDate)):periodSelection==="all"?entries:periodSelection==="unassigned"?entries.filter(entry=>!periods.some(period=>entry.date>=period.startDate&&entry.date<=period.endDate)):entries.filter(entry=>{const period=periods.find(candidate=>candidate.id===periodSelection);return !!period&&entry.date>=period.startDate&&entry.date<=period.endDate})
   const isEntrySubmissionOpen=(entry:TimeEntry,own:boolean)=>{
@@ -209,6 +216,7 @@ export function EntriesLog({
       if(!period)return false
       const deadline=Date.parse(period.submissionDeadline)
       if(now<=deadline)return true
+      if(hasExtensionForEntry(entry))return true
       return canSubmitOthers&&now<=deadline+period.managerGraceDays*86_400_000
     }
     return !submissionDeadline||now<Date.parse(submissionDeadline)
@@ -231,7 +239,7 @@ export function EntriesLog({
   const selectable = (canSubmit || canSubmitOthers || canRequestReview) && !!userEmail
   const selectedIdSet = new Set(selectedIds)
   const visibleIdSet = new Set(visibleEntries.map(entry => entry.id))
-  const submissions = canSubmit&&userEmail ? periodEntries.filter(entry => !ownerEntryIsArchived(entry) && !entry.payoutEligible && (entry.status === "draft" || entry.status === "rejected") && (entry.ownerEmail?.toLowerCase() === userEmail.toLowerCase() || canSubmitOthers) && isEntrySubmissionOpen(entry,entry.ownerEmail?.toLowerCase()===userEmail.toLowerCase())) : []
+  const submissions = canSubmit&&userEmail ? periodEntries.filter(entry => (!ownerEntryIsArchived(entry)||hasExtensionForEntry(entry)) && !entry.payoutEligible && (entry.status === "draft" || entry.status === "rejected") && (entry.ownerEmail?.toLowerCase() === userEmail.toLowerCase() || canSubmitOthers) && isEntrySubmissionOpen(entry,entry.ownerEmail?.toLowerCase()===userEmail.toLowerCase())) : []
   const requestable = canRequestReview ? periodEntries.filter(entry=>entry.status==="submitted"&&(entry.reviewEligible||entry.ownerEmail?.toLowerCase()===userEmail?.toLowerCase())) : []
   const eligible = [...submissions,...requestable]
   const eligibleIdSet = new Set(eligible.map(entry => entry.id))
@@ -273,7 +281,7 @@ export function EntriesLog({
   }
 
   return (
-    <div className="flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden border border-sky-300 bg-gradient-to-b from-white to-sky-50/30 shadow-sm">
+    <div className="timesheet-workspace-frame flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden bg-gradient-to-b from-white to-sky-50/30 shadow-sm">
       {clearConfirmationOpen && <WindowSurface title="Confirm clearing timesheets" onBack={() => setClearConfirmationOpen(false)} compact resizable>
         <section className="flex w-full max-w-xl flex-col bg-white text-slate-950">
           <header className="flex items-start gap-3 border-b border-red-200 bg-red-50 p-4">
@@ -306,7 +314,11 @@ export function EntriesLog({
       </div>}
       {periodView&&<div className="grid min-w-0 grid-cols-1 items-center gap-1 border-b border-indigo-300 bg-indigo-100/80 px-2.5 py-1.5 md:grid-cols-[minmax(0,1fr)_minmax(16rem,42rem)_minmax(0,1fr)]">
         <span role="status" className={`text-left text-xs font-semibold ${submissionClosed?"text-red-950":"text-orange-950"}`}>{deadlineMessage}</span>
-        {periodToolbarCenter&&<div className="min-w-0 md:col-start-2 md:justify-self-center">{periodToolbarCenter}</div>}
+        {(periodToolbarCenter||(showPatronBulkActions&&canSubmit))&&<div className="min-w-0 md:col-start-2 md:justify-self-center">{periodToolbarCenter??<div aria-label="Bulk timesheet submission" className="flex min-w-0 flex-wrap items-center justify-center gap-1.5">
+          <Button size="sm" variant="outline" className="h-8 whitespace-nowrap" disabled={!eligible.length} onClick={()=>setSelectedIds(eligible.map(entry=>entry.id))}>Select eligible ({eligible.length})</Button>
+          <Button size="sm" variant="ghost" className="h-8 whitespace-nowrap" disabled={!selected.length} onClick={()=>setSelectedIds([])}>Clear ({selected.length})</Button>
+          <SubmissionActions entries={submissions.filter(entry=>selectedIdSet.has(entry.id))} openRequest={submissionRequest} destination={submissionDestination} onStatusChange={onStatusChange} onSubmitted={id=>setSelectedIds(previous=>previous.filter(current=>current!==id))}/>
+        </div>}</div>}
         <div className="flex min-w-0 flex-wrap items-center justify-end gap-2 md:col-start-3 md:justify-self-end">
         <label className="flex items-center gap-2 text-xs font-bold text-indigo-950">Timesheet period
           <select aria-label="Timesheet period" value={periodSelection} onChange={event=>setPeriodSelection(event.target.value)} disabled={!periodsLoaded||periods.length===0} className="h-8 max-w-full rounded-md border-2 border-indigo-500 bg-white px-2 text-xs font-semibold text-indigo-950 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-700">
@@ -322,7 +334,7 @@ export function EntriesLog({
       </div>}
       {canSubmit&&!periodView&&<p role="status" className={`border-b px-3 py-1.5 text-right text-xs font-semibold ${submissionClosed?"border-red-300 bg-red-100 text-red-950":"border-orange-300 bg-orange-100 text-orange-950"}`}>{deadlineMessage}</p>}
 
-      <div className="border-b border-sky-200 bg-sky-50/50 p-1.5">
+      <div className="mx-1 flex min-h-0 min-w-0 flex-1 flex-col border-b border-sky-200 bg-sky-50/50 p-1.5 sm:mx-2">
         <div className="grid gap-1 sm:grid-cols-2 xl:grid-cols-[minmax(20rem,1.55fr)_repeat(3,minmax(9rem,1fr))_auto]">
           <label className="flex min-w-0 basis-full items-center gap-2 sm:flex-1 sm:basis-auto">
             <Search className="size-4 shrink-0" aria-hidden="true" />
@@ -345,7 +357,7 @@ export function EntriesLog({
               <label className="flex items-center gap-2 text-xs font-medium text-slate-700">Through<input aria-label="Entries through date" type="date" value={dateThrough} min={dateFrom||undefined} onChange={event=>setDateThrough(event.target.value)} className="h-7 min-w-0 flex-1 rounded-md border border-emerald-200 bg-white px-2 text-xs"/></label>
               <select aria-label="Group entries" value={groupBy} onChange={event=>setGroupBy(event.target.value)} className="h-7 rounded-md border border-teal-200 bg-white px-2 text-xs"><option value="project">Group by project</option><option value="day">Group by day</option><option value="person">Group by person</option><option value="none">No grouping</option></select>
               <div className="flex items-center justify-between gap-2"><span className="text-xs font-medium text-slate-600">{visibleEntries.length} visible · {filtersActive?"custom view":"all entries"}</span><Button variant="outline" size="sm" className="h-7" title="Reset search, filters, sorting, and grouping" aria-label="Reset timesheet view" disabled={!filtersActive} onClick={clearFilters}><FilterX className="size-4"/>Reset view</Button></div>
-              {selectable&&<div className="flex flex-wrap items-center gap-1 border-t border-orange-200 bg-orange-50/60 px-1.5 py-1 sm:col-span-2 xl:col-span-4">
+              {selectable&&!(showPatronBulkActions&&periodView)&&<div className="flex flex-wrap items-center gap-1 border-t border-orange-200 bg-orange-50/60 px-1.5 py-1 sm:col-span-2 xl:col-span-4">
                 <span className="mr-1 text-xs font-semibold text-orange-950">Bulk actions · {selected.length} selected / {matchingEligible.length} eligible</span>
                 <Button variant="outline" size="sm" disabled={!eligible.length} onClick={() => setSelectedIds(eligible.map(entry => entry.id))}>Select all eligible ({eligible.length})</Button>
                 <Button variant="ghost" size="sm" disabled={!selected.length} onClick={() => setSelectedIds([])}>Clear selection</Button>
@@ -356,7 +368,7 @@ export function EntriesLog({
           </details>
         </div>
         {visibleEntries.length === 0 && <p role="status" className="p-4 text-sm text-muted-foreground">{periodView&&periodsLoaded&&periods.length>0&&periodSelection==="current"&&!activePeriod?"No timesheet period is active today. Select an archived or upcoming period to retrieve entries.":periodView&&periodsLoaded&&periods.length===0?"No saved timesheets match the current filters.":"No matching entries."}</p>}
-        <div tabIndex={0} aria-label="Scrollable time entries" className="timesheet-scroll-region min-h-0 flex-1 overflow-auto overscroll-y-auto rounded-sm border-2 border-slate-600 bg-white">
+        <div tabIndex={0} aria-label="Scrollable time entries" className="timesheet-scroll-region min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-scroll overscroll-y-auto rounded-sm border-2 border-slate-600 bg-white">
         <table className="w-full min-w-[1080px] border-collapse border-2 border-slate-500 text-left shadow-sm [&_th]:border-r [&_th]:border-slate-400 [&_td]:border-r [&_td]:border-b [&_td]:border-slate-300 [&_th:last-child]:border-r-0 [&_td:last-child]:border-r-0">
           <thead className="sticky top-0 z-[1] bg-sky-100">
             <tr className="border-b-2 border-sky-500 text-[10px] uppercase tracking-wide text-sky-950">
@@ -380,7 +392,7 @@ export function EntriesLog({
                 <EntryLogRow entry={entry} showIdentity
                   selection={selectable ? { checked: selectedIdSet.has(entry.id) && eligibleIdSet.has(entry.id), disabled: !eligibleIdSet.has(entry.id), onChange: checked => setSelectedIds(previous => checked ? [...new Set([...previous, entry.id])] : previous.filter(id => id !== entry.id)) } : undefined}
                   canEdit={canEdit && unlocked && !ownerEntryIsArchived(entry)} canDelete={canDelete && unlocked && (!deleteOwnOnly||own) && !ownerEntryIsArchived(entry)}
-                  canSubmit={canSubmit && (own||canSubmitOthers) && !ownerEntryIsArchived(entry) && isEntrySubmissionOpen(entry,own)} canRecall={canSubmit && own && !ownerEntryIsArchived(entry)} canReview={canReview && !own}
+                  canSubmit={canSubmit && (own||canSubmitOthers) && (!ownerEntryIsArchived(entry)||hasExtensionForEntry(entry)) && isEntrySubmissionOpen(entry,own)} canRecall={canSubmit && own && !ownerEntryIsArchived(entry)} canReview={canReview && !own}
                   onUpdate={onUpdate} onStatusChange={onStatusChange} onDelete={onDelete}
                   onSubmit={canSubmit&&own?()=>{setSelectedIds([entry.id]);setSubmissionRequest(value=>value+1)}:undefined}
                   onRequestReview={onRequestReview&&requestable.some(row=>row.id===entry.id)?()=>onRequestReview([entry]):undefined}

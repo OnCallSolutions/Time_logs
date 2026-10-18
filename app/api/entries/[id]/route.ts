@@ -30,6 +30,7 @@ import {
   getTimesheetSubmissionDeadline,
   listTimeProjects,
   isTimesheetDateArchived,
+  hasActiveTimesheetExtension,
 } from "@/lib/db"
 import type { EntryStatus, TimeEntry } from "@/lib/types"
 
@@ -201,7 +202,10 @@ export async function PATCH(
     if (!current) {
       return Response.json({ error: "Entry not found." }, { status: 404 })
     }
-    if((access.role==="contractor"||access.role==="employee")&&await isTimesheetDateArchived(current.date))return Response.json({error:"Past timesheet periods are archived and read-only. Contact your manager if a correction is required."},{status:409})
+    if((access.role==="contractor"||access.role==="employee")&&await isTimesheetDateArchived(current.date)){
+      const extensionSubmission=patch.status==="submitted"&&!hasEntryFieldPatch(patch)&&await hasActiveTimesheetExtension(current.ownerEmail??access.email,current.date)
+      if(!extensionSubmission)return Response.json({error:"Past timesheet periods are archived and read-only. An approved extension only permits submitting existing draft entries."},{status:409})
+    }
     if(patch.project!==undefined&&(access.role==="contractor"||access.role==="employee")){
       const assigned=await listTimeProjects(false,access.email)
       if(!assigned.some(project=>project.name.toLocaleLowerCase()===patch.project!.toLocaleLowerCase()))return Response.json({error:"That project is not assigned to your account. Ask your manager to assign it before changing this entry."},{status:422})
@@ -277,7 +281,8 @@ export async function PATCH(
     if(!revision)return Response.json({error:"Refresh this timesheet before saving a status or editing it."},{status:409})
     if(patch.status==="submitted"){
       const submissionDeadline=await getTimesheetSubmissionDeadline()
-      if(submissionDeadline&&Date.now()>=Date.parse(submissionDeadline))return Response.json({error:`The organization submission deadline passed on ${new Date(submissionDeadline).toLocaleString()}. Contact an administrator if an exception is needed.`},{status:409})
+      const hasExtension=await hasActiveTimesheetExtension(current.ownerEmail??access.email,current.date)
+      if(submissionDeadline&&Date.now()>=Date.parse(submissionDeadline)&&!hasExtension)return Response.json({error:`The submission deadline passed on ${new Date(submissionDeadline).toLocaleString()}. Request an extension from your account manager.`},{status:409})
       let submitted: TimeEntry | null
       try {
         submitted=await submitTimeEntryWithAudit(
@@ -317,7 +322,8 @@ export async function PATCH(
       }
       if(!submitted){
         const latestDeadline=await getTimesheetSubmissionDeadline()
-        if(latestDeadline&&Date.now()>=Date.parse(latestDeadline))return Response.json({error:`The organization submission deadline passed on ${new Date(latestDeadline).toLocaleString()}. Contact an administrator if an exception is needed.`},{status:409})
+        const hasLatestExtension=await hasActiveTimesheetExtension(current.ownerEmail??access.email,current.date)
+        if(latestDeadline&&Date.now()>=Date.parse(latestDeadline)&&!hasLatestExtension)return Response.json({error:`The submission deadline passed on ${new Date(latestDeadline).toLocaleString()}. Request an extension from your account manager.`},{status:409})
         return Response.json({error:"Evidence changed. Refresh before submitting again."},{status:409})
       }
       return Response.json({entry:submitted})

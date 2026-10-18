@@ -206,6 +206,7 @@ const workflowSettingsSchemaReady = createDatabaseInitializer()
 const timesheetPeriodsSchemaReady = createDatabaseInitializer()
 const projectsSchemaReady = createDatabaseInitializer()
 const entryRejectionArchiveSchemaReady = createDatabaseInitializer()
+const submissionExtensionsSchemaReady = createDatabaseInitializer()
 
 /**
  * Maps a database row into the client-facing time entry shape.
@@ -502,6 +503,82 @@ export function ensureTimesheetPeriodsTable() {
     )`
     await sql`CREATE INDEX IF NOT EXISTS timesheet_periods_dates_idx ON timesheet_periods(start_date,end_date)`
   })
+}
+
+/** Creates scoped patron deadline requests and approved submission grants. */
+export function ensureSubmissionExtensionsTable(){
+  return submissionExtensionsSchemaReady(async()=>{
+    await ensureTimesheetPeriodsTable()
+    await sql`CREATE TABLE IF NOT EXISTS timesheet_extension_requests (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      requester_email text NOT NULL,
+      period_id uuid NOT NULL REFERENCES timesheet_periods(id) ON DELETE CASCADE,
+      assigned_to text NOT NULL,
+      reason text NOT NULL CHECK(length(reason) BETWEEN 5 AND 1000),
+      requested_until timestamptz NOT NULL,
+      status text NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','denied')),
+      reviewed_by text,
+      reviewed_at timestamptz,
+      manager_note text NOT NULL DEFAULT '',
+      approved_until timestamptz,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    )`
+    await sql`CREATE UNIQUE INDEX IF NOT EXISTS timesheet_extension_pending_owner_period_idx ON timesheet_extension_requests(lower(requester_email),period_id) WHERE status='pending'`
+    await sql`CREATE INDEX IF NOT EXISTS timesheet_extension_reviewer_status_idx ON timesheet_extension_requests(lower(assigned_to),status,created_at DESC)`
+    await sql`CREATE INDEX IF NOT EXISTS timesheet_extension_owner_period_idx ON timesheet_extension_requests(lower(requester_email),period_id,status)`
+  })
+}
+
+export type TimesheetExtensionRequest={id:string;requesterEmail:string;requesterName:string;periodId:string;periodName:string;assignedTo:string;reason:string;requestedUntil:string;status:"pending"|"approved"|"denied";reviewedBy:string|null;reviewedAt:string|null;managerNote:string;approvedUntil:string|null;createdAt:string}
+
+function toTimesheetExtensionRequest(row:Record<string,unknown>):TimesheetExtensionRequest{
+  return {id:String(row.id),requesterEmail:String(row.requester_email),requesterName:String(row.requester_name??row.requester_email),periodId:String(row.period_id),periodName:String(row.period_name),assignedTo:String(row.assigned_to),reason:String(row.reason),requestedUntil:new Date(String(row.requested_until)).toISOString(),status:String(row.status) as TimesheetExtensionRequest["status"],reviewedBy:row.reviewed_by?String(row.reviewed_by):null,reviewedAt:row.reviewed_at?new Date(String(row.reviewed_at)).toISOString():null,managerNote:String(row.manager_note??""),approvedUntil:row.approved_until?new Date(String(row.approved_until)).toISOString():null,createdAt:new Date(String(row.created_at)).toISOString()}
+}
+
+/** Lists only the signed-in patron's requests or requests routed to their reviewer. */
+export async function listTimesheetExtensionRequests(email:string,reviewer=false):Promise<TimesheetExtensionRequest[]>{
+  await ensureSubmissionExtensionsTable()
+  const rows=reviewer
+    ? await sql`SELECT r.*,p.name AS period_name,r.requester_email AS requester_name FROM timesheet_extension_requests r JOIN timesheet_periods p ON p.id=r.period_id WHERE lower(r.assigned_to)=lower(${email}) ORDER BY CASE r.status WHEN 'pending' THEN 0 ELSE 1 END,r.created_at DESC LIMIT 100`
+    : await sql`SELECT r.*,p.name AS period_name,r.requester_email AS requester_name FROM timesheet_extension_requests r JOIN timesheet_periods p ON p.id=r.period_id WHERE lower(r.requester_email)=lower(${email}) ORDER BY r.created_at DESC LIMIT 100`
+  return rows.map(row=>toTimesheetExtensionRequest(row as Record<string,unknown>))
+}
+
+/** Creates a request only when the patron has draft or returned work in that period. */
+export async function createTimesheetExtensionRequest(input:{ownerEmail:string;periodId:string;assignedTo:string;reason:string;requestedUntil:string},context:AuditContext):Promise<TimesheetExtensionRequest|null>{
+  await ensureSubmissionExtensionsTable();await ensureTimeEntriesTable();await ensureAuditEventsTable()
+  const rows=await sql`WITH created AS (
+    INSERT INTO timesheet_extension_requests(requester_email,period_id,assigned_to,reason,requested_until)
+    SELECT lower(${input.ownerEmail}),p.id,lower(${input.assignedTo}),${input.reason}::text,${input.requestedUntil}::timestamptz
+    FROM timesheet_periods p WHERE p.id=${input.periodId}::uuid AND ${input.requestedUntil}::timestamptz>p.submission_deadline
+      AND EXISTS(SELECT 1 FROM time_entries e WHERE lower(e.owner_email)=lower(${input.ownerEmail}) AND e.work_date BETWEEN p.start_date AND p.end_date AND e.status IN ('draft','rejected') AND e.payout_eligible_at IS NULL)
+    ON CONFLICT DO NOTHING RETURNING *
+  ), audited AS (
+    INSERT INTO audit_events(actor_email,action,target_type,target_id,metadata,ip_address,user_agent,request_method,request_path,request_id)
+    SELECT lower(${input.ownerEmail}),'timesheet_extension_requested','timesheet_extension_request',id::text,jsonb_build_object('periodId',period_id,'assignedTo',assigned_to,'requestedUntil',requested_until),${context.ipAddress}::text,${context.userAgent}::text,${context.requestMethod}::text,${context.requestPath}::text,${context.requestId}::text FROM created RETURNING target_id
+  ) SELECT c.*,p.name AS period_name,c.requester_email AS requester_name FROM created c JOIN timesheet_periods p ON p.id=c.period_id WHERE EXISTS(SELECT 1 FROM audited)`
+  return rows.length?toTimesheetExtensionRequest(rows[0] as Record<string,unknown>):null
+}
+
+/** Makes a one-time, assigned-manager decision and records the grant atomically. */
+export async function decideTimesheetExtensionRequest(id:string,reviewerEmail:string,decision:"approved"|"denied",managerNote:string,context:AuditContext):Promise<TimesheetExtensionRequest|null>{
+  await ensureSubmissionExtensionsTable();await ensureAuditEventsTable()
+  const rows=await sql`WITH changed AS (
+    UPDATE timesheet_extension_requests SET status=${decision},reviewed_by=lower(${reviewerEmail}),reviewed_at=now(),manager_note=${managerNote}::text,approved_until=CASE WHEN ${decision}='approved' THEN requested_until ELSE NULL END,updated_at=now()
+    WHERE id=${id}::uuid AND status='pending' AND lower(assigned_to)=lower(${reviewerEmail}) RETURNING *
+  ), audited AS (
+    INSERT INTO audit_events(actor_email,action,target_type,target_id,metadata,ip_address,user_agent,request_method,request_path,request_id)
+    SELECT lower(${reviewerEmail}),CASE WHEN ${decision}='approved' THEN 'timesheet_extension_approved' ELSE 'timesheet_extension_denied' END,'timesheet_extension_request',id::text,jsonb_build_object('periodId',period_id,'requesterEmail',requester_email,'approvedUntil',approved_until,'hasManagerNote',length(manager_note)>0),${context.ipAddress}::text,${context.userAgent}::text,${context.requestMethod}::text,${context.requestPath}::text,${context.requestId}::text FROM changed RETURNING target_id
+  ) SELECT c.*,p.name AS period_name,c.requester_email AS requester_name FROM changed c JOIN timesheet_periods p ON p.id=c.period_id WHERE EXISTS(SELECT 1 FROM audited)`
+  return rows.length?toTimesheetExtensionRequest(rows[0] as Record<string,unknown>):null
+}
+
+/** Checks a patron-specific approved window for user-facing deadline feedback. */
+export async function hasActiveTimesheetExtension(ownerEmail:string,workDate:string):Promise<boolean>{
+  await ensureSubmissionExtensionsTable()
+  const rows=await sql`SELECT EXISTS(SELECT 1 FROM timesheet_extension_requests r JOIN timesheet_periods p ON p.id=r.period_id WHERE lower(r.requester_email)=lower(${ownerEmail}) AND r.status='approved' AND r.approved_until>now() AND ${workDate}::date BETWEEN p.start_date AND p.end_date) AS active`
+  return Boolean(rows[0]?.active)
 }
 
 /** Creates a shared project catalog and imports existing project names once. */
@@ -1653,6 +1730,7 @@ export async function submitTimeEntryWithAudit(
   await ensureAuditEventsTable()
   await ensureWorkflowSettingsTable()
   await ensureTimesheetPeriodsTable()
+  await ensureSubmissionExtensionsTable()
 
   const rows = await sql`WITH changed AS (
     UPDATE time_entries
@@ -1675,7 +1753,9 @@ export async function submitTimeEntryWithAudit(
       AND (
         EXISTS (SELECT 1 FROM timesheet_periods)
         AND EXISTS (SELECT 1 FROM timesheet_periods p WHERE work_date BETWEEN p.start_date AND p.end_date
-          AND (now() <= p.submission_deadline OR (${actorRole}::text = 'manager' AND now() <= p.submission_deadline + make_interval(days => p.manager_grace_days))))
+          AND (now() <= p.submission_deadline OR (${actorRole}::text = 'manager' AND now() <= p.submission_deadline + make_interval(days => p.manager_grace_days)) OR EXISTS (
+            SELECT 1 FROM timesheet_extension_requests x WHERE lower(x.requester_email)=lower(time_entries.owner_email) AND x.period_id=p.id AND x.status='approved' AND x.approved_until>=now()
+          )))
         OR (NOT EXISTS (SELECT 1 FROM timesheet_periods) AND NOT EXISTS (
           SELECT 1 FROM organization_workflow_settings WHERE id='organization' AND timesheet_submission_deadline <= now()
         ))

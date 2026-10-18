@@ -37,3 +37,19 @@ export async function resolveSubmissionReviewer(ownerEmail:string):Promise<Submi
   const {role:_,...reviewer}=selected
   return addedBy?{...reviewer,assignment:"added_by_manager"}:reviewer
 }
+
+/** Resolves an active account manager for patron deadline-extension decisions. */
+export async function resolveAccountManagerReviewer(ownerEmail:string):Promise<SubmissionReviewer|null>{
+  const owner=ownerEmail.toLowerCase()
+  const roster=await actorRoster()
+  const candidates=await Promise.all(roster
+    .filter(actor=>actor.role==="account_manager"&&actor.accessStatus==="active"&&actor.email.toLowerCase()!==owner)
+    .map(async actor=>{
+      const access=await getEffectivePermissions(actor.email)
+      return access.role==="account_manager"&&access.permissions.review_entries
+        ?{email:actor.email.toLowerCase(),displayName:actor.displayName||actor.email,assignment:"available_manager" as const}
+        :null
+    }))
+  return candidates.filter((candidate):candidate is {email:string;displayName:string;assignment:"available_manager"}=>candidate!==null)
+    .sort((a,b)=>a.displayName.localeCompare(b.displayName)||a.email.localeCompare(b.email))[0]??null
+}
