@@ -3,13 +3,13 @@
 import { useEffect, useState } from "react"
 import { Activity, CalendarClock, CheckCircle2, ChevronRight, Clock3, Pencil, RefreshCw } from "lucide-react"
 import { apiPath } from "@/lib/paths"
-import type { TimeEntry } from "@/lib/types"
+import type { TimeEntry, UserRole } from "@/lib/types"
 import { Button } from "@/components/ui/button"
 
 type Period={id:string;name:string;startDate:string;endDate:string;submissionDeadline:string}
 
 /** Gives each role a period archive before opening its raw timesheet records. */
-export function TimesheetPeriodLanding({entries,onSelect,onLogTime,onRefresh,canCreate=false,personalReadiness=false}:{entries:TimeEntry[];onSelect:(periodId:string)=>void;onLogTime?:()=>void;onRefresh?:()=>void;canCreate?:boolean;personalReadiness?:boolean}){
+export function TimesheetPeriodLanding({entries,onSelect,onLogTime,onRefresh,canCreate=false,personalReadiness=false,role}:{entries:TimeEntry[];onSelect:(periodId:string)=>void;onLogTime?:()=>void;onRefresh?:()=>void;canCreate?:boolean;personalReadiness?:boolean;role?:UserRole}){
   const [periods,setPeriods]=useState<Period[]>([])
   const [loading,setLoading]=useState(true)
   const [error,setError]=useState("")
@@ -39,16 +39,25 @@ export function TimesheetPeriodLanding({entries,onSelect,onLogTime,onRefresh,can
   const needsAction=featuredStatuses.draft+featuredStatuses.rejected
   const featuredPeople=new Set(featuredEntries.map(entry=>entry.contractor).filter(Boolean)).size
   const featuredProjects=new Set(featuredEntries.map(entry=>entry.project).filter(Boolean)).size
+  const accountManagerView=role==="account_manager"||role==="admin"
+  const projectPreview=[...featuredEntries.reduce((projects,entry)=>{
+    const summary=projects.get(entry.project)??{hours:0,entries:0}
+    summary.hours+=Number(entry.hours)||0;summary.entries+=1;projects.set(entry.project,summary);return projects
+  },new Map<string,{hours:number;entries:number}>())].sort((a,b)=>b[1].hours-a[1].hours||a[0].localeCompare(b[0])).slice(0,4)
+  const managerPreview=[...featuredEntries.reduce((managers,entry)=>{
+    const name=entry.reviewManagerName||entry.reviewManagerEmail||"Manager not assigned"
+    managers.set(name,(managers.get(name)??0)+1);return managers
+  },new Map<string,number>())].sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0])).slice(0,4)
   const openAll=()=>onSelect("all")
-  return <section aria-label="Timesheet periods" className="flex min-h-0 w-full flex-col gap-3">
+  return <section aria-label="Timesheet periods" className="flex min-h-0 min-w-0 w-full flex-1 flex-col gap-2">
     <header className="flex flex-wrap items-center justify-between gap-2 border-b border-sky-200 bg-gradient-to-r from-sky-50 via-white to-emerald-50 px-3 py-2">
       <div><h2 className="text-sm font-semibold text-sky-950">Timesheet periods</h2><p className="text-xs text-slate-600">Choose a period to open its raw time entries and submission controls.</p></div>
       <div className="flex gap-1.5">{canCreate&&onLogTime&&<Button size="sm" onClick={onLogTime}><Pencil className="size-3.5"/>Log time</Button>}{onRefresh&&<Button size="sm" variant="outline" onClick={onRefresh}><RefreshCw className="size-3.5"/>Refresh</Button>}</div>
     </header>
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-slate-200 px-1 pb-2 text-xs"><span>{entries.length} visible entries</span><span>{entries.reduce((sum,entry)=>sum+Number(entry.hours||0),0).toLocaleString(undefined,{maximumFractionDigits:2})} hours</span><span className="text-emerald-800">{entries.filter(entry=>entry.status==="approved").length} approved</span><span className="text-blue-800">{entries.filter(entry=>entry.status==="submitted").length} awaiting review</span><span className="text-orange-800">{entries.filter(entry=>entry.status==="draft").length} drafts</span></div>
     {error&&<p role="alert" className="border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>}
-    {loading?<p role="status" className="px-2 py-4 text-sm text-slate-600">Loading period archive…</p>:<div className="grid min-h-0 gap-3 lg:grid-cols-[minmax(15rem,0.72fr)_minmax(0,1.28fr)]">
-      <nav aria-label="Available timesheet periods" className="min-h-0 overflow-auto border-y border-sky-200 bg-sky-50/30 p-2">
+    {loading?<p role="status" className="px-2 py-4 text-sm text-slate-600">Loading period archive…</p>:<div className="grid min-h-0 flex-1 grid-rows-[minmax(8rem,0.4fr)_minmax(0,1fr)] gap-2 lg:grid-cols-[minmax(15rem,0.72fr)_minmax(0,1.28fr)] lg:grid-rows-1">
+      <nav aria-label="Available timesheet periods" className="min-h-0 max-h-[calc(100dvh-14rem)] overflow-auto border border-sky-200 bg-sky-50/30 p-2 lg:max-h-none">
         <button type="button" onClick={openAll} className="mb-2 flex w-full items-center justify-between rounded-md border-l-2 border-blue-500 bg-blue-50 px-2.5 py-2 text-left transition hover:bg-blue-100"><span><span className="block text-xs font-semibold text-blue-950">All saved periods</span><span className="block text-[10px] text-blue-800">Combined view · all matching entries</span></span><span className="text-xs tabular-nums text-blue-950">{entries.length}</span></button>
         {!periods.length?<p className="px-2 py-3 text-xs text-slate-600">No time periods are configured. Open all saved timesheets to view existing entries.</p>:<>
           {current.length>0&&<PeriodGroup title="Current period" periods={current} today={today} onSelect={onSelect} dueLabel={dueLabel} periodEntries={periodEntries}/>}
@@ -57,7 +66,7 @@ export function TimesheetPeriodLanding({entries,onSelect,onLogTime,onRefresh,can
           {!current.length&&!upcoming.length&&!archived.length&&<p className="px-2 py-3 text-xs text-slate-600">No periods are available.</p>}
         </>}
       </nav>
-      <section aria-label="Period overview" className="flex min-h-40 min-w-0 flex-col border-y border-emerald-200 bg-gradient-to-br from-emerald-50/70 via-white to-orange-50/60 p-4">
+      <section aria-label="Period overview" className="flex min-h-0 min-w-0 flex-col overflow-y-auto border border-emerald-200 bg-gradient-to-br from-emerald-50/70 via-white to-orange-50/60 p-2.5 sm:p-3">
         {featuredPeriod?<>
           <header className="flex flex-wrap items-start justify-between gap-3 border-b border-emerald-200 pb-3"><div className="flex min-w-0 items-start gap-2"><CalendarClock className="mt-0.5 size-5 shrink-0 text-emerald-700" aria-hidden="true"/><div className="min-w-0"><p className="text-[10px] font-semibold uppercase text-emerald-800">{active?"Current period":upcoming.length?"Next period":"Most recent period"}</p><h3 className="truncate text-base font-semibold text-emerald-950">{featuredPeriod.name}</h3><p className="text-xs text-slate-600">{featuredPeriod.startDate} – {featuredPeriod.endDate}</p></div></div><Button size="sm" onClick={()=>onSelect(featuredPeriod.id)}>Open timesheets<ChevronRight className="size-3.5"/></Button></header>
           <div className={`grid grid-cols-2 gap-2 py-3 sm:grid-cols-3 ${personalReadiness?"lg:grid-cols-5":"lg:grid-cols-6"}`}>
@@ -87,6 +96,16 @@ export function TimesheetPeriodLanding({entries,onSelect,onLogTime,onRefresh,can
               <span className="flex items-center gap-2"><span className="tabular-nums text-slate-700">{Number(entry.hours).toLocaleString(undefined,{maximumFractionDigits:2})}h</span><span className={`rounded-full px-1.5 py-0.5 text-[10px] capitalize ${entry.status==="approved"?"bg-emerald-100 text-emerald-800":entry.status==="submitted"?"bg-sky-100 text-sky-800":entry.status==="rejected"?"bg-red-100 text-red-800":"bg-orange-100 text-orange-900"}`}>{entry.status}</span></span>
             </li>)}</ul>:<p className="px-2.5 py-2 text-xs text-slate-600">No time entries in this period yet.</p>}
           </section>
+          {accountManagerView&&<section aria-label="Project and manager preview" className="mt-2 grid min-w-0 gap-2 sm:grid-cols-2">
+            <div className="min-w-0 border border-emerald-200 bg-white/80">
+              <h4 className="border-b border-emerald-100 px-2 py-1 text-[11px] font-semibold text-emerald-950">Projects in this period</h4>
+              {projectPreview.length?<ul className="divide-y divide-slate-100">{projectPreview.map(([project,summary])=><li key={project} className="flex min-w-0 items-center justify-between gap-2 px-2 py-1 text-[11px]"><span className="min-w-0 truncate font-medium" title={project}>{project}</span><span className="shrink-0 tabular-nums text-slate-700">{summary.entries} entries · {summary.hours.toLocaleString(undefined,{maximumFractionDigits:2})}h</span></li>)}</ul>:<p className="px-2 py-2 text-[11px] text-slate-600">No projects have time recorded.</p>}
+            </div>
+            <div className="min-w-0 border border-blue-200 bg-white/80">
+              <h4 className="border-b border-blue-100 px-2 py-1 text-[11px] font-semibold text-blue-950">Review managers</h4>
+              {managerPreview.length?<ul className="divide-y divide-slate-100">{managerPreview.map(([manager,count])=><li key={manager} className="flex min-w-0 items-center justify-between gap-2 px-2 py-1 text-[11px]"><span className="min-w-0 truncate font-medium" title={manager}>{manager}</span><span className="shrink-0 tabular-nums text-slate-700">{count} {count===1?"entry":"entries"}</span></li>)}</ul>:<p className="px-2 py-2 text-[11px] text-slate-600">No manager assignments recorded.</p>}
+            </div>
+          </section>}
           <p className="mt-auto pt-3 text-xs text-slate-600"><CheckCircle2 className="mr-1 inline size-3.5 text-emerald-700"/>Choose any period on the left to open its searchable raw timesheets and approval controls. Archived periods remain read-only.</p>
         </>:<div className="flex min-h-40 flex-1 flex-col justify-center"><CalendarClock className="mb-2 size-5 text-emerald-700" aria-hidden="true"/><h3 className="text-sm font-semibold text-emerald-950">No timesheet periods configured</h3><p className="mt-1 max-w-xl text-sm text-slate-700">Open all saved timesheets to review existing records, or ask an account manager to configure the next work period.</p><Button className="mt-3 w-fit" size="sm" variant="outline" onClick={openAll}>Open all saved timesheets<ChevronRight className="size-3.5"/></Button></div>}
       </section>

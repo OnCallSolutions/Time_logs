@@ -60,3 +60,20 @@ it("shows personal record readiness and opens the period for review",async()=>{
   await userEvent.click(within(readiness).getByRole("button",{name:"Review timesheets"}))
   expect(onSelect).toHaveBeenCalledWith("current")
 })
+
+it("gives account managers project and reviewing-manager previews",async()=>{
+  vi.stubGlobal("fetch",vi.fn(async()=>new Response(JSON.stringify({periods:[
+    {id:"current",name:"October",startDate:"2026-10-01",endDate:"2026-10-31",submissionDeadline:"2026-11-02T17:00:00.000Z"},
+  ]}))))
+  render(<TimesheetPeriodLanding role="account_manager" entries={[
+    {id:"one",date:"2026-10-10",hours:3,status:"submitted",contractor:"Taylor",project:"Field",description:"Inspection",reviewManagerName:"Morgan Lee"},
+    {id:"two",date:"2026-10-11",hours:2,status:"approved",contractor:"Jordan",project:"Field",description:"Setup",reviewManagerName:"Morgan Lee"},
+  ] as never} onSelect={vi.fn()}/> )
+  const preview=await screen.findByRole("region",{name:"Project and manager preview"})
+  expect(preview).toHaveTextContent("Projects in this period")
+  expect(preview).toHaveTextContent("Field")
+  expect(preview).toHaveTextContent("5h")
+  expect(preview).toHaveTextContent("Morgan Lee")
+  expect(screen.getByRole("region",{name:"Period overview"})).toHaveClass("overflow-y-auto")
+  expect(screen.getByRole("navigation",{name:"Available timesheet periods"})).toHaveClass("overflow-auto")
+})
