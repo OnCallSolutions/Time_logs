@@ -39,8 +39,8 @@ function reconcileWindows(): void {
  * @param props.sessionGuard - Marks the privileged privacy shield during session verification.
  * @returns React portal containing the active application window.
  */
-export function WindowSurface({ title, onBack, disabled = false, children,sessionGuard=false,compact=true,resizable=true,assistant=true }: {
-  title: string; onBack: () => void; disabled?: boolean; children: ReactNode;sessionGuard?:boolean;compact?:boolean;resizable?:boolean;assistant?:boolean
+export function WindowSurface({ title, onBack, disabled = false, children,sessionGuard=false,compact=true,resizable=true,assistant=true,showSizeToggle=true }: {
+  title: string; onBack: () => void; disabled?: boolean; children: ReactNode;sessionGuard?:boolean;compact?:boolean;resizable?:boolean;assistant?:boolean;showSizeToggle?:boolean
 }) {
   const [expanded, setExpanded] = useState(true)
   const [assistantOpen,setAssistantOpen]=useState(false)
@@ -129,12 +129,12 @@ export function WindowSurface({ title, onBack, disabled = false, children,sessio
         <div className="flex shrink-0 items-center justify-between gap-3 border-b-2 border-orange-400 bg-gradient-to-r from-orange-50 via-sky-50 to-emerald-50 px-3 py-2">
           <Button variant="outline" size="sm" disabled={disabled} onClick={onBack} className="border-orange-200 bg-white/80 text-slate-800 hover:bg-orange-100"><ArrowLeft className="size-4" />Back</Button>
           <h1 className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-900">{title}</h1>
-          <div className="flex items-center gap-1">
+          {showSizeToggle&&<div className="flex items-center gap-1">
             <Button variant="outline" size="icon-sm" title={expanded ? "Restore window" : "Expand window"}
               aria-label={expanded ? "Restore window" : "Expand window"} onClick={() => setExpanded(value => !value)} className="border-sky-200 bg-white/80 text-sky-900 hover:bg-sky-100">
               {expanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
             </Button>
-          </div>
+          </div>}
         </div>
         <div className="window-content flex min-h-0 flex-1 justify-center overflow-hidden">{children}</div>
         {assistant&&renderAssistant&&<div className="pointer-events-none absolute bottom-4 right-4 z-30">
