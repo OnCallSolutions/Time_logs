@@ -633,7 +633,7 @@ export async function createTimesheetPeriod(input:{name:string;startDate:string;
   const rows=await sql`WITH lock AS (SELECT pg_advisory_xact_lock(hashtext('tanovo-timesheet-periods'))), saved AS (
     INSERT INTO timesheet_periods(name,start_date,end_date,submission_deadline,manager_grace_days,reminder_days,created_by)
     SELECT ${input.name},${input.startDate}::date,${input.endDate}::date,${input.submissionDeadline}::timestamptz,${input.managerGraceDays},${input.reminderDays},${actor.toLowerCase()}
-    FROM lock WHERE NOT EXISTS(SELECT 1 FROM timesheet_periods WHERE start_date <= ${input.endDate}::date AND end_date >= ${input.startDate}::date)
+    FROM lock WHERE ${input.endDate}::date >= CURRENT_DATE AND NOT EXISTS(SELECT 1 FROM timesheet_periods WHERE start_date <= ${input.endDate}::date AND end_date >= ${input.startDate}::date)
     RETURNING *
   ), audited AS (
     INSERT INTO audit_events(actor_email,action,target_type,target_id,metadata,ip_address,user_agent,request_method,request_path,request_id)
@@ -675,7 +675,7 @@ export async function updateTimesheetPeriod(id:string,input:{name:string;startDa
   ), saved AS (
     UPDATE timesheet_periods p SET name=${input.name},start_date=${input.startDate}::date,end_date=${input.endDate}::date,
       submission_deadline=${input.submissionDeadline}::timestamptz,manager_grace_days=${input.managerGraceDays},reminder_days=${input.reminderDays}
-    FROM before b WHERE p.id=b.id AND NOT EXISTS(SELECT 1 FROM timesheet_periods other
+    FROM before b WHERE p.id=b.id AND b.end_date>=CURRENT_DATE AND ${input.endDate}::date>=CURRENT_DATE AND NOT EXISTS(SELECT 1 FROM timesheet_periods other
       WHERE other.id<>p.id AND other.start_date<=${input.endDate}::date AND other.end_date>=${input.startDate}::date)
     RETURNING p.*
   ), audited AS (

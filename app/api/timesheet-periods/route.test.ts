@@ -56,6 +56,11 @@ it("rejects inverted date ranges",async()=>{
   expect(response.status).toBe(400)
   expect(createTimesheetPeriod).not.toHaveBeenCalled()
 })
+it("rejects creation of a period whose end date is in the past",async()=>{
+  const response=await POST(new Request("http://localhost/api/timesheet-periods",{method:"POST",body:JSON.stringify({...payload,startDate:"2020-01-01",endDate:"2020-01-31"})}))
+  expect(response.status).toBe(400)
+  expect(createTimesheetPeriod).not.toHaveBeenCalled()
+})
 it("allows an authorized account manager to apply a reasoned period override",async()=>{
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"account_manager",permissions:{manage_timesheet_periods:true}} as never)
   const response=await PATCH(new Request("http://localhost/api/timesheet-periods",{method:"PATCH",body:JSON.stringify({id:"123e4567-e89b-42d3-a456-426614174000",...payload,submissionDeadline:"2026-10-10T17:00:00.000Z",reason:"Approved extension"})}))
@@ -68,5 +73,11 @@ it("requires period-management rights and a reason for period overrides",async()
   expect((await PATCH(new Request("http://localhost/api/timesheet-periods",{method:"PATCH",body:JSON.stringify(body)}))).status).toBe(403)
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"admin",permissions:{manage_timesheet_periods:true}} as never)
   expect((await PATCH(new Request("http://localhost/api/timesheet-periods",{method:"PATCH",body:JSON.stringify({...body,reason:"no"})}))).status).toBe(400)
+  expect(updateTimesheetPeriod).not.toHaveBeenCalled()
+})
+it("prevents edits to periods that have already ended",async()=>{
+  const response=await PATCH(new Request("http://localhost/api/timesheet-periods",{method:"PATCH",body:JSON.stringify({id:"123e4567-e89b-42d3-a456-426614174000",...payload,startDate:"2020-01-01",endDate:"2020-01-31",reason:"Correct historical dates"})}))
+  expect(response.status).toBe(409)
+  expect(await response.json()).toMatchObject({error:"Past periods are archived and cannot be edited."})
   expect(updateTimesheetPeriod).not.toHaveBeenCalled()
 })

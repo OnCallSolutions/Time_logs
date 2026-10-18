@@ -36,6 +36,7 @@ export async function POST(req: Request) {
     if (!access.permissions.manage_timesheet_periods) return Response.json({ error: "You are not authorized to configure timesheet periods." }, { status: 403 })
     const input = periodSchema.parse(await req.json())
     if (input.startDate > input.endDate) return Response.json({ error: "The period start must be on or before its end." }, { status: 400 })
+    if (input.endDate < new Date().toISOString().slice(0,10)) return Response.json({ error: "Past periods are archived. New periods must include today or a future date." }, { status: 400 })
     if (Date.parse(input.submissionDeadline) <= Date.now()) return Response.json({ error: "Choose a future submission deadline." }, { status: 400 })
     const period = await createTimesheetPeriod(input, email, getAuditContext(req))
     if (!period) return Response.json({ error: "This work-date range overlaps an existing period. Refresh periods and choose a non-overlapping range." }, { status: 409 })
@@ -55,6 +56,7 @@ export async function PATCH(req: Request) {
     if (!access.permissions.manage_timesheet_periods) return Response.json({ error: "You are not authorized to change timesheet periods." }, { status: 403 })
     const input = z.object({ id:z.string().uuid(), ...periodSchema.shape, reason:z.string().trim().min(5).max(500) }).strict().parse(await req.json())
     if (input.startDate > input.endDate) return Response.json({ error: "The period start must be on or before its end." }, { status: 400 })
+    if (input.endDate < new Date().toISOString().slice(0,10)) return Response.json({ error: "Past periods are archived and cannot be edited." }, { status: 409 })
     const { id, reason, ...period }=input
     const saved=await updateTimesheetPeriod(id,period,email,reason,getAuditContext(req))
     if (!saved) return Response.json({ error: "The period was not found or its dates overlap another period. Refresh and try again." }, { status: 409 })
