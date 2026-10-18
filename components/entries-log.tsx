@@ -9,7 +9,7 @@
  * should be available.
  */
 import { AlertTriangle, ChevronRight, Download, FilterX, Search, ClipboardList, Trash2 } from "lucide-react"
-import { Fragment,useEffect,useState } from "react"
+import { Fragment,useEffect,useState,type ReactNode } from "react"
 import { EntryLogRow, type EntryMutation, type EntryTransition } from "@/components/entry-log-row"
 import { EntryReviewDialog } from "@/components/manager-workspace"
 import { SubmissionActions } from "@/components/submission-actions"
@@ -132,6 +132,7 @@ export function EntriesLog({
   readOnlyArchivedForOwner = false,
   periodView = false,
   initialPeriodSelection,
+  periodToolbarCenter,
   hideHeader = false,
   description = "Review your saved entries.",
   entries,
@@ -157,6 +158,7 @@ export function EntriesLog({
   readOnlyArchivedForOwner?: boolean
   periodView?: boolean
   initialPeriodSelection?: string
+  periodToolbarCenter?: ReactNode
   hideHeader?: boolean
   description?: string
   entries: TimeEntry[]
@@ -239,7 +241,7 @@ export function EntriesLog({
   if (entries.length === 0) {
     return (
       <div className="border-y border-border bg-card/50">
-      {(canSubmit||periodView)&&<p role="status" className={`border-b px-4 py-2 text-xs ${submissionClosed?"border-red-200 bg-red-50 text-red-900":"border-orange-200 bg-orange-50/70 text-orange-950"}`}>{deadlineMessage}</p>}
+      {periodView?<div className="grid min-w-0 grid-cols-1 items-center gap-1 border-b border-indigo-300 bg-indigo-100/80 px-2.5 py-1.5 md:grid-cols-[minmax(0,1fr)_minmax(16rem,42rem)_minmax(0,1fr)]"><span role="status" className={`text-left text-xs font-semibold ${submissionClosed?"text-red-950":"text-orange-950"}`}>{deadlineMessage}</span>{periodToolbarCenter&&<div className="min-w-0 md:col-start-2 md:justify-self-center">{periodToolbarCenter}</div>}</div>:canSubmit&&<p role="status" className={`border-b px-4 py-2 text-xs ${submissionClosed?"border-red-200 bg-red-50 text-red-900":"border-orange-200 bg-orange-50/70 text-orange-950"}`}>{deadlineMessage}</p>}
       <div className="flex min-h-56 flex-col items-center justify-center px-6 py-10 text-center">
         {!hideHeader&&<div className="mb-6 w-full max-w-3xl text-left">
           <h2 className="text-sm font-semibold">{title}</h2>
@@ -302,7 +304,10 @@ export function EntriesLog({
           {canExport&&<Button variant="outline" size="sm" className="h-7 border-emerald-300 bg-emerald-50 px-2 text-xs text-emerald-900 hover:bg-emerald-100" disabled={!visibleEntries.length} onClick={()=>downloadTimesheetCsv(visibleEntries)}><Download className="size-3.5" aria-hidden="true"/>Export ({visibleEntries.length})</Button>}
         </div>
       </div>}
-      {periodView&&<div className="flex flex-wrap items-center justify-end gap-2 border-b border-indigo-300 bg-indigo-100/80 px-2.5 py-1.5">
+      {periodView&&<div className="grid min-w-0 grid-cols-1 items-center gap-1 border-b border-indigo-300 bg-indigo-100/80 px-2.5 py-1.5 md:grid-cols-[minmax(0,1fr)_minmax(16rem,42rem)_minmax(0,1fr)]">
+        <span role="status" className={`text-left text-xs font-semibold ${submissionClosed?"text-red-950":"text-orange-950"}`}>{deadlineMessage}</span>
+        {periodToolbarCenter&&<div className="min-w-0 md:col-start-2 md:justify-self-center">{periodToolbarCenter}</div>}
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-2 md:col-start-3 md:justify-self-end">
         <label className="flex items-center gap-2 text-xs font-bold text-indigo-950">Timesheet period
           <select aria-label="Timesheet period" value={periodSelection} onChange={event=>setPeriodSelection(event.target.value)} disabled={!periodsLoaded||periods.length===0} className="h-8 max-w-full rounded-md border-2 border-indigo-500 bg-white px-2 text-xs font-semibold text-indigo-950 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-700">
             <option value="current">Current period{activePeriod?` · ${activePeriod.name}`:""}</option>
@@ -313,8 +318,9 @@ export function EntriesLog({
           </select>
         </label>
         <span role="status" className="text-right text-xs font-semibold text-indigo-950">{!periodsLoaded?"Loading period history…":periods.length===0?"No periods are configured; showing all saved timesheets.":periodSelection==="current"&&!activePeriod?"No period is active today. Select an archived or upcoming period.":periodSelection==="archived"?"Archived entries remain stored and can be retrieved by period.":`Showing ${periodEntries.length} entries for ${periodSelection==="current"?activePeriod?.name??"the current period":periodSelection==="all"?"all periods":periodSelection==="unassigned"?"dates outside configured periods":periods.find(period=>period.id===periodSelection)?.name??"the selected period"}.`}</span>
+        </div>
       </div>}
-      {(canSubmit||periodView)&&<p role="status" className={`border-b px-3 py-1.5 text-right text-xs font-semibold ${submissionClosed?"border-red-300 bg-red-100 text-red-950":"border-orange-300 bg-orange-100 text-orange-950"}`}>{deadlineMessage}</p>}
+      {canSubmit&&!periodView&&<p role="status" className={`border-b px-3 py-1.5 text-right text-xs font-semibold ${submissionClosed?"border-red-300 bg-red-100 text-red-950":"border-orange-300 bg-orange-100 text-orange-950"}`}>{deadlineMessage}</p>}
 
       <div className="border-b border-sky-200 bg-sky-50/50 p-1.5">
         <div className="grid gap-1 sm:grid-cols-2 xl:grid-cols-[minmax(20rem,1.55fr)_repeat(3,minmax(9rem,1fr))_auto]">

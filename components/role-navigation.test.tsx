@@ -31,6 +31,7 @@ beforeEach(()=>{
     if(url.endsWith("/api/entries")) return Response.json({entries:servedEntries})
     if(url.endsWith("/api/timesheet-periods")) return Response.json({periods:[{id:"period-1",name:"October 2026",startDate:"2026-10-01",endDate:"2026-10-31",submissionDeadline:"2026-11-02T17:00:00.000Z",managerGraceDays:3,reminderDays:3}]})
     if(url.endsWith("/api/users")) return Response.json({users:[]})
+    if(url.endsWith("/api/manager/team")) return Response.json({people:[]})
     if(url.endsWith("/api/assistant/conversations")) return Response.json({id:"123e4567-e89b-42d3-a456-426614174000",messages:[]})
     if(url.includes("/api/assistant/runs")) return Response.json({runs:[],hasMore:false})
     return Response.json({events:[]})

@@ -584,6 +584,19 @@ export async function listTimeProjectAssignments():Promise<{projectId:string;ema
   return rows.map(row=>({projectId:String(row.project_id),email:String(row.patron_email)}))
 }
 
+/** @returns Employees and contractors assigned to a manager through an active project or reviewer assignment. */
+export async function listManagerWorkforceEmails(managerEmail:string):Promise<string[]>{
+  await ensureProjectsTable()
+  const rows=await sql`SELECT DISTINCT lower(team.email) AS email FROM (
+    SELECT owner_email AS email FROM time_entries WHERE lower(review_manager_email)=lower(${managerEmail}) AND owner_email IS NOT NULL
+    UNION
+    SELECT assignment.patron_email AS email FROM time_project_assignments assignment
+      JOIN time_projects project ON project.id=assignment.project_id
+      WHERE project.active AND (lower(assignment.assigned_by)=lower(${managerEmail}) OR lower(project.created_by)=lower(${managerEmail}))
+  ) team WHERE lower(team.email)<>lower(${managerEmail}) ORDER BY lower(team.email)`
+  return rows.map(row=>String(row.email).toLowerCase())
+}
+
 /** @returns True when a project name currently exists and is active. */
 export async function isActiveTimeProject(name:string):Promise<boolean>{
   await ensureProjectsTable()
@@ -703,7 +716,7 @@ export async function updateTimesheetPeriod(id:string,input:{name:string;startDa
   ), audited AS (
     INSERT INTO audit_events(actor_email,action,target_type,target_id,metadata,ip_address,user_agent,request_method,request_path,request_id)
     SELECT ${actor.toLowerCase()},'timesheet_period_updated','timesheet_period',saved.id::text,
-      jsonb_build_object('reason',${reason},'before',jsonb_build_object('name',before.name,'startDate',before.start_date,'endDate',before.end_date,'submissionDeadline',before.submission_deadline,'managerGraceDays',before.manager_grace_days,'reminderDays',before.reminder_days),
+      jsonb_build_object('reason',${reason}::text,'before',jsonb_build_object('name',before.name,'startDate',before.start_date,'endDate',before.end_date,'submissionDeadline',before.submission_deadline,'managerGraceDays',before.manager_grace_days,'reminderDays',before.reminder_days),
         'after',jsonb_build_object('name',saved.name,'startDate',saved.start_date,'endDate',saved.end_date,'submissionDeadline',saved.submission_deadline,'managerGraceDays',saved.manager_grace_days,'reminderDays',saved.reminder_days)),
       ${context.ipAddress},${context.userAgent},${context.requestMethod},${context.requestPath},${context.requestId}
     FROM saved JOIN before ON before.id=saved.id RETURNING target_id

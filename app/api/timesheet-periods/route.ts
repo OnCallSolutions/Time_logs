@@ -3,6 +3,7 @@ import { z } from "zod"
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { getAuditContext } from "@/lib/audit"
+import { persistenceFailureDetails } from "@/lib/persistence-diagnostics"
 import { createTimesheetPeriod, ensureDefaultUpcomingTimesheetPeriod, listTimesheetPeriods, updateTimesheetPeriod } from "@/lib/db"
 
 export const runtime = "nodejs"
@@ -43,6 +44,7 @@ export async function POST(req: Request) {
     return Response.json({ period }, { status: 201, headers: { "Cache-Control": "no-store" } })
   } catch (error) {
     const invalid = error instanceof z.ZodError || error instanceof SyntaxError
+    if (!invalid) console.error("[timesheet-periods] create failed", persistenceFailureDetails(error))
     return Response.json({ error: invalid ? "Enter a valid period name, date range, deadline, grace, and reminder interval." : "Timesheet period could not be saved." }, { status: invalid ? 400 : 503 })
   }
 }
@@ -63,6 +65,7 @@ export async function PATCH(req: Request) {
     return Response.json({ period:saved }, { headers:{ "Cache-Control":"no-store" } })
   } catch (error) {
     const invalid=error instanceof z.ZodError||error instanceof SyntaxError
+    if(!invalid)console.error("[timesheet-periods] update failed",persistenceFailureDetails(error))
     return Response.json({ error:invalid?"Enter valid period details and a reason for the change.":"Timesheet period could not be updated." }, { status:invalid?400:503 })
   }
 }

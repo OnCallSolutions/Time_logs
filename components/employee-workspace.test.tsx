@@ -4,8 +4,10 @@
  */
 import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { expect, it, vi } from "vitest"
+import { afterEach,expect, it, vi } from "vitest"
 import { EmployeeWorkspace, RoleWorkspaceHome } from "./employee-workspace"
+
+afterEach(()=>vi.unstubAllGlobals())
 
 it("selects corrections without offering team or admin actions", async () => {
   const select = vi.fn()
@@ -48,4 +50,19 @@ it("shows account managers a compact personal-timesheet snapshot",async()=>{
   expect(screen.getByRole("region",{name:"account_manager workspace home"})).toHaveTextContent("6h")
   await userEvent.click(within(recent).getByRole("button",{name:/All timesheets/}))
   expect(onTimesheets).toHaveBeenCalledOnce()
+})
+
+it("shows managers with team visibility their assigned employee and contractor directory",async()=>{
+  vi.stubGlobal("fetch",vi.fn(async()=>Response.json({people:[
+    {email:"employee@example.com",displayName:"Avery Employee",role:"employee",contractorNumber:null},
+    {email:"contractor@example.com",displayName:"Casey Contractor",role:"contractor",contractorNumber:"TN-0042"},
+  ]})))
+  render(<RoleWorkspaceHome role="manager" entries={[]} teamEntries={[]} pending={0} canCreate canReview canReports canViewTeamDirectory onTimesheets={vi.fn()} onReviews={vi.fn()} onLogTime={vi.fn()}/> )
+  const directory=await screen.findByRole("region",{name:"Team directory"})
+  expect(directory).toHaveTextContent("1 employees · 1 contractors assigned to you")
+  expect(directory).toHaveTextContent("Avery Employee")
+  expect(directory).toHaveTextContent("Casey Contractor")
+  await userEvent.selectOptions(within(directory).getByRole("combobox",{name:"Filter team by role"}),"contractor")
+  expect(within(directory).getByText("Casey Contractor")).toBeVisible()
+  expect(within(directory).queryByText("Avery Employee")).not.toBeInTheDocument()
 })
