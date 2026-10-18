@@ -1,14 +1,16 @@
-import { afterEach, expect, it, vi } from "vitest"
+import {afterEach,expect,it,vi} from "vitest"
+import {reportClientFailure} from "./client-error-report"
 
-afterEach(()=>{vi.unstubAllGlobals();vi.resetModules()})
+afterEach(()=>vi.unstubAllGlobals())
 
-it("reuses the same error reference and sends diagnostics once for repeated failures",async()=>{
-  const fetchMock=vi.fn(()=>Promise.resolve(Response.json({accepted:true})))
+it("redacts credentials and personal data before sending client failure reports",()=>{
+  const fetchMock=vi.fn().mockResolvedValue(new Response(null,{status:202}))
   vi.stubGlobal("fetch",fetchMock)
-  const {reportClientFailure}=await import("./client-error-report")
-  const error={operation:"entry.submit",route:"/api/entries/[id]",status:503,message:"Save failed for request 12345"}
-  const first=reportClientFailure(error)
-  const second=reportClientFailure(error)
-  expect(second).toBe(first)
-  expect(fetchMock).toHaveBeenCalledTimes(1)
+  reportClientFailure({reference:"e4b21455-ca7d-468c-aee9-3b6a9d3767ea",operation:"entry.save",route:"/api/entries",message:"Save failed for person@example.com; Bearer abc.def; access_token=secret-value"})
+  const body=JSON.parse(fetchMock.mock.calls[0][1].body as string)
+  expect(body.message).toContain("[redacted email]")
+  expect(body.message).toContain("Bearer [redacted]")
+  expect(body.message).toContain("access_token=[redacted]")
+  expect(body.message).not.toContain("person@example.com")
+  expect(body.message).not.toContain("secret-value")
 })

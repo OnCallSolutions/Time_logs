@@ -158,6 +158,14 @@ it("rejects manager-to-manager approval",async()=>{
   const response=await PATCH(new Request("http://localhost/api/entries/entry",{method:"PATCH",body:JSON.stringify({status:"approved"})}),{params:Promise.resolve({id:"entry"})})
   expect(response.status).toBe(404);expect(updateTimeEntryWithAudit).not.toHaveBeenCalled()
 })
+it("does not let an administrator approve a manager timesheet through broad admin rights",async()=>{
+  vi.mocked(auth).mockResolvedValue({user:{email:"admin@example.com"}} as never)
+  vi.mocked(getEffectivePermissions).mockResolvedValue({role:"admin",permissions:resolvePermissions("admin",{view_manager_entries:true,review_manager_entries:true})})
+  vi.mocked(getTimeEntry).mockResolvedValue({id:"entry",ownerEmail:"other@example.com",status:"submitted",revision:"original"} as never)
+  const response=await PATCH(new Request("http://localhost/api/entries/entry",{method:"PATCH",body:JSON.stringify({status:"approved",expectedRevision:"original"})}),{params:Promise.resolve({id:"entry"})})
+  expect(response.status).toBe(403)
+  expect(updateTimeEntryWithAudit).not.toHaveBeenCalled()
+})
 it("permits an explicitly authorized account manager to review manager work",async()=>{
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"account_manager",permissions:resolvePermissions("account_manager",{review_manager_entries:true})})
   vi.mocked(getTimeEntry).mockResolvedValue({id:"entry",ownerEmail:"other@example.com",status:"submitted",revision:"original"} as never)

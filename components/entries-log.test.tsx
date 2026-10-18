@@ -5,6 +5,8 @@
 import { render,screen,within,waitFor,act,fireEvent,cleanup } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach,expect,it,vi } from "vitest"
+vi.mock("@/lib/timesheet-pdf",()=>({downloadTimesheetPdf:vi.fn()}))
+import {downloadTimesheetPdf} from "@/lib/timesheet-pdf"
 import { EntriesLog } from "./entries-log"
 afterEach(()=>{cleanup();vi.unstubAllGlobals()})
 it("keeps multiple same-project work units as separate entries",()=>{
@@ -58,25 +60,17 @@ it("exposes filtered CSV export only when the caller has the explicit export rig
   expect(screen.getByRole("button",{name:"Export (1)"})).toBeEnabled()
 })
 
-it("offers Excel/CSV and a print-ready PDF export for authorized visible rows",async()=>{
+it("offers direct Excel/CSV and PDF downloads only to authorized patrons",async()=>{
   const user=userEvent.setup()
   const {rerender}=render(<EntriesLog entries={[entry]} onUpdate={vi.fn()} onStatusChange={vi.fn()} onDelete={vi.fn()} onClear={vi.fn()}/> )
   expect(screen.queryByRole("button",{name:"Export (1)"})).not.toBeInTheDocument()
   rerender(<EntriesLog entries={[{...entry,description:"<script>alert(1)</script>"}]} canExport onUpdate={vi.fn()} onStatusChange={vi.fn()} onDelete={vi.fn()} onClear={vi.fn()}/> )
   await user.click(screen.getByRole("button",{name:"Export (1)"}))
   expect(screen.getByRole("menuitem",{name:"Excel / CSV"})).toBeVisible()
-  expect(screen.getByRole("menuitem",{name:"PDF / Print"})).toBeVisible()
-
-  const write=vi.fn()
-  const popup={opener:null,document:{open:vi.fn(),write,close:vi.fn()},focus:vi.fn()}
-  vi.spyOn(window,"open").mockReturnValue(popup as unknown as Window)
-  await user.click(screen.getByRole("menuitem",{name:"PDF / Print"}))
-  expect(window.open).toHaveBeenCalledWith("","_blank")
-  expect(write).toHaveBeenCalledWith(expect.stringContaining("&lt;script&gt;alert(1)&lt;/script&gt;"))
-  expect(write).toHaveBeenCalledWith(expect.stringContaining("Save as PDF"))
-  expect(write).toHaveBeenCalledWith(expect.stringContaining("@page{size:A4 landscape"))
-  expect(write).toHaveBeenCalledWith(expect.stringContaining("thead{display:table-header-group}"))
-  expect(write).toHaveBeenCalledWith(expect.stringContaining("page-break-inside:avoid"))
+  expect(screen.getByRole("menuitem",{name:"Download PDF"})).toBeVisible()
+  vi.mocked(downloadTimesheetPdf).mockResolvedValue()
+  await user.click(screen.getByRole("menuitem",{name:"Download PDF"}))
+  expect(downloadTimesheetPdf).toHaveBeenCalledWith([{...entry,description:"<script>alert(1)</script>"}])
   expect(screen.queryByRole("menu")).not.toBeInTheDocument()
 })
 

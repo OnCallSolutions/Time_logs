@@ -16,6 +16,7 @@ import { SubmissionActions } from "@/components/submission-actions"
 import { Button } from "@/components/ui/button"
 import { WindowSurface } from "@/components/window-surface"
 import { apiPath } from "@/lib/paths"
+import { downloadTimesheetPdf } from "@/lib/timesheet-pdf"
 import { useRetainedViewState } from "@/components/use-retained-view-state"
 import type { EntryStatus, TimeEntry } from "@/lib/types"
 
@@ -89,39 +90,6 @@ function downloadTimesheetCsv(entries:TimeEntry[]):void {
   link.download=`timesheets-${new Date().toISOString().slice(0,10)}.csv`
   link.click()
   URL.revokeObjectURL(url)
-}
-
-function escapeHtml(value:unknown):string {
-  return String(value??"").replace(/[&<>"']/g,character=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[character]??character)
-}
-
-function openTimesheetPrintView(entries:TimeEntry[]):void {
-  const printWindow=window.open("","_blank")
-  if(!printWindow)return
-  const total=entries.reduce((sum,entry)=>sum+(Number(entry.hours)||0),0)
-  const rows=entries.map(entry=>`<tr><td>${escapeHtml(entry.contractor)}</td><td>${escapeHtml(entry.date)}</td><td>${escapeHtml(entry.project)}</td><td>${escapeHtml(entry.description)}</td><td class="hours">${escapeHtml(entry.hours)}</td><td>${escapeHtml(entry.status)}</td></tr>`).join("")
-  printWindow.opener=null
-  printWindow.document.open()
-  printWindow.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Timesheet export</title><style>
-    @page{size:A4 landscape;margin:12mm 10mm 14mm}
-    *{box-sizing:border-box}
-    body{font:10pt/1.35 Arial,sans-serif;color:#111;margin:0}
-    h1{font-size:18pt;line-height:1.15;margin:0 0 4pt;break-after:avoid}
-    .generated{font-size:9pt;color:#444;margin:0 0 12pt}
-    .summary{display:flex;justify-content:space-between;gap:12pt;padding:7pt 9pt;margin:0 0 10pt;border:1px solid #999;background:#f2f4f6;font-weight:700;break-inside:avoid}
-    table{width:100%;border-collapse:collapse;table-layout:fixed;break-inside:auto}
-    th,td{border:1px solid #9a9a9a;padding:5pt 6pt;text-align:left;vertical-align:top;overflow-wrap:anywhere;word-break:normal}
-    th{background:#e9edf1;font-size:9pt}
-    td{font-size:8.5pt}
-    th:nth-child(1){width:15%}th:nth-child(2){width:12%}th:nth-child(3){width:18%}th:nth-child(4){width:35%}th:nth-child(5){width:8%}th:nth-child(6){width:12%}
-    .hours{text-align:right;white-space:nowrap}
-    tbody tr{break-inside:avoid;page-break-inside:avoid}
-    thead{display:table-header-group}
-    @media screen{body{padding:24px}.hint{font-size:11px;color:#555;margin-top:12px}}
-    @media print{.hint{display:none}thead{display:table-header-group}tr,td,th{break-inside:avoid;page-break-inside:avoid}body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
-    </style></head><body><h1>Timesheet export</h1><p class="generated">Generated ${escapeHtml(new Date().toLocaleString())}</p><div class="summary"><span>${entries.length} ${entries.length===1?"entry":"entries"}</span><span>${escapeHtml(total)} total hours</span></div><table><thead><tr><th>Contractor / employee</th><th>Date</th><th>Project</th><th>Description</th><th>Hours</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table><p class="hint">Choose “Save as PDF” in the print dialog to download this report as a PDF.</p><script>window.addEventListener("load",()=>window.setTimeout(()=>window.print(),200))</script></body></html>`)
-  printWindow.document.close()
-  printWindow.focus()
 }
 
 /**
@@ -209,6 +177,7 @@ export function EntriesLog({
   const [query, setQuery] = useRetainedViewState(stateKey?`${stateKey}:query`:undefined,"")
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [exportMenuOpen,setExportMenuOpen]=useState(false)
+  const [exportError,setExportError]=useState("")
   const [submissionRequest,setSubmissionRequest]=useState(0)
   const [status, setStatus] = useRetainedViewState<EntryStatus | "all">(stateKey?`${stateKey}:status`:undefined,`all`)
   const [project, setProject] = useRetainedViewState(stateKey?`${stateKey}:project`:undefined,`all`)
@@ -347,8 +316,9 @@ export function EntriesLog({
             <Button variant="outline" size="sm" className="h-7 border-emerald-300 bg-emerald-50 px-2 text-xs text-emerald-900 hover:bg-emerald-100" disabled={!visibleEntries.length} aria-haspopup="menu" aria-expanded={exportMenuOpen} onClick={()=>setExportMenuOpen(open=>!open)}><Download className="size-3.5" aria-hidden="true"/>Export ({visibleEntries.length})</Button>
             {exportMenuOpen&&<div role="menu" aria-label="Timesheet export formats" className="absolute right-0 top-full z-30 mt-1 min-w-40 rounded-md border border-slate-200 bg-white p-1 shadow-lg">
               <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-600" onClick={()=>{downloadTimesheetCsv(visibleEntries);setExportMenuOpen(false)}}><Download className="size-3.5" aria-hidden="true"/>Excel / CSV</button>
-              <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-600" onClick={()=>{openTimesheetPrintView(visibleEntries);setExportMenuOpen(false)}}><FileText className="size-3.5" aria-hidden="true"/>PDF / Print</button>
+              <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-600" onClick={()=>{setExportError("");setExportMenuOpen(false);void downloadTimesheetPdf(visibleEntries).catch(()=>setExportError("PDF could not be generated. Try again."))}}><FileText className="size-3.5" aria-hidden="true"/>Download PDF</button>
             </div>}
+            {exportError&&<p role="alert" className="absolute right-0 top-full z-30 mt-1 w-56 rounded border border-red-200 bg-white p-2 text-xs text-red-800 shadow">{exportError}</p>}
           </div>}
         </div>
       </div>}

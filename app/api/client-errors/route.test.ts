@@ -22,3 +22,9 @@ it("requires an active account and validates client-provided diagnostics",async(
   expect((await POST(new Request("http://localhost/api/client-errors",{method:"POST",body:JSON.stringify({...payload,route:"/api/entries?secret=x"})}))).status).toBe(400)
   expect(recordAuditEvent).not.toHaveBeenCalled()
 })
+it("rejects an oversized streamed report without a Content-Length header",async()=>{
+  const body=new ReadableStream<Uint8Array>({start(controller){controller.enqueue(new Uint8Array(8193));controller.close()}})
+  const request=new Request("http://localhost/api/client-errors",{method:"POST",body,duplex:"half"} as RequestInit)
+  expect(request.headers.has("content-length")).toBe(false)
+  expect((await POST(request)).status).toBe(413)
+})

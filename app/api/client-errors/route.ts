@@ -4,6 +4,7 @@ import {auth} from "@/auth"
 import {getEffectivePermissions} from "@/lib/effective-permissions"
 import {getAuditContext} from "@/lib/audit"
 import {recordAuditEvent} from "@/lib/db"
+import {readJsonLimited,RequestBodyTooLargeError} from "@/lib/read-json-limited"
 
 export const runtime="nodejs"
 const inputSchema=z.object({
@@ -26,11 +27,12 @@ export async function POST(request:Request){
     const email=(await auth())?.user?.email
     const access=await getEffectivePermissions(email)
     if(!email||!access.role)return Response.json({error:"Unauthorized."},{status:401})
-    const input=inputSchema.parse(await request.json())
+    const input=inputSchema.parse(await readJsonLimited(request,8192))
     await recordAuditEvent({actorEmail:email,action:"client_error_reported",targetType:"client_error",targetId:input.reference,metadata:{operation:input.operation,route:input.route,httpMethod:input.method??null,errorCode:input.code??null,httpStatus:input.status??null,message:sanitizeMessage(input.message)},...getAuditContext(request)})
     return Response.json({accepted:true},{status:202,headers:{"Cache-Control":"no-store"}})
   }catch(error){
+    const tooLarge=error instanceof RequestBodyTooLargeError
     const invalid=error instanceof z.ZodError||error instanceof SyntaxError
-    return Response.json({error:invalid?"Invalid error report.":"Error report could not be recorded."},{status:invalid?400:503})
+    return Response.json({error:tooLarge?"Report is too large.":invalid?"Invalid error report.":"Error report could not be recorded."},{status:tooLarge?413:invalid?400:503})
   }
 }

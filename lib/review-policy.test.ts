@@ -8,6 +8,8 @@ import { resolvePermissions } from "./permissions"
 it("routes manager work only to account managers",()=>{
   expect(canReviewRole("manager","manager")).toBe(false)
   expect(canReviewRole("admin","manager")).toBe(false)
+  expect(canReviewRole("admin","manager",resolvePermissions("admin",{view_manager_entries:true,review_manager_entries:true}))).toBe(false)
+  expect(canReviewRole("manager","manager",resolvePermissions("manager",{view_manager_entries:true,review_manager_entries:true}))).toBe(true)
   expect(canReviewRole("account_manager","manager")).toBe(true)
 })
 it("keeps account managers outside contractor operational review",()=>{
