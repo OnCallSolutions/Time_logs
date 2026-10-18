@@ -29,6 +29,7 @@ import {
   submitTimeEntryWithAudit,
   getTimesheetSubmissionDeadline,
   listTimeProjects,
+  isTimesheetDateArchived,
 } from "@/lib/db"
 import type { EntryStatus, TimeEntry } from "@/lib/types"
 
@@ -200,6 +201,7 @@ export async function PATCH(
     if (!current) {
       return Response.json({ error: "Entry not found." }, { status: 404 })
     }
+    if((access.role==="contractor"||access.role==="employee")&&await isTimesheetDateArchived(current.date))return Response.json({error:"Past timesheet periods are archived and read-only. Contact your manager if a correction is required."},{status:409})
     if(patch.project!==undefined&&(access.role==="contractor"||access.role==="employee")){
       const assigned=await listTimeProjects(false,access.email)
       if(!assigned.some(project=>project.name.toLocaleLowerCase()===patch.project!.toLocaleLowerCase()))return Response.json({error:"That project is not assigned to your account. Ask your manager to assign it before changing this entry."},{status:422})
@@ -404,6 +406,7 @@ export async function DELETE(
     if (!current) {
       return Response.json({ error: "Entry not found." }, { status: 404 })
     }
+    if((access.role==="contractor"||access.role==="employee")&&await isTimesheetDateArchived(current.date))return Response.json({error:"Past timesheet periods are archived and read-only. Contact your manager if a correction is required."},{status:409})
 
     const scope = await createReviewAccess(access.email, access)(current)
     if(!scope.visible)return Response.json({error:"Entry not found."},{status:404})

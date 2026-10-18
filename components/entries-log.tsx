@@ -129,6 +129,7 @@ export function EntriesLog({
   canReview = false,
   canSubmit = false,
   canSubmitOthers = false,
+  readOnlyArchivedForOwner = false,
   periodView = false,
   initialPeriodSelection,
   description = "Review your saved entries.",
@@ -152,6 +153,7 @@ export function EntriesLog({
   canReview?: boolean
   canSubmit?: boolean
   canSubmitOthers?: boolean
+  readOnlyArchivedForOwner?: boolean
   periodView?: boolean
   initialPeriodSelection?: string
   description?: string
@@ -195,6 +197,7 @@ export function EntriesLog({
   const today=[todayDate.getFullYear(),String(todayDate.getMonth()+1).padStart(2,"0"),String(todayDate.getDate()).padStart(2,"0")].join("-")
   const activePeriod=periods.find(period=>period.startDate<=today&&period.endDate>=today)
   const selectedPeriod=periodSelection==="current"?activePeriod:periods.find(period=>period.id===periodSelection)
+  const ownerEntryIsArchived=(entry:TimeEntry)=>readOnlyArchivedForOwner&&(!periodsLoaded||periods.some(period=>period.endDate<today&&entry.date>=period.startDate&&entry.date<=period.endDate))
   const periodEntries=!periodView?entries:!periodsLoaded?[]:periods.length===0?entries:periodSelection==="current"?(activePeriod?entries.filter(entry=>entry.date>=activePeriod.startDate&&entry.date<=activePeriod.endDate):[]):periodSelection==="archived"?entries.filter(entry=>periods.some(period=>period.endDate<today&&entry.date>=period.startDate&&entry.date<=period.endDate)):periodSelection==="all"?entries:periodSelection==="unassigned"?entries.filter(entry=>!periods.some(period=>entry.date>=period.startDate&&entry.date<=period.endDate)):entries.filter(entry=>{const period=periods.find(candidate=>candidate.id===periodSelection);return !!period&&entry.date>=period.startDate&&entry.date<=period.endDate})
   const isEntrySubmissionOpen=(entry:TimeEntry,own:boolean)=>{
     if(periods.length){
@@ -224,7 +227,7 @@ export function EntriesLog({
   const selectable = (canSubmit || canSubmitOthers || canRequestReview) && !!userEmail
   const selectedIdSet = new Set(selectedIds)
   const visibleIdSet = new Set(visibleEntries.map(entry => entry.id))
-  const submissions = canSubmit&&userEmail ? periodEntries.filter(entry => !entry.payoutEligible && (entry.status === "draft" || entry.status === "rejected") && (entry.ownerEmail?.toLowerCase() === userEmail.toLowerCase() || canSubmitOthers) && isEntrySubmissionOpen(entry,entry.ownerEmail?.toLowerCase()===userEmail.toLowerCase())) : []
+  const submissions = canSubmit&&userEmail ? periodEntries.filter(entry => !ownerEntryIsArchived(entry) && !entry.payoutEligible && (entry.status === "draft" || entry.status === "rejected") && (entry.ownerEmail?.toLowerCase() === userEmail.toLowerCase() || canSubmitOthers) && isEntrySubmissionOpen(entry,entry.ownerEmail?.toLowerCase()===userEmail.toLowerCase())) : []
   const requestable = canRequestReview ? periodEntries.filter(entry=>entry.status==="submitted"&&(entry.reviewEligible||entry.ownerEmail?.toLowerCase()===userEmail?.toLowerCase())) : []
   const eligible = [...submissions,...requestable]
   const eligibleIdSet = new Set(eligible.map(entry => entry.id))
@@ -370,8 +373,8 @@ export function EntriesLog({
               {groupBy!=="none"&&(index===0||entryGroupKey(visibleEntries[index-1],groupBy)!==entryGroupKey(entry,groupBy))&&<tr className="bg-gradient-to-r from-orange-50 via-sky-50 to-emerald-50"><th colSpan={selectable ? 8 : 7} className="border-y border-sky-100 px-2 py-1 text-left text-xs font-semibold text-slate-900">{entryGroupLabel(entry,groupBy)} <span className="ml-1 font-normal text-slate-600">{groupTotals.get(entryGroupKey(entry,groupBy))?.count} entries · {groupTotals.get(entryGroupKey(entry,groupBy))?.hours.toLocaleString(undefined,{maximumFractionDigits:2})}h</span></th></tr>}
                 <EntryLogRow entry={entry} showIdentity
                   selection={selectable ? { checked: selectedIdSet.has(entry.id) && eligibleIdSet.has(entry.id), disabled: !eligibleIdSet.has(entry.id), onChange: checked => setSelectedIds(previous => checked ? [...new Set([...previous, entry.id])] : previous.filter(id => id !== entry.id)) } : undefined}
-                  canEdit={canEdit && unlocked} canDelete={canDelete && unlocked && (!deleteOwnOnly||own)}
-                  canSubmit={canSubmit && (own||canSubmitOthers) && isEntrySubmissionOpen(entry,own)} canRecall={canSubmit && own} canReview={canReview && !own}
+                  canEdit={canEdit && unlocked && !ownerEntryIsArchived(entry)} canDelete={canDelete && unlocked && (!deleteOwnOnly||own) && !ownerEntryIsArchived(entry)}
+                  canSubmit={canSubmit && (own||canSubmitOthers) && !ownerEntryIsArchived(entry) && isEntrySubmissionOpen(entry,own)} canRecall={canSubmit && own && !ownerEntryIsArchived(entry)} canReview={canReview && !own}
                   onUpdate={onUpdate} onStatusChange={onStatusChange} onDelete={onDelete}
                   onSubmit={canSubmit&&own?()=>{setSelectedIds([entry.id]);setSubmissionRequest(value=>value+1)}:undefined}
                   onRequestReview={onRequestReview&&requestable.some(row=>row.id===entry.id)?()=>onRequestReview([entry]):undefined}

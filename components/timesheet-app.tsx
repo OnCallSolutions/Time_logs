@@ -887,6 +887,7 @@ export function TimesheetApp({
           canClear={view!=="personal"&&canClearVisibleEntries}
           canReview={view!=="personal"&&canReviewEntries}
           canSubmit={canSubmitEntries}
+          readOnlyArchivedForOwner={role==="employee"||role==="contractor"}
           canSubmitOthers={role==="manager"&&view==="log"}
           periodView={view==="log"||view==="personal"}
           initialPeriodSelection={initialTimesheetPeriod}

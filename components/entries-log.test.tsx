@@ -105,6 +105,21 @@ it("shows the exact submit-by deadline for the selected period",async()=>{
   expect(screen.getByText(/deadline passed/i)).toBeVisible()
 })
 
+it("keeps a contractor's past-period entries visible but read-only",async()=>{
+  const now=new Date(),today=[now.getFullYear(),String(now.getMonth()+1).padStart(2,"0"),String(now.getDate()).padStart(2,"0")].join("-")
+  const periods=[
+    {id:"active",name:"Current Cycle",startDate:today,endDate:today,submissionDeadline:"2099-12-31T23:59:00.000Z",managerGraceDays:3},
+    {id:"archive",name:"January 2000",startDate:"2000-01-01",endDate:"2000-01-31",submissionDeadline:"2000-02-05T00:00:00.000Z",managerGraceDays:3},
+  ]
+  vi.stubGlobal("fetch",vi.fn().mockResolvedValue(new Response(JSON.stringify({periods}),{status:200,headers:{"Content-Type":"application/json"}})))
+  render(<EntriesLog periodView readOnlyArchivedForOwner userEmail="person@example.com" canEdit canDelete canSubmit entries={[{id:"old",ownerEmail:"person@example.com",contractor:"Person",project:"Archive",date:"2000-01-12",hours:3,description:"Archived draft",status:"draft"}]} onUpdate={vi.fn()} onStatusChange={vi.fn()} onDelete={vi.fn()} onClear={vi.fn()}/> )
+  await userEvent.selectOptions(await screen.findByRole("combobox",{name:"Timesheet period"}),"archive")
+  expect(await screen.findByText("Archived draft")).toBeVisible()
+  expect(screen.queryByRole("button",{name:"Edit entry"})).not.toBeInTheDocument()
+  expect(screen.queryByRole("button",{name:"Delete entry"})).not.toBeInTheDocument()
+  expect(screen.queryByRole("button",{name:"Submit entry"})).not.toBeInTheDocument()
+})
+
 it("requires a confirmation window before deleting an entry",async()=>{
   const onDelete=vi.fn()
   const user=userEvent.setup()

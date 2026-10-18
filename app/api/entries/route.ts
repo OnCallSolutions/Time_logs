@@ -21,6 +21,7 @@ import {
   listTimeEntries,
   listTimeProjects,
   listTimesheetPeriods,
+  isTimesheetPeriodArchived,
   recordAuditEvent,
 } from "@/lib/db"
 
@@ -133,6 +134,7 @@ export async function POST(req: Request) {
     const period=(await listTimesheetPeriods()).find(candidate=>candidate.id===body.periodId)
     if(!period)return Response.json({error:"Select a configured timesheet period before saving entries."},{status:400})
     if(body.entries.some(entry=>entry.date<period.startDate||entry.date>period.endDate))return Response.json({error:`Every work date must fall within ${period.name} (${period.startDate}–${period.endDate}). No entries were saved.`},{status:422})
+    if((access.role==="employee"||access.role==="contractor")&&await isTimesheetPeriodArchived(period.id))return Response.json({error:"Past timesheet periods are archived and read-only. Contact your manager if a correction is required."},{status:409})
     if(access.role==="contractor"||access.role==="employee"){
       const assigned=await listTimeProjects(false,access.email)
       const allowed=new Map(assigned.map(project=>[project.name.toLocaleLowerCase(),project.name]))

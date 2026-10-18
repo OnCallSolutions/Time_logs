@@ -7,14 +7,14 @@ vi.mock("@/lib/account-identities",()=>({listAccountIdentities:vi.fn(async()=>[]
 vi.mock("@/auth",()=>({auth:vi.fn()}))
 vi.mock("@/lib/effective-permissions",()=>({getEffectivePermissions:vi.fn()}))
 vi.mock("@/lib/access",()=>({getEffectiveUserRole:vi.fn()}))
-vi.mock("@/lib/db",()=>({getTimeEntry:vi.fn(),getTimesheetSubmissionDeadline:vi.fn(async()=>null),updateTimeEntryWithAudit:vi.fn(),submitTimeEntryWithAudit:vi.fn(),rejectSubmittedEntry:vi.fn(),deleteTimeEntry:vi.fn(),recordAuditEvent:vi.fn()}))
+vi.mock("@/lib/db",()=>({getTimeEntry:vi.fn(),getTimesheetSubmissionDeadline:vi.fn(async()=>null),isTimesheetDateArchived:vi.fn(async()=>false),updateTimeEntryWithAudit:vi.fn(),submitTimeEntryWithAudit:vi.fn(),rejectSubmittedEntry:vi.fn(),deleteTimeEntry:vi.fn(),recordAuditEvent:vi.fn()}))
 vi.mock("@/lib/review-requests",()=>({listReviewRequests:vi.fn(async()=>[])}))
 vi.mock("@/lib/account-handoffs",()=>({approveAndForward:vi.fn()}))
 vi.mock("@/lib/submission-reviewer",()=>({resolveSubmissionReviewer:vi.fn()}))
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { getEffectiveUserRole } from "@/lib/access"
-import { getTimeEntry,getTimesheetSubmissionDeadline,updateTimeEntryWithAudit,submitTimeEntryWithAudit,deleteTimeEntry,rejectSubmittedEntry } from "@/lib/db"
+import { getTimeEntry,getTimesheetSubmissionDeadline,isTimesheetDateArchived,updateTimeEntryWithAudit,submitTimeEntryWithAudit,deleteTimeEntry,rejectSubmittedEntry } from "@/lib/db"
 import { resolvePermissions } from "@/lib/permissions"
 import { PATCH,DELETE } from "./route"
 import { approveAndForward } from "@/lib/account-handoffs"
@@ -114,6 +114,17 @@ it("does not allow an owner to recall after approval",async()=>{
   vi.mocked(getTimeEntry).mockResolvedValue({id:"entry",ownerEmail:"contractor@example.com",status:"approved",revision:"current"} as never)
   const response=await PATCH(new Request("http://localhost/api/entries/entry",{method:"PATCH",body:JSON.stringify({status:"draft",expectedRevision:"current"})}),{params:Promise.resolve({id:"entry"})})
   expect(response.status).toBe(403)
+  expect(updateTimeEntryWithAudit).not.toHaveBeenCalled()
+})
+it("blocks contractor edits and submission for archived work periods",async()=>{
+  vi.mocked(auth).mockResolvedValue({user:{email:"contractor@example.com"}} as never)
+  vi.mocked(getEffectiveUserRole).mockResolvedValue("contractor")
+  vi.mocked(getEffectivePermissions).mockResolvedValue({role:"contractor",permissions:resolvePermissions("contractor")})
+  vi.mocked(getTimeEntry).mockResolvedValue({id:"entry",ownerEmail:"contractor@example.com",date:"2026-08-15",status:"draft",revision:"current"} as never)
+  vi.mocked(isTimesheetDateArchived).mockResolvedValue(true)
+  const response=await PATCH(new Request("http://localhost/api/entries/entry",{method:"PATCH",body:JSON.stringify({description:"Attempted past-period edit",expectedRevision:"current"})}),{params:Promise.resolve({id:"entry"})})
+  expect(response.status).toBe(409)
+  expect((await response.json()).error).toMatch(/past timesheet periods are archived/i)
   expect(updateTimeEntryWithAudit).not.toHaveBeenCalled()
 })
 it("blocks submission at the organization deadline",async()=>{

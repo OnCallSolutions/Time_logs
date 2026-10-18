@@ -14,6 +14,7 @@ import { getAuditContext } from "@/lib/audit"
 import { z } from "zod"
 import { listAccountIdentities } from "@/lib/account-identities"
 import { historyPage,historyByIds } from "@/lib/message-history-store"
+import { persistenceFailureDetails } from "@/lib/persistence-diagnostics"
 /**
  * Loads recent messages visible to the signed-in active account.
  * @returns Promise<Response> containing the authorized inbox.
@@ -32,7 +33,7 @@ export async function GET(request?:Request): Promise<Response> {
     const official=new Map(identities.map(person=>[person.email,person.officialName]))
     const last=messages.at(-1)
     return Response.json({messages:messages.map(message=>({...message,sender_name:message.sender_email.toLowerCase()===email.toLowerCase()?"You":official.get(String(message.sender_email))??"Unknown sender",recipient_name:official.get(String(message.recipient_email))??(message.recipient_email?"Unknown recipient":"All recipients"),author_name:official.get(String(message.encrypted_payload?.author))??"Unknown sender"})),readReceiptsEnabled:preferences.readReceiptsEnabled,next:messages.length===(before?50:100)&&last?{date:String(last.created_at),id:last.id}:null,email:email.toLowerCase(),role:access.role,editMinutes:MESSAGE_EDIT_MINUTES},{headers:{"Cache-Control":"no-store"}})
-  } catch { return Response.json({error:"Inbox unavailable."},{status:500}) }
+  } catch (error) { console.error("[messages] inbox load failed",persistenceFailureDetails(error));return Response.json({error:"Inbox unavailable."},{status:500}) }
 }
 
 /**
@@ -117,5 +118,5 @@ export async function POST(req:Request): Promise<Response> {
     const id = await sendMessage(email,body.recipient,"[Encrypted message]",body.encrypted)
     await recordAuditEvent({actorEmail:email,action:"message_sent",targetType:"message",targetId:id,metadata:{broadcast:body.recipient === null,audience,recipientCount:recipients.length},...getAuditContext(req)})
     return Response.json({id},{status:201})
-  } catch(error) { return Response.json({error:error instanceof z.ZodError||error instanceof SyntaxError?"Invalid encrypted message request.":"Message could not be sent."},{status:error instanceof z.ZodError||error instanceof SyntaxError?400:500}) }
+  } catch(error) { if(!(error instanceof z.ZodError)&&!(error instanceof SyntaxError))console.error("[messages] send failed",persistenceFailureDetails(error));return Response.json({error:error instanceof z.ZodError||error instanceof SyntaxError?"Invalid encrypted message request.":"Message could not be sent."},{status:error instanceof z.ZodError||error instanceof SyntaxError?400:500}) }
 }

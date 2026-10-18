@@ -629,6 +629,20 @@ export async function listTimesheetPeriods():Promise<TimesheetPeriod[]> {
   return rows.map(row=>({id:String(row.id),name:String(row.name),startDate:String(row.start_date),endDate:String(row.end_date),submissionDeadline:new Date(String(row.submission_deadline)).toISOString(),managerGraceDays:Number(row.manager_grace_days),reminderDays:Number(row.reminder_days),createdBy:String(row.created_by),createdAt:new Date(String(row.created_at)).toISOString()}))
 }
 
+/** Checks archive status using the database calendar, so server timezone cannot change edit rights. */
+export async function isTimesheetPeriodArchived(periodId:string):Promise<boolean> {
+  await ensureTimesheetPeriodsTable()
+  const rows=await sql`SELECT EXISTS(SELECT 1 FROM timesheet_periods WHERE id=${periodId}::uuid AND end_date < CURRENT_DATE) AS archived`
+  return Boolean(rows[0]?.archived)
+}
+
+/** Checks whether a work date belongs to a period that has fully elapsed. */
+export async function isTimesheetDateArchived(workDate:string):Promise<boolean> {
+  await ensureTimesheetPeriodsTable()
+  const rows=await sql`SELECT EXISTS(SELECT 1 FROM timesheet_periods WHERE ${workDate}::date BETWEEN start_date AND end_date AND end_date < CURRENT_DATE) AS archived`
+  return Boolean(rows[0]?.archived)
+}
+
 /** Creates a non-overlapping period and immutable audit row in one statement. */
 export async function createTimesheetPeriod(input:{name:string;startDate:string;endDate:string;submissionDeadline:string;managerGraceDays:number;reminderDays:number},actor:string,context:AuditContext):Promise<TimesheetPeriod|null>{
   await ensureTimesheetPeriodsTable();await ensureAuditEventsTable()
