@@ -1481,7 +1481,7 @@ export async function updateTimeEntry(
       AND (${expectedRevision??null}::timestamptz IS NULL OR updated_at=${expectedRevision??null}::timestamptz)
       AND payout_eligible_at IS NULL
       AND (${patch.status ?? null} NOT IN ('approved', 'rejected') OR ${patch.status ?? null} IS NULL
-        OR (status = 'submitted' AND lower(owner_email) <> lower(${ownerEmail}) AND ${reviewerEmail ?? null} IS NOT NULL))
+        OR (status = 'submitted' AND lower(owner_email) <> lower(${ownerEmail}) AND ${reviewerEmail ?? null}::text IS NOT NULL))
       AND (lower(owner_email) <> lower(${ownerEmail}) OR status IN ('draft','rejected')
         OR (status='submitted' AND ${patch.status ?? null}='draft'
           AND ${patch.contractor===undefined&&patch.date===undefined&&patch.hours===undefined&&patch.project===undefined&&patch.description===undefined}))
@@ -1536,7 +1536,7 @@ export async function updateTimeEntryWithAudit(
       AND (${includeAll} OR lower(owner_email) = lower(${ownerEmail}))
       AND updated_at = ${expectedRevision}::timestamptz
       AND payout_eligible_at IS NULL
-      AND (${patch.status ?? null} NOT IN ('approved','rejected') OR ${patch.status ?? null} IS NULL OR (status='submitted' AND lower(owner_email)<>lower(${ownerEmail}) AND ${reviewerEmail ?? null} IS NOT NULL))
+      AND (${patch.status ?? null} NOT IN ('approved','rejected') OR ${patch.status ?? null} IS NULL OR (status='submitted' AND lower(owner_email)<>lower(${ownerEmail}) AND ${reviewerEmail ?? null}::text IS NOT NULL))
       AND (lower(owner_email)<>lower(${ownerEmail}) OR status IN ('draft','rejected') OR (status='submitted' AND ${patch.status ?? null}='draft' AND ${patch.contractor===undefined&&patch.date===undefined&&patch.hours===undefined&&patch.project===undefined&&patch.description===undefined}))
     RETURNING *
   ), audited AS (
@@ -1649,7 +1649,7 @@ export async function submitTimeEntryWithAudit(
         ))
       )
       AND (lower(owner_email) <> lower(${ownerEmail}) OR status IN ('draft', 'rejected'))
-      AND (status IN ('draft', 'rejected') OR (status = 'submitted' AND ${reviewerEmail ?? null} IS NOT NULL))
+      AND (status IN ('draft', 'rejected') OR (status = 'submitted' AND ${reviewerEmail ?? null}::text IS NOT NULL))
     RETURNING *
   ), audited AS (
     INSERT INTO audit_events (

@@ -12,7 +12,7 @@ vi.mock("@neondatabase/serverless",()=>({neon:()=>async(strings:TemplateStringsA
   queries.push({text:strings.reduce((text,part,index)=>text+part+(index<values.length?`$${index+1}`:""),""),values});return[]
 }}))
 import {approveAndForward} from "./account-handoffs"
-import {rejectSubmittedEntry} from "./db"
+import {rejectSubmittedEntry,submitTimeEntryWithAudit,updateTimeEntryWithAudit} from "./db"
 const id="00000000-0000-4000-8000-000000000000",actor="reviewer@example.invalid",revision="2000-01-01T00:00:00Z",context={ipAddress:null,userAgent:null,requestMethod:"PATCH",requestPath:"/api/entries/test",requestId:null}
 beforeEach(()=>{queries.length=0})
 it("binds approval, business handoff and audit to unchanged independently owned submitted evidence",async()=>{
@@ -35,4 +35,14 @@ it("rejects atomically with its audit and never persists the human reason in aud
   expect(decision.text).toContain("lower(owner_email)<>")
   expect(decision.values.filter(value=>value==="Private reason")).toHaveLength(1)
   expect(decision.values).toContain(revision)
+})
+it("types an omitted reviewer parameter in the submission guard",async()=>{
+  await submitTimeEntryWithAudit("owner@example.invalid",id,{status:"submitted"},false,undefined,revision,actor,"draft",{changedFields:[]},"contractor",context)
+  const submission=queries.find(query=>query.text.includes("'entry_submitted'"))!
+  expect(submission.text).toMatch(/status = 'submitted' AND \$\d+::text IS NOT NULL/)
+})
+it("types an omitted reviewer parameter in the audited status-update guard",async()=>{
+  await updateTimeEntryWithAudit("owner@example.invalid",id,{status:"approved"},false,undefined,revision,{actorEmail:actor,action:"entry_approved",metadata:{},context})
+  const update=queries.find(query=>query.text.includes("WITH changed AS")&&query.text.includes("UPDATE time_entries"))!
+  expect(update.text).toMatch(/status='submitted' AND lower\(owner_email\)<>lower\(\$\d+\) AND \$\d+::text IS NOT NULL/)
 })
