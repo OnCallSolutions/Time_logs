@@ -6,9 +6,9 @@
 import {beforeEach,expect,it,vi} from "vitest"
 const {queries,result}=vi.hoisted(()=>({queries:[] as {text:string;values:unknown[]}[],result:{rows:[] as Record<string,unknown>[]}}))
 vi.mock("@neondatabase/serverless",()=>({neon:()=>async(strings:TemplateStringsArray,...values:unknown[])=>{
-  const text=strings.join("?");queries.push({text,values});return text.includes('AS "expiresAt"')?result.rows:[]
+  const text=strings.join("?");queries.push({text,values});return text.includes('AS "expiresAt"')||text.includes("RETURNING id")||text.includes("SELECT 1 FROM app_signin_sessions")?result.rows:[]
 }}))
-import {createAppSession,readAppSession,revokeAppSession} from "./app-sessions"
+import {createAppSession,isAppSessionFresh,markAppSessionFresh,readAppSession,revokeAppSession} from "./app-sessions"
 const id="00000000-0000-4000-8000-000000000000"
 beforeEach(()=>{queries.length=0;result.rows=[{expiresAt:"2026-10-16T12:30:00Z",absoluteExpiresAt:"2026-10-16T20:00:00Z"}]})
 it("reads an existing session without updating activity or creating replacements",async()=>{
@@ -32,4 +32,12 @@ it("binds created sessions to normalized identity and revokes the exact ID",asyn
   await revokeAppSession(id)
   expect(queries.at(-1)?.text).toContain("SET revoked_at=COALESCE")
   expect(queries.at(-1)?.values).toEqual([id])
+})
+it("allows a recent verification on the same app session without replacing it",async()=>{
+  expect(await markAppSessionFresh(id,"Person@EXAMPLE.COM")).toBe(true)
+  const update=queries.find(query=>query.text.includes("SET reauthenticated_at=now()"))!
+  expect(update.text).toContain("revoked_at IS NULL");expect(update.text).toContain("RETURNING id")
+  expect(update.values).toEqual([id,"person@example.com",8*3600,30*60])
+  expect(await isAppSessionFresh(id,"person@example.com")).toBe(true)
+  expect(queries.at(-1)?.text).toContain("COALESCE(reauthenticated_at,created_at)")
 })

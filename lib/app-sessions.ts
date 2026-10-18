@@ -16,7 +16,8 @@ async function ensureSessions():Promise<void>{
   await initialize(async()=>{
     await sql`CREATE TABLE IF NOT EXISTS app_signin_sessions(
       id uuid PRIMARY KEY,email text NOT NULL,created_at timestamptz NOT NULL DEFAULT now(),
-      last_activity_at timestamptz NOT NULL DEFAULT now(),revoked_at timestamptz)`
+      last_activity_at timestamptz NOT NULL DEFAULT now(),reauthenticated_at timestamptz,revoked_at timestamptz)`
+    await sql`ALTER TABLE app_signin_sessions ADD COLUMN IF NOT EXISTS reauthenticated_at timestamptz`
     await sql`CREATE INDEX IF NOT EXISTS app_signin_sessions_owner_idx ON app_signin_sessions(email,created_at DESC)`
   })
 }
@@ -66,9 +67,20 @@ export async function isAppSessionFresh(id:string,email:string,maxAgeSeconds=300
   await ensureSessions()
   const rows=await sql`SELECT 1 FROM app_signin_sessions
     WHERE id=${id}::uuid AND email=${normalizeEmail(email)} AND revoked_at IS NULL
-      AND created_at>now()-(${maxAgeSeconds}*interval '1 second')
+      AND COALESCE(reauthenticated_at,created_at)>now()-(${maxAgeSeconds}*interval '1 second')
       AND created_at>now()-(${SESSION_MAX_SECONDS}*interval '1 second')
       AND last_activity_at>now()-(${SESSION_IDLE_SECONDS}*interval '1 second')`
+  return rows.length>0
+}
+/** Marks an existing live app session as recently verified without replacing its ID or cookie. */
+export async function markAppSessionFresh(id:string,email:string):Promise<boolean>{
+  if(!/^[a-f0-9-]{36}$/i.test(id))return false
+  await ensureSessions()
+  const rows=await sql`UPDATE app_signin_sessions SET reauthenticated_at=now()
+    WHERE id=${id}::uuid AND email=${normalizeEmail(email)} AND revoked_at IS NULL
+      AND created_at>now()-(${SESSION_MAX_SECONDS}*interval '1 second')
+      AND last_activity_at>now()-(${SESSION_IDLE_SECONDS}*interval '1 second')
+    RETURNING id`
   return rows.length>0
 }
 /**

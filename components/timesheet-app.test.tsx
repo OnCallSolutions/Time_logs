@@ -130,6 +130,8 @@ function mockTimesheetFetch() {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     const method = init?.method ?? "GET"
+    if (url === "/tanovo-time/api/auth/csrf?stepup=1") return jsonResponse({csrfToken:"test-csrf-token"})
+    if (url.startsWith("/tanovo-time/api/auth/signin/microsoft-entra-id?stepup=1")) return jsonResponse({url:"https://login.microsoftonline.com/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A3000%2Ftanovo-time%2Fapi%2Fauth%2Fcallback%2Fmicrosoft-entra-id"})
     const body = init?.body ? JSON.parse(String(init.body)) : null
     if (url === "/tanovo-time/api/permissions") return jsonResponse({role:"admin",permissions:resolvePermissions("admin")})
     fetchCalls.push({ url, method, body })

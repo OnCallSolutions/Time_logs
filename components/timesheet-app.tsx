@@ -1426,6 +1426,9 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       })
+      if (res.status === 404 || res.status === 405) {
+        throw new Error("This server does not have the access-update endpoint yet. Confirm the Development deployment is current, then refresh and try again.")
+      }
       const data = await res.json()
       if (!res.ok) {
         throw new Error(data.error ?? "Failed to save user access.")

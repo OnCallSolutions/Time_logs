@@ -6,6 +6,7 @@
  * thin while preserving the /tanovo-time/api/auth path expected by Azure.
  */
 import { handlers } from "@/auth"
+import { stepUpHandlers } from "@/step-up-auth"
 import { NextRequest } from "next/server"
 import { basePath } from "@/lib/paths"
 
@@ -33,6 +34,12 @@ function withPublicAuthBasePath(req: NextRequest) {
   })
 }
 
+/** Routes explicitly tagged step-up requests, and their OAuth callback, to isolated cookies. */
+function isStepUpRequest(req:NextRequest):boolean{
+  if(req.nextUrl.searchParams.get("stepup")==="1")return true
+  return req.nextUrl.pathname.includes("/callback/")&&req.cookies.has("tanovo-time.stepup.state")
+}
+
 /**
  * Handles Auth.js GET requests after restoring the public base path.
  *
@@ -40,7 +47,7 @@ function withPublicAuthBasePath(req: NextRequest) {
  * @returns The Auth.js response for the requested action.
  */
 export function GET(req: NextRequest) {
-  return handlers.GET(withPublicAuthBasePath(req))
+  return (isStepUpRequest(req)?stepUpHandlers.GET:handlers.GET)(withPublicAuthBasePath(req))
 }
 
 /**
@@ -50,5 +57,5 @@ export function GET(req: NextRequest) {
  * @returns The Auth.js response for the requested action.
  */
 export function POST(req: NextRequest) {
-  return handlers.POST(withPublicAuthBasePath(req))
+  return (isStepUpRequest(req)?stepUpHandlers.POST:handlers.POST)(withPublicAuthBasePath(req))
 }
