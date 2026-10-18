@@ -243,7 +243,7 @@ export function TimesheetApp({
   const messageEncryption=useMessageEncryption(accessDenied?"":messageInbox.email,messageInbox.messages)
   const [entries, setEntries] = useState<TimeEntry[]>([])
   const entryReadEpoch=useRef(0),pendingEntryWrites=useRef(0)
-  const [view, setView] = useState<View>(role === "admin" ? "admin" : role === "account_manager" ? "accounts" : "home")
+  const [view, setView] = useState<View>(role === "admin" ? "admin" : "home")
   const previousRole = useRef(initialRole)
   const [messagesOpen,setMessagesOpen]=useState(false)
   const assistantDockRef=useRef<HTMLDivElement>(null)
@@ -374,10 +374,8 @@ export function TimesheetApp({
   useEffect(()=>{
     if(role!==previousRole.current) {
       if(role==="admin")setView("admin")
-      else if(role==="account_manager"&&permissions.view_accounts)setView("accounts")
       else setView("home")
     }
-    if(role==="account_manager"&&permissions.view_accounts)setView("accounts")
     previousRole.current=role
   },[role,permissions.view_accounts])
   const [entriesRefresh,setEntriesRefresh]=useState(0)
@@ -483,7 +481,7 @@ export function TimesheetApp({
       } catch { if (!controller.signal.aborted&&requestId===permissionRequest.current) { setAccessDenied(true); setEntries([]); setPermissions(resolvePermissions(null)) } }
     }
     void refreshPermissions()
-    const timer = window.setInterval(refreshPermissions,15000)
+    const timer = window.setInterval(refreshPermissions,5000)
     window.addEventListener("focus",refreshPermissions)
     window.addEventListener("permissions-changed",refreshPermissions)
     const channel=typeof BroadcastChannel !== "undefined" ? new BroadcastChannel("permissions-changed") : null
@@ -571,6 +569,14 @@ export function TimesheetApp({
     if (accessDenied && view === "messages") setView("log")
     if(view==="accounts"&&(accessDenied||!((permissions.view_accounts&&(role==="admin"||role==="account_manager")))))setView("log")
   }, [canReviewEntries, canViewAdmin, canViewTeamReports, view,permissionsLoaded,permissions.ai_review,permissions.delegate_permissions,permissions.manage_timesheet_periods,permissions.send_to_accounts,permissions.view_accounts,permissions.view_personal_reports,role,accessDenied])
+
+  useEffect(()=>{
+    if(!permissionsLoaded)return
+    if(accessDenied){setWorkspaceWindow(null);setAccountManagerTool(null);setMessagesOpen(false);return}
+    if(workspaceWindow==="projects"&&!permissions.manage_projects&&!permissions.create_projects)setWorkspaceWindow(null)
+    if(workspaceWindow==="notes"&&!permissions.create_entries)setWorkspaceWindow(null)
+    if(accountManagerTool==="projects"&&(role!=="account_manager"||!permissions.manage_projects))setAccountManagerTool(null)
+  },[permissionsLoaded,accessDenied,workspaceWindow,accountManagerTool,permissions.manage_projects,permissions.create_projects,permissions.create_entries,role])
 
   /**
    * Persists newly parsed entries and prepends them to the local view.
@@ -767,13 +773,13 @@ export function TimesheetApp({
     <div role="separator" aria-label="Resize assistant panel" aria-orientation="horizontal" aria-valuenow={assistantHeight} tabIndex={0} onPointerDown={beginAssistantResize} onPointerMove={moveAssistantResize} onPointerUp={endAssistantResize} onPointerCancel={endAssistantResize} onKeyDown={event=>{if(event.key==="ArrowUp")resizeAssistantHeightByKeyboard(32);if(event.key==="ArrowDown")resizeAssistantHeightByKeyboard(-32)}} className="absolute -top-2 left-1/2 z-10 h-4 w-16 -translate-x-1/2 cursor-ns-resize rounded-full bg-transparent after:absolute after:left-1/2 after:top-1/2 after:h-1 after:w-10 after:-translate-x-1/2 after:-translate-y-1/2 after:rounded-full after:bg-emerald-500/50 hover:after:bg-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500" />
     <AssistantPanel organizationName={organizationName} workspaceContext="main" handoffContext={assistantHandoff} onHandoffUsed={()=>setAssistantHandoff("")} onClose={()=>setAssistantDockOpen(false)} onDragStart={beginAssistantDrag} onDragMove={moveAssistantDrag} onDragEnd={endAssistantDrag} onNavigate={(destination,handoff)=>{if(handoff)setAssistantHandoff(handoff);if(destination==="messages")setMessagesOpen(true);else openWorkspacePage(destination as View)}} onRefresh={()=>{setEntriesRefresh(value=>value+1);messageInbox.refresh()}} messageContext={assistantMessageContext} onContextUsed={()=>setAssistantMessageContext("")} onCompose={draft=>{setAssistantCompose(draft);setMessagesOpen(true)}} focusRequest={assistantFocusRequest} onPreferredHeight={height=>{if(!assistantWasManuallyResized.current)setAssistantHeight(current=>current===height?current:height)}}/>
   </div>
-  const pageTitle=view==="period-index"?"Timesheet periods":view==="personal"?`${role==="manager"?"My managerial timesheets":"My timesheets"} · ${personalStatusLabel}`:view==="log"&&(role==="employee"||role==="contractor")?`My timesheets · ${personalStatusLabel}`:view==="log"?(permissions.view_all_timesheets?"Organization timesheets":permissions.view_team?"Team entries":role==="contractor"?"Contractor time submissions":"Employee time entries"):view==="approvals"?"Review queue":view==="report"||view==="my-report"?"Reports":view==="activity"?"Account activity":view==="permissions"?"Manage employees and contractors":view==="accounts"?"Final approvals":view==="periods"?"Timesheet periods":view==="admin"?adminStartSection==="reports"?"Reports":adminStartSection==="timesheets"?"Timesheets":"Admin dashboard":"Workspace"
+  const pageTitle=view==="home"?`${role.replaceAll("_"," ")} dashboard`:view==="period-index"?"Timesheet periods":view==="personal"?`${role==="manager"?"My managerial timesheets":"My timesheets"} · ${personalStatusLabel}`:view==="log"&&(role==="employee"||role==="contractor")?`My timesheets · ${personalStatusLabel}`:view==="log"?(permissions.view_all_timesheets?"Organization timesheets":permissions.view_team?"Team entries":role==="contractor"?"Contractor time submissions":"Employee time entries"):view==="approvals"?"Review queue":view==="report"||view==="my-report"?"Reports":view==="activity"?"Account activity":view==="permissions"?"Manage employees and contractors":view==="accounts"?"Final approvals":view==="periods"?"Timesheet periods":view==="admin"?adminStartSection==="reports"?"Reports":adminStartSection==="timesheets"?"Timesheets":"Admin dashboard":"Workspace"
   return (
     <WindowAssistantProvider renderAssistant={(workspace,onClose,onPreferredHeight)=><AssistantPanel organizationName={organizationName} workspaceContext={workspace} handoffContext={assistantHandoff} onHandoffUsed={()=>setAssistantHandoff("")} onClose={onClose} onNavigate={(destination,handoff)=>{if(handoff)setAssistantHandoff(handoff);if(destination==="messages")setMessagesOpen(true);else openWorkspacePage(destination as View)}} onRefresh={()=>{setEntriesRefresh(value=>value+1);messageInbox.refresh()}} messageContext="" onContextUsed={()=>{}} onCompose={draft=>{setAssistantCompose(draft);setMessagesOpen(true)}} onPreferredHeight={onPreferredHeight}/> }>
     <main className="app-workspace tech-surface flex h-dvh min-h-svh w-full min-w-0 flex-col gap-3 overflow-x-hidden overflow-y-auto overscroll-y-auto bg-background px-3 pb-8 pt-3 sm:px-5 md:pt-4">
       {syncError&&<div role="alert" className="fixed right-4 top-4 z-[160] flex w-[min(36rem,calc(100vw-2rem))] items-start gap-3 border border-red-300 bg-white px-4 py-3 text-sm text-red-950 shadow-xl"><span className="min-w-0 flex-1 break-words">{syncError}</span>{issueContext&&<Button type="button" variant="outline" size="sm" className="h-7 shrink-0 border-orange-300 bg-orange-50 px-2 text-orange-900 hover:bg-orange-100" onClick={()=>setIssueReportOpen(true)}>Report to admins</Button>}<button type="button" aria-label="Dismiss error message" title="Dismiss error message" onClick={()=>setSyncError(null)} className="grid size-7 shrink-0 place-items-center rounded border border-red-200 text-red-800 hover:bg-red-50"><X className="size-4"/></button></div>}
       {issueReportOpen&&issueContext&&<IssueReportWindow context={issueContext} onClose={()=>{setIssueReportOpen(false);setIssueContext(null)}}/>}
-      {!accessDenied&&messagesOpen&&<WindowSurface title="Messages" onBack={()=>setMessagesOpen(false)}><section className="min-h-0 w-full overflow-auto bg-background p-3 sm:p-5"><MessagesPanel inbox={messageInbox} encryption={messageEncryption} canSend={permissions.send_messages&&(role==="admin"||role==="manager")} initialDraft={assistantCompose} onDraftConsumed={()=>setAssistantCompose(null)} onExplainMessage={text=>{setAssistantMessageContext(text);setMessagesOpen(false);focusAssistant()}}/></section></WindowSurface>}
+      {!accessDenied&&messagesOpen&&<WindowSurface title="Messages" onBack={()=>setMessagesOpen(false)}><section className="min-h-0 w-full overflow-auto bg-background p-3 sm:p-5"><MessagesPanel inbox={messageInbox} encryption={messageEncryption} canSend={permissions.send_messages} canBroadcast={role==="admin"||role==="manager"} initialDraft={assistantCompose} onDraftConsumed={()=>setAssistantCompose(null)} onExplainMessage={text=>{setAssistantMessageContext(text);setMessagesOpen(false);focusAssistant()}}/></section></WindowSurface>}
       <header className="workspace-header flex flex-col gap-2 border-b border-border pb-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1"><Brand/><span aria-hidden="true" className="hidden h-5 border-l border-orange-200 sm:block"/><h1 className="text-base font-semibold text-slate-900">{role === "admin" ? "Technology management" : role === "account_manager" ? "Final timesheet approvals" : role === "manager" ? "Manager workspace" : role === "contractor" ? "Contractor workspace" : "Employee workspace"}</h1></div>
@@ -806,15 +812,15 @@ export function TimesheetApp({
           {canViewAdmin&&<Button variant="outline" onClick={()=>openWorkspacePage("admin","admin")}><ShieldCheck className="size-4"/>Admin</Button>}
           {permissions.view_personal_reports&&role==="contractor"&&<Button variant="outline" onClick={()=>openWorkspacePage("activity")}><Activity className="size-4"/>Account activity</Button>}
           {permissions.delegate_permissions&&role==="manager"&&<Button variant="outline" onClick={()=>openWorkspacePage("permissions")}><KeyRound className="size-4"/>Manage team access</Button>}
-          {permissions.manage_projects&&<Button variant="outline" onClick={()=>setWorkspaceWindow("projects")}><FolderKanban className="size-4"/>Projects</Button>}
+          {(permissions.manage_projects||permissions.create_projects)&&<Button variant="outline" onClick={()=>setWorkspaceWindow("projects")}><FolderKanban className="size-4"/>{permissions.manage_projects?"Projects":"My projects"}</Button>}
         </>}
       </nav>}
       {!accessDenied&&!(view==="log"||view==="personal"||view==="period-index"||(view==="admin"&&adminStartSection==="timesheets"))&&<SubmissionDeadlineNotice/>}
       {lifecycleOpen&&!accessDenied&&(canViewAdmin||(role==="manager"&&permissions.delegate_permissions))&&<WindowSurface title={canViewAdmin?"Access lifecycle":"Temporary coverage"} onBack={()=>setLifecycleOpen(false)}><section className="min-h-0 w-full overflow-auto bg-white"><AccessLifecyclePanel key={role} admin={canViewAdmin} permissions={permissions}/></section></WindowSurface>}
       {canViewAdmin && technologyReports && <SecurityRiskWindow onClose={() => setTechnologyReports(false)} />}
 
-      {workspaceWindow&&<WindowSurface title={workspaceWindow==="notes"?"Create timesheet entries":workspaceWindow==="projects"?"Projects and assignments":workspaceWindow==="overview"?"Workspace overview":"Workflow totals"} onBack={()=>setWorkspaceWindow(null)} compact={workspaceWindow!=="notes"} showSizeToggle={workspaceWindow!=="notes"}><section className={"flex min-h-0 w-full flex-col bg-white "+(workspaceWindow==="notes"?"max-w-none":"mx-auto max-w-6xl")}><div className="min-h-0 flex-1 overflow-auto p-4">
-      {workspaceWindow==="projects"?<ProjectManagement/>:workspaceWindow==="overview"?<RoleOverview role={role}/>:workspaceWindow==="notes"?<NoteInput canCreateProjects={permissions.create_projects} onParsed={async (parsed,periodId)=>{await addParsed(parsed,periodId);setWorkspaceWindow(null);if(role!=="admin"||view!=="admin")openWorkspacePage(role==="manager"?"personal":"log")}}/>:<WorkflowOverview
+      {!accessDenied&&workspaceWindow&&<WindowSurface title={workspaceWindow==="notes"?"Create timesheet entries":workspaceWindow==="projects"?(permissions.manage_projects?"Projects and assignments":"My projects"):workspaceWindow==="overview"?"Workspace overview":"Workflow totals"} onBack={()=>setWorkspaceWindow(null)} compact={workspaceWindow!=="notes"} showSizeToggle={workspaceWindow!=="notes"}><section className={"flex min-h-0 w-full flex-col bg-white "+(workspaceWindow==="notes"?"max-w-none":"mx-auto max-w-6xl")}><div className="min-h-0 flex-1 overflow-auto p-4">
+      {workspaceWindow==="projects"?(permissions.manage_projects||permissions.create_projects?<ProjectManagement canManage={permissions.manage_projects} canCreate={permissions.manage_projects||permissions.create_projects}/>:<p role="status" className="m-4 border border-orange-200 bg-orange-50 p-3 text-sm text-orange-950">Project access was updated. Returning to your available workspace…</p>):workspaceWindow==="overview"?<RoleOverview role={role}/>:workspaceWindow==="notes"?(permissions.create_entries?<NoteInput canCreateProjects={permissions.create_projects} onParsed={async (parsed,periodId)=>{await addParsed(parsed,periodId);setWorkspaceWindow(null);if(role!=="admin"||view!=="admin")openWorkspacePage(role==="manager"?"personal":"log")}}/>:<p role="status" className="m-4 border border-orange-200 bg-orange-50 p-3 text-sm text-orange-950">Time-entry access was updated. Returning to your available workspace…</p>):<WorkflowOverview
         approvedCount={approvedEntries.length}
         draftCount={draftEntries.length}
         pendingCount={pendingEntries.length}
@@ -822,7 +828,7 @@ export function TimesheetApp({
         role={role}
       />}
       </div></section></WindowSurface>}
-      {!accessDenied&&role==="account_manager"&&accountManagerTool&&<WindowSurface title={accountManagerTool==="periods"?"Timesheet periods and submission windows":"Projects and workforce assignments"} onBack={()=>setAccountManagerTool(null)}><section className="min-h-0 w-full overflow-auto bg-white">{accountManagerTool==="periods"?<div className="p-3 sm:p-5"><SubmissionDeadlineSettings defaultOpen/></div>:<ProjectManagement/>}</section></WindowSurface>}
+      {!accessDenied&&role==="account_manager"&&accountManagerTool&&(accountManagerTool==="periods"?permissions.manage_timesheet_periods:permissions.manage_projects)&&<WindowSurface title={accountManagerTool==="periods"?"Timesheet periods and submission windows":"Projects and workforce assignments"} onBack={()=>setAccountManagerTool(null)}><section className="min-h-0 w-full overflow-auto bg-white">{accountManagerTool==="periods"?<div className="p-3 sm:p-5"><SubmissionDeadlineSettings defaultOpen/></div>:<ProjectManagement canManage={permissions.manage_projects} canCreate={permissions.manage_projects}/>}</section></WindowSurface>}
       {!accessDenied&&reviewerHelp&&role==="manager"&&permissions.request_review_help&&permissions.delegate_permissions&&permissions.send_messages&&<ReviewerHelpDialog entries={reviewerHelp} email={userEmail??""} encryption={messageEncryption} onClose={()=>setReviewerHelp(null)} onComplete={()=>{setReviewerHelp(null);messageInbox.refresh();setEntriesRefresh(value=>value+1)}}/>}
       {suggestedReview && <EntryReviewDialog entry={suggestedReview.entry} decision={suggestedReview.decision} initialNote={suggestedReview.reason} onCancel={() => setSuggestedReview(null)} onConfirm={async note => {
         await changeEntryStatus(suggestedReview.entry.id,suggestedReview.decision,note || undefined,suggestedReview.entry.revision)
@@ -835,7 +841,7 @@ export function TimesheetApp({
         <WorkspacePageSurface open={false} title={pageTitle} onBack={closeWorkspacePage}><AdminPanel onExit={closeWorkspacePage} role={role} entries={entries} pendingEntries={pendingEntries} userEmail={userEmail??""} onEntryUpdate={updateEntry} onEntryStatusChange={changeEntryStatus} onEntryDelete={deleteEntry} onEntryClear={clearEntries} onPreviewDataReset={startPreviewDataReset} onRefreshEntries={()=>setEntriesRefresh(value=>value+1)} onOpenEntryCapture={()=>setWorkspaceWindow("notes")} onApprovalUpdated={entry=>{entryReadEpoch.current++;setEntries(previous=>previous.map(current=>current.id===entry.id?entry:current))}} canCreateEntries={permissions.create_entries} canEditEntries={permissions.edit_entries} canDeleteEntries={permissions.delete_entries} canClearEntries={canClearVisibleEntries} canReviewEntries={canReviewEntries} canAIReview={canAIReview} canSubmitEntries={canSubmitEntries} canExportEntries={permissions.export_entries} canManagePeriods={permissions.manage_timesheet_periods} rightsOnly openRequest={directoryRequest} reportContent={<ManagerReport entries={entries}/>} onSecurity={()=>setTechnologyReports(true)} onLifecycle={()=>setLifecycleOpen(true)} /></WorkspacePageSurface>
       ) : <WorkspacePageSurface open={pageWindow} title={pageTitle} onBack={closeWorkspacePage}><div className="flex min-w-0 w-full flex-1 flex-col items-stretch gap-4">
         <div className="flex min-w-0 flex-col gap-4">
-          {view==="home"&&(role==="contractor"||role==="employee"||role==="manager")&&<RoleWorkspaceHome
+          {view==="home"&&(role==="contractor"||role==="employee"||role==="manager"||role==="account_manager")&&<RoleWorkspaceHome
             role={role}
             entries={entries.filter(entry=>entry.ownerEmail?.toLowerCase()===userEmail?.toLowerCase())}
             teamEntries={role==="manager"?entries.filter(entry=>entry.ownerEmail?.toLowerCase()!==userEmail?.toLowerCase()):[]}
@@ -843,9 +849,22 @@ export function TimesheetApp({
             canCreate={permissions.create_entries}
             canReview={canReviewEntries||canAIReview}
             canReports={canViewTeamReports}
+            canManageProjects={permissions.manage_projects}
+            canCreateProjects={permissions.create_projects}
+            canManageAccess={permissions.delegate_permissions}
+            canViewActivity={permissions.view_personal_reports}
+            canManagePeriods={permissions.manage_timesheet_periods}
+            canViewAllTimesheets={permissions.view_all_timesheets}
+            canViewAccounts={permissions.view_accounts}
             onTimesheets={()=>openWorkspacePage("period-index")}
             onReviews={()=>openWorkspacePage("approvals")}
             onLogTime={()=>setWorkspaceWindow("notes")}
+            onReport={()=>openWorkspacePage(canViewTeamReports?"report":"my-report")}
+            onProjects={()=>setWorkspaceWindow("projects")}
+            onTeamAccess={()=>openWorkspacePage("permissions")}
+            onActivity={()=>openWorkspacePage("activity")}
+            onPeriodSettings={()=>setAccountManagerTool("periods")}
+            onFinalApprovals={()=>openWorkspacePage("accounts")}
           />}
           {view!=="home"&&<>
           {savedStatus&&!syncError&&<p role="status" className="border-y border-green-200 bg-green-50 px-4 py-2 text-sm text-green-900">{savedStatus}</p>}
@@ -956,7 +975,7 @@ export function TimesheetApp({
       ) : view === "periods" ? (
         <section className="min-h-0 w-full overflow-auto bg-white p-4 sm:p-6"><header className="mb-4 border-b border-orange-200 bg-orange-50 px-4 py-3"><h2 className="font-semibold text-orange-950">Timesheet periods</h2><p className="text-sm text-orange-900">Create new work-date ranges or edit and save existing periods. New periods become the current view when their dates begin; older timesheets remain archived and retrievable.</p></header><SubmissionDeadlineSettings defaultOpen/></section>
       ) : view === "messages" ? (
-        <MessagesPanel inbox={messageInbox} canSend={permissions.send_messages && (role === "admin" || role === "manager")} />
+        <MessagesPanel inbox={messageInbox} canSend={permissions.send_messages} canBroadcast={role==="admin"||role==="manager"}/>
       ) : view === "permissions" ? (
         <EmployeeRightsPanel permissions={permissions} />
       ) : (
@@ -1543,30 +1562,35 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
       {!rightsOnly&&<AdminWorkspace activeSection={adminSection} onAdmin={()=>navigateAdminSection("admin")} onReports={()=>navigateAdminSection("reports")} onTimesheets={()=>navigateAdminSection("timesheets")}/>}
       <div className="grid min-w-0 items-start gap-3 lg:grid-cols-2">
         <div className="min-w-0">
-          {rightsOnly?<div className="flex flex-wrap items-center gap-2 border-y border-orange-200 bg-orange-50/70 px-3 py-2"><Button variant="outline" size="sm" className="border-blue-200 bg-blue-50 text-blue-800 hover:bg-blue-100" onClick={()=>setDirectoryOpen(true)}><Users className="size-4"/>Patron rights</Button><span className="ml-auto text-xs text-slate-600">{users.length} actors · {users.filter(user=>user.role==="admin"&&user.accessStatus==="active").length} active admins</span></div>:adminSection===null&&<section aria-label="People and access" className="flex h-[min(72svh,54rem)] min-h-[26rem] min-w-0 flex-col overflow-hidden rounded-lg border border-orange-200 bg-white shadow-sm shadow-orange-950/5">
+          {rightsOnly?<div className="flex flex-wrap items-center gap-2 border-y border-orange-200 bg-orange-50/70 px-3 py-2"><Button variant="outline" size="sm" className="border-blue-200 bg-blue-50 text-blue-800 hover:bg-blue-100" onClick={()=>setDirectoryOpen(true)}><Users className="size-4"/>Patron rights</Button><span className="ml-auto text-xs text-slate-600">{users.length} actors · {users.filter(user=>user.role==="admin"&&user.accessStatus==="active").length} active admins</span></div>:adminSection===null&&<section aria-label="People and access" className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border border-orange-200 bg-white shadow-sm shadow-orange-950/5">
             <header className="flex flex-wrap items-center justify-between gap-2 border-b border-orange-200 bg-gradient-to-r from-orange-50 via-white to-sky-50 px-3 py-1.5">
               <div><h2 className="text-sm font-semibold text-orange-950">People and access</h2><p className="text-[11px] text-slate-600">Resolve identity, access, and account health issues</p></div>
               <div className="flex flex-wrap gap-1.5"><AddPerson admin/><Button size="sm" variant="outline" onClick={()=>setDirectoryOpen(true)}><Users className="size-4"/>Directory</Button></div>
             </header>
+            <details className="group min-w-0">
+            <summary className="flex cursor-pointer list-none items-center gap-2 border-b border-orange-100 bg-orange-50/50 px-3 py-2 text-xs font-medium text-orange-950 hover:bg-orange-100/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 [&::-webkit-details-marker]:hidden"><ChevronRight className="size-3.5 transition-transform group-open:rotate-90"/><span className="flex-1">Patron directory</span><span className="tabular-nums text-slate-600">{users.length} accounts · {patronsNeedingAttention.length} need attention</span></summary>
             <div className="flex flex-wrap gap-1.5 border-b border-slate-200 bg-slate-50/70 p-2">
               <label className="sr-only" htmlFor="patron-search">Search patrons by name or email</label><input id="patron-search" type="search" value={patronSearch} onChange={event=>setPatronSearch(event.target.value)} placeholder="Search name or email" className="h-8 min-w-0 flex-1 basis-52 rounded-md border border-slate-300 px-2.5 text-sm"/>
               <label className="sr-only" htmlFor="patron-role-filter">Filter patrons by role</label><select id="patron-role-filter" value={patronRoleFilter} onChange={event=>setPatronRoleFilter(event.target.value)} className="h-8 rounded-md border border-slate-300 bg-white px-2 text-xs"><option value="all">All roles</option>{["admin","manager","account_manager","employee","contractor","none"].map(value=><option key={value} value={value}>{value==="none"?"Unassigned":value.replaceAll("_"," ")}</option>)}</select>
               <label className="sr-only" htmlFor="patron-status-filter">Filter people by access status</label><select id="patron-status-filter" value={patronStatusFilter} onChange={event=>setPatronStatusFilter(event.target.value)} className="h-8 rounded-md border border-slate-300 bg-white px-2 text-xs"><option value="all">All access states</option><option value="needs_attention">Needs attention</option>{["active","suspended","retired","blocked","denied","observed"].map(value=><option key={value} value={value}>{value==="observed"?"Observed":accessStatusLabel(value as AccessStatus)}</option>)}</select>
             </div>
-            <div className="min-h-0 flex-1 overflow-auto overscroll-contain">
+            <div className="max-h-64 min-h-0 overflow-auto overscroll-contain">
               {loading?<p role="status" className="p-3 text-sm text-slate-600">Loading organization patrons...</p>:error?<p role="alert" className="p-3 text-sm text-red-700">{error}</p>:landingPatrons.length===0?<p className="p-3 text-sm text-slate-600">No patrons match these filters.</p>:<table className="w-full min-w-[500px] text-left text-sm"><thead className="sticky top-0 z-[1] bg-sky-50"><tr className="border-b border-sky-200 text-[11px] uppercase text-sky-950"><th className="px-2.5 py-1.5 font-medium">Patron</th><th className="px-2.5 py-1.5 font-medium">Role</th><th className="px-2.5 py-1.5 font-medium">Access</th><th className="px-2.5 py-1.5 text-right font-medium">Edit</th></tr></thead><tbody>{landingPatrons.map(user=><tr key={user.email} className="border-b border-slate-100 odd:bg-white even:bg-sky-50/30 hover:bg-orange-50"><td className="px-2.5 py-1.5"><button type="button" className="max-w-full truncate text-left text-sm font-medium text-slate-900 underline-offset-2 hover:underline" onClick={()=>setSelectedPatron(user)}>{displayOfficialName(user.displayName)}</button></td><td className="px-2.5 py-1.5"><span className={`inline-flex rounded-full border px-1.5 py-0.5 text-[11px] font-medium capitalize ${roleBadgeClass(user.role)}`}>{user.role.replaceAll("_"," ")}</span></td><td className="px-2.5 py-1.5 text-xs">{user.accessStatus==="observed"?"Observed":accessStatusLabel(user.accessStatus)}</td><td className="px-2.5 py-1 text-right"><Button type="button" variant="outline" size="sm" className="h-7 border-orange-300 bg-orange-50 px-2 text-orange-900 hover:bg-orange-100" onClick={()=>openEditUserEditor(user)} disabled={savingUser===user.email}><Pencil className="size-3.5"/><span className="sr-only">Edit access for {displayOfficialName(user.displayName)}</span></Button></td></tr>)}</tbody></table>}
             </div>
+            </details>
           </section>}
         </div>
-        {!rightsOnly&&adminSection===null&&<aside aria-label="Organization health" className="flex h-[min(72svh,54rem)] min-h-[26rem] min-w-0 flex-col overflow-auto rounded-lg border border-sky-200 bg-gradient-to-br from-sky-50 via-white to-emerald-50 shadow-sm shadow-sky-950/5">
-          <header className="border-b border-sky-200 bg-sky-100/70 px-4 py-3"><h2 className="text-sm font-semibold text-sky-950">Organization health</h2><p className="text-[11px] text-sky-900">People, access readiness, and account support</p></header>
-          {canManagePeriods&&<div className="px-3 pt-3"><PeriodExpirationNotice onManage={()=>setAdminTimesheetTool("periods")}/></div>}
-          <div className="grid grid-cols-2 gap-2 p-3 sm:grid-cols-3 lg:grid-cols-2 2xl:grid-cols-3">
-            <div className="rounded-md border border-sky-200 bg-white/90 p-3"><span className="block text-xs text-sky-800">Patrons</span><strong className="mt-1 block text-xl text-sky-950">{users.length}</strong></div>
-            <button type="button" onClick={()=>setPatronStatusFilter("needs_attention")} className="rounded-md border border-orange-300 bg-orange-50 p-3 text-left hover:bg-orange-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500"><span className="block text-xs text-orange-900">Needs attention</span><strong className="mt-1 block text-xl text-orange-950">{patronsNeedingAttention.length}</strong></button>
-            <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3"><span className="block text-xs text-emerald-900">Active admins</span><strong className="mt-1 block text-xl text-emerald-950">{activeAdminCount}</strong></div>
+        {!rightsOnly&&adminSection===null&&<aside aria-label="Organization health" className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border border-sky-200 bg-gradient-to-br from-sky-50 via-white to-emerald-50 shadow-sm shadow-sky-950/5">
+          <header className="border-b border-sky-200 bg-sky-100/70 px-3 py-2"><h2 className="text-sm font-semibold text-sky-950">Organization health</h2><p className="text-[11px] text-sky-900">Key attention counts and operations</p></header>
+          {canManagePeriods&&<div className="px-2 pt-2"><PeriodExpirationNotice onManage={()=>setAdminTimesheetTool("periods")}/></div>}
+          <div className="grid grid-cols-3 gap-1.5 p-2">
+            <div className="border-l-2 border-sky-500 bg-white/90 px-2 py-1.5"><span className="block text-[11px] text-sky-800">Patrons</span><strong className="block text-lg text-sky-950">{users.length}</strong></div>
+            <button type="button" onClick={()=>setPatronStatusFilter("needs_attention")} className="border-l-2 border-orange-500 bg-orange-50 px-2 py-1.5 text-left hover:bg-orange-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500"><span className="block text-[11px] text-orange-900">Needs attention</span><strong className="block text-lg text-orange-950">{patronsNeedingAttention.length}</strong></button>
+            <div className="border-l-2 border-emerald-500 bg-emerald-50 px-2 py-1.5"><span className="block text-[11px] text-emerald-900">Active admins</span><strong className="block text-lg text-emerald-950">{activeAdminCount}</strong></div>
           </div>
-          <div className="mx-3 mb-3 border-l-4 border-orange-500 bg-white/80 p-3">
+          <details className="group mx-2 mb-2 border-t border-sky-100">
+            <summary className="flex cursor-pointer list-none items-center gap-2 py-2 text-xs font-semibold text-sky-950 hover:text-sky-700 [&::-webkit-details-marker]:hidden"><ChevronRight className="size-3.5 transition-transform group-open:rotate-90"/>Support priorities<span className="ml-auto font-normal text-slate-600">{patronsNeedingAttention.length+activeManagerCount+activeAdminCount} indicators</span></summary>
+          <div className="mb-2 border-l-4 border-orange-500 bg-white/80 p-2">
             <h3 className="text-sm font-semibold text-slate-900">Support priorities</h3>
             <ul className="mt-2 space-y-2 text-xs text-slate-700">
               <li className="flex items-center justify-between gap-3"><span>Access or profile needs review</span><strong className={patronsNeedingAttention.length?"text-orange-800":"text-emerald-800"}>{patronsNeedingAttention.length}</strong></li>
@@ -1575,11 +1599,8 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
             </ul>
             <Button type="button" variant="outline" size="sm" className="mt-3 w-full justify-center border-orange-300 bg-orange-50 text-orange-950 hover:bg-orange-100" onClick={()=>setPatronStatusFilter("needs_attention")}><Users className="size-4"/>Review people needing attention</Button>
           </div>
-          <button type="button" onClick={()=>setAdminIssuesOpen(true)} className="mx-3 mb-3 rounded-md border border-red-200 bg-gradient-to-r from-red-50 to-orange-50 p-3 text-left transition hover:border-red-300 hover:from-red-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500">
-            <span className="flex items-center justify-between gap-2"><strong className="text-sm text-red-950">Issues and requests</strong><span className="rounded-full bg-red-700 px-2 py-0.5 text-xs font-semibold text-white">{issueSummary.open} open</span></span>
-            <span className="mt-1 block text-xs text-red-900">Patron reports · {issueSummary.uniqueErrors} unique error patterns · {issueSummary.urgent} urgent. Open the queue to investigate and resolve.</span>
-          </button>
-          <div className="mx-3 mb-3 rounded-md border border-blue-200 bg-blue-50/80 p-3 text-xs text-blue-950"><strong>Admin focus</strong><p className="mt-1 text-blue-900">Keep identities, role assignments, and account status current. Detailed time records remain in the Timesheets workspace.</p></div>
+          </details>
+          <button type="button" onClick={()=>setAdminIssuesOpen(true)} className="mx-2 mb-2 flex items-center justify-between gap-2 border border-red-200 bg-red-50/80 px-2.5 py-2 text-left hover:bg-red-100"><span className="text-xs font-medium text-red-950">Issues and requests</span><span className="text-xs font-semibold text-red-800">{issueSummary.open} open · {issueSummary.urgent} urgent</span></button>
         </aside>}
       </div>
       {!rightsOnly&&adminSection==="admin"&&<WindowSurface title="Admin" onBack={backAdminSection}>

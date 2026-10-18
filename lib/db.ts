@@ -592,14 +592,18 @@ export async function isActiveTimeProject(name:string):Promise<boolean>{
 }
 
 /** Adds a unique catalog project and its audit event atomically. */
-export async function createTimeProject(input:{name:string;description:string},actor:string,context:AuditContext):Promise<TimeProject|null>{
+export async function createTimeProject(input:{name:string;description:string},actor:string,context:AuditContext,assignCreator=false):Promise<TimeProject|null>{
   await ensureProjectsTable();await ensureAuditEventsTable()
   const rows=await sql`WITH saved AS (
     INSERT INTO time_projects(name,description,created_by) VALUES(${input.name},${input.description},${actor.toLowerCase()})
     ON CONFLICT DO NOTHING RETURNING *
+  ), assigned AS (
+    INSERT INTO time_project_assignments(project_id,patron_email,assigned_by)
+    SELECT id,lower(created_by),lower(created_by) FROM saved WHERE ${assignCreator}
+    ON CONFLICT DO NOTHING RETURNING project_id
   ), audited AS (
     INSERT INTO audit_events(actor_email,action,target_type,target_id,metadata,ip_address,user_agent,request_method,request_path,request_id)
-    SELECT created_by,'project_created','time_project',id::text,jsonb_build_object('name',name,'description',description),
+    SELECT created_by,'project_created','time_project',id::text,jsonb_build_object('name',name,'description',description,'assignedToCreator',${assignCreator}),
       ${context.ipAddress},${context.userAgent},${context.requestMethod},${context.requestPath},${context.requestId} FROM saved RETURNING target_id
   ) SELECT id,name,description,active,created_by,created_at::text AS created_at,updated_at::text AS updated_at FROM saved WHERE EXISTS(SELECT 1 FROM audited)`
   const row=rows[0]

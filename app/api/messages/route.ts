@@ -108,8 +108,11 @@ export async function POST(req:Request): Promise<Response> {
   try {
     const email = (await auth())?.user?.email
     const access = await getEffectivePermissions(email)
-    if (!email || !(access.role === "admin" || access.role === "manager") || !access.permissions.send_messages) return Response.json({error:"Forbidden."},{status:403})
-    const body = z.object({recipient:z.string().email().nullable(),audience:z.enum(messageAudiences).optional(),encrypted:encryptedMessageSchema}).parse(await req.json())
+    if (!email || !access.role || !access.permissions.send_messages) return Response.json({error:"Forbidden."},{status:403})
+    const raw=await req.json() as {recipient?:unknown;audience?:unknown}|null
+    const requestedAudience=raw?.audience??(typeof raw?.recipient==="string"?"individual":"workforce")
+    if(access.role!=="admin"&&access.role!=="manager"&&(requestedAudience!=="individual"||typeof raw?.recipient!=="string"))return Response.json({error:"Only administrators and managers can send group announcements."},{status:403})
+    const body = z.object({recipient:z.string().email().nullable(),audience:z.enum(messageAudiences).optional(),encrypted:encryptedMessageSchema}).parse(raw)
     const audience=body.audience??(body.recipient?"individual":"workforce")
     if((audience==="individual")!==!!body.recipient)return Response.json({error:"Choose an individual or a group, not both."},{status:400})
     const recipients=audienceEmails(await actorRoster(),audience,body.recipient)

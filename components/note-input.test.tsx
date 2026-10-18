@@ -43,13 +43,36 @@ it("requests the selected multi-entry sample size",async()=>{
 })
 it("sends the selected configured period with AI extraction",async()=>{
   const onParsed=vi.fn(async()=>{})
-  const request=vi.fn(async(input:string|URL|Request)=>String(input).includes("timesheet-periods")?periodResponse():Response.json({entries:[{contractor:"Own Person",date:"2026-10-17",hours:2,project:"Project",description:"Work"}]}))
+  const request=vi.fn(async(input:string|URL|Request)=>String(input).includes("timesheet-periods")?periodResponse():String(input).includes("/api/projects")?Response.json({projects:[{id:"p1",name:"Project",description:""}]}):Response.json({entries:[{contractor:"Own Person",date:"2026-10-17",hours:2,project:"Project",description:"Work"}]}))
   vi.stubGlobal("fetch",request);render(<NoteInput onParsed={onParsed}/>);const user=userEvent.setup()
   await user.click(screen.getByRole("button",{name:"AI notes"}))
   await user.type(screen.getByRole("textbox",{name:"Time worked notes"}),"2 hours on Project")
   await user.click(screen.getByRole("button",{name:"Extract entries"}))
   expect(request).toHaveBeenCalledWith("/tanovo-time/api/parse",expect.objectContaining({method:"POST",body:JSON.stringify({notes:"2 hours on Project",periodId:period.id})}))
   expect(onParsed).toHaveBeenCalledWith([expect.objectContaining({date:"2026-10-17",project:"Project"})],period.id)
+})
+it("creates AI-discovered projects when authorized before saving entries",async()=>{
+  const onParsed=vi.fn(async()=>{})
+  let projectReads=0
+  const request=vi.fn(async(input:string|URL|Request,init?:RequestInit)=>{
+    const url=String(input)
+    if(url.includes("timesheet-periods"))return periodResponse()
+    if(url.endsWith("/api/projects")&&init?.method==="POST")return Response.json({project:{id:"new-id",name:"New field project",description:""}},{status:201})
+    if(url.includes("/api/parse"))return Response.json({entries:[{contractor:"Self",date:"2026-10-17",hours:2,project:"New field project",description:"Work"}]})
+    projectReads++;return Response.json({projects:projectReads===1?[]:[{id:"new-id",name:"New field project",description:""}]})
+  })
+  vi.stubGlobal("fetch",request);render(<NoteInput canCreateProjects onParsed={onParsed}/>);const user=userEvent.setup()
+  await user.click(screen.getByRole("button",{name:"AI notes"}));await user.type(screen.getByRole("textbox",{name:"Time worked notes"}),"2 hours on New field project");await user.click(screen.getByRole("button",{name:"Extract entries"}))
+  expect(request).toHaveBeenCalledWith("/tanovo-time/api/projects",expect.objectContaining({method:"POST",body:JSON.stringify({name:"New field project"})}))
+  expect(onParsed).toHaveBeenCalledWith([expect.objectContaining({project:"New field project"})],period.id)
+})
+it("does not attempt project creation for unauthorized AI notes",async()=>{
+  const onParsed=vi.fn(async()=>{})
+  const request=vi.fn(async(input:string|URL|Request)=>String(input).includes("timesheet-periods")?periodResponse():String(input).includes("/api/projects")?Response.json({projects:[]}):Response.json({entries:[{contractor:"Self",date:"2026-10-17",hours:2,project:"Unassigned",description:"Work"}]}))
+  vi.stubGlobal("fetch",request);render(<NoteInput onParsed={onParsed}/>);const user=userEvent.setup()
+  await user.click(screen.getByRole("button",{name:"AI notes"}));await user.type(screen.getByRole("textbox",{name:"Time worked notes"}),"2 hours on Unassigned");await user.click(screen.getByRole("button",{name:"Extract entries"}))
+  expect(onParsed).not.toHaveBeenCalled();expect(request).not.toHaveBeenCalledWith("/tanovo-time/api/projects",expect.objectContaining({method:"POST"}))
+  expect(await screen.findByRole("alert")).toHaveTextContent(/Ask your manager to assign them/)
 })
 it("creates a manual entry only after the user explicitly saves the queued row",async()=>{
   const onParsed=vi.fn(async()=>{})

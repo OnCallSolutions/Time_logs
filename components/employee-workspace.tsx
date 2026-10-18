@@ -4,9 +4,10 @@
  * This component never fetches team records or exposes administrative actions.
  */
 "use client"
-import { ArrowRight, CheckCircle2, ClipboardList, Clock3, FilePlus2, ListChecks, Send, Users, XCircle } from "lucide-react"
-import type { EntryStatus, TimeEntry, UserRole } from "@/lib/types"
+import { ArrowRight, BarChart3, CalendarClock, CheckCircle2, ClipboardList, Clock3, FilePlus2, FolderKanban, KeyRound, ListChecks, Send, ShieldCheck, UserRoundCog, Users, XCircle } from "lucide-react"
+import type { EntryStatus, TimeEntry } from "@/lib/types"
 import { Button } from "@/components/ui/button"
+import { getRoleActions, type RoleActionId } from "@/lib/role-actions"
 
 /**
  * Provides a role-specific workspace home without rendering raw entry rows.
@@ -23,53 +24,50 @@ import { Button } from "@/components/ui/button"
  * @param props.onLogTime - Opens the time-entry capture workflow.
  * @returns A compact workspace home tailored to the active role.
  */
-export function RoleWorkspaceHome({ role, entries, teamEntries = [], pending, canCreate, canReview, canReports, onTimesheets, onReviews, onLogTime }: {
-  role: "contractor" | "employee" | "manager"
+export function RoleWorkspaceHome({ role, entries, teamEntries = [], pending, canCreate, canReview, canReports, canManageProjects = false, canCreateProjects = false, canManageAccess = false, canViewActivity = false, canManagePeriods = false, canViewAllTimesheets = false, canViewAccounts = false, onTimesheets, onReviews, onLogTime, onReport, onProjects, onTeamAccess, onActivity, onPeriodSettings, onFinalApprovals }: {
+  role: "contractor" | "employee" | "manager" | "account_manager"
   entries: TimeEntry[]
   teamEntries?: TimeEntry[]
   pending: number
   canCreate: boolean
   canReview: boolean
   canReports: boolean
+  canManageProjects?: boolean
+  canCreateProjects?: boolean
+  canManageAccess?: boolean
+  canViewActivity?: boolean
+  canManagePeriods?: boolean
+  canViewAllTimesheets?: boolean
+  canViewAccounts?: boolean
   onTimesheets: () => void
   onReviews: () => void
   onLogTime: () => void
+  onReport?: () => void
+  onProjects?: () => void
+  onTeamAccess?: () => void
+  onActivity?: () => void
+  onPeriodSettings?: () => void
+  onFinalApprovals?: () => void
 }) {
   const personal = entries
   const isContractor = role === "contractor"
   const isManager = role === "manager"
-  const title = isContractor ? "Contractor workspace" : isManager ? "Manager workspace" : "Employee workspace"
-  const description = isContractor
-    ? "Capture your project hours, keep your own records accurate, and send eligible work to your assigned manager."
-    : isManager
-      ? "Review team submissions, use AI as an adviser, and move approved contractor work to business accounts. Your own hours go through independent review."
-      : "Record internal work, correct your own entries, and submit approved timekeeping records to your manager."
-
-  return <section aria-label={`${role} workspace home`} className={`min-h-[20rem] overflow-auto rounded-lg border p-4 sm:p-6 ${isContractor ? "border-orange-200 bg-gradient-to-br from-orange-50 via-white to-sky-50" : isManager ? "border-blue-200 bg-gradient-to-br from-blue-50 via-white to-orange-50" : "border-emerald-200 bg-gradient-to-br from-emerald-50 via-white to-sky-50"}`}>
-    <header className="flex flex-wrap items-start justify-between gap-4 border-b border-current/10 pb-4">
-      <div className="min-w-0">
-        <p className={`text-xs font-semibold uppercase tracking-wide ${isContractor ? "text-orange-800" : isManager ? "text-blue-800" : "text-emerald-800"}`}>{isContractor ? "Project time" : isManager ? "Team operations" : "Internal time"}</p>
-        <h2 className="mt-1 text-xl font-semibold text-slate-950">{title}</h2>
-        <p className="mt-1 max-w-2xl text-sm text-slate-600">{description}</p>
-      </div>
-      <div className="flex flex-wrap gap-2">
-        {canCreate && <Button onClick={onLogTime} className={isContractor ? "bg-orange-600 text-white hover:bg-orange-700" : undefined}><FilePlus2 className="size-4"/>{isContractor ? "Log project time" : "Log time"}</Button>}
-        <Button variant="outline" onClick={onTimesheets}><Clock3 className="size-4"/>{isManager ? "My timesheets" : isContractor ? "My submissions" : "My time entries"}<ArrowRight className="size-4"/></Button>
-        {isManager && (canReview || canReports) && <Button variant="outline" onClick={onReviews}><Users className="size-4"/>Team reviews<ArrowRight className="size-4"/></Button>}
+  const isAccountManager = role === "account_manager"
+  const actions = getRoleActions(role, { create_entries: canCreate, review_entries: canReview, view_reports: canReports, manage_projects: canManageProjects, create_projects: canCreateProjects, delegate_permissions: canManageAccess, view_personal_reports: canViewActivity, view_accounts: canViewAccounts, view_all_timesheets: canViewAllTimesheets, manage_timesheet_periods: canManagePeriods })
+  const handlers: Partial<Record<RoleActionId, () => void>> = { log_time: onLogTime, timesheets: onTimesheets, approvals: onReviews, reports: onReport, projects: onProjects, team_access: onTeamAccess, account_activity: onActivity, final_approvals: onFinalApprovals, period_settings: onPeriodSettings }
+  const icon: Record<RoleActionId, typeof Clock3> = { log_time: FilePlus2, timesheets: Clock3, approvals: CheckCircle2, reports: BarChart3, projects: FolderKanban, team_access: KeyRound, account_activity: UserRoundCog, final_approvals: ShieldCheck, period_settings: CalendarClock }
+  const title = isAccountManager ? "Account manager" : isContractor ? "Contractor" : isManager ? "Manager" : "Employee"
+  const approvedHours = personal.filter(entry => entry.status === "approved").reduce((total, entry) => total + entry.hours, 0)
+  return <section aria-label={`${role} workspace home`} className={`min-w-0 overflow-hidden rounded-md border ${isContractor ? "border-orange-200 bg-orange-50/30" : isManager || isAccountManager ? "border-blue-200 bg-blue-50/30" : "border-emerald-200 bg-emerald-50/30"}`}>
+    <header className="flex flex-wrap items-center justify-between gap-2 border-b border-current/10 px-3 py-2">
+      <div className="flex min-w-0 items-baseline gap-x-2"><h2 className="text-sm font-semibold text-slate-950">{title} dashboard</h2><p className="truncate text-xs text-slate-600">{isAccountManager ? "Final review, periods, and workforce controls." : isManager ? "Review team work and manage assigned workflows." : isContractor ? "Log assigned project work and track submissions." : "Record work and follow its approval status."}</p></div>
+      <div className="flex flex-wrap items-center gap-x-3 text-xs text-slate-700" aria-label="Timesheet summary">
+        {isManager ? <><span><strong className="text-orange-800">{pending}</strong> awaiting review</span><span><strong>{teamEntries.length}</strong> team entries</span></> : isAccountManager ? <><span>Manager-approved evidence</span><span>Final review before finance handoff</span></> : <><span><strong>{personal.filter(entry => entry.status === "draft").length}</strong> drafts</span><span><strong>{personal.filter(entry => entry.status === "submitted").length}</strong> awaiting manager</span><span><strong className="text-emerald-800">{approvedHours.toLocaleString(undefined,{maximumFractionDigits:2})}h</strong> approved</span></>}
       </div>
     </header>
-
-    {isManager ? <div className="mt-4 grid gap-3 sm:grid-cols-3">
-      <div className="rounded-md border border-orange-200 bg-orange-50 p-3"><p className="text-xs text-orange-900">Awaiting your review</p><p className="mt-1 text-2xl font-semibold tabular-nums text-orange-950">{pending}</p></div>
-      <div className="rounded-md border border-blue-200 bg-blue-50 p-3"><p className="text-xs text-blue-900">Team submissions</p><p className="mt-1 text-2xl font-semibold tabular-nums text-blue-950">{teamEntries.length}</p></div>
-      <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3"><p className="text-xs text-emerald-900">Review path</p><p className="mt-1 text-sm font-semibold text-emerald-950">Approved contractor time → Business accounts</p></div>
-    </div> : <div className="mt-4 grid gap-3 sm:grid-cols-3">
-      <div className={`rounded-md border p-3 ${isContractor ? "border-orange-200 bg-orange-50" : "border-emerald-200 bg-emerald-50"}`}><p className="text-xs text-slate-600">Draft entries</p><p className="mt-1 text-2xl font-semibold tabular-nums text-slate-950">{personal.filter(entry => entry.status === "draft").length}</p></div>
-      <div className="rounded-md border border-blue-200 bg-blue-50 p-3"><p className="text-xs text-slate-600">Awaiting manager</p><p className="mt-1 text-2xl font-semibold tabular-nums text-slate-950">{personal.filter(entry => entry.status === "submitted").length}</p></div>
-      <div className="rounded-md border border-green-200 bg-green-50 p-3"><p className="text-xs text-slate-600">Approved hours</p><p className="mt-1 text-2xl font-semibold tabular-nums text-slate-950">{personal.filter(entry => entry.status === "approved").reduce((total, entry) => total + entry.hours, 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}h</p></div>
-    </div>}
-    {isContractor && <p className="mt-4 rounded-md border border-orange-200 bg-white/80 px-3 py-2 text-sm text-orange-950">Only your own database-registered timesheets can be submitted for manager review.</p>}
-    {isManager && !canReview && !canReports && <p className="mt-4 rounded-md border border-blue-200 bg-white/80 px-3 py-2 text-sm text-blue-950">Review actions are not currently assigned to your account. Your own timesheets remain available under Timesheets.</p>}
+    <nav aria-label={`${role} dashboard actions`} className="flex flex-wrap gap-1.5 p-2">
+      {actions.map(action => { const Icon = icon[action.id]; const handler = handlers[action.id]; return handler ? <Button key={action.id} size="sm" variant={action.id === "log_time" || action.id === "final_approvals" ? "default" : "outline"} className="h-8" onClick={handler}><Icon className="size-3.5"/>{action.label}<ArrowRight className="size-3"/></Button> : null })}
+    </nav>
   </section>
 }
 

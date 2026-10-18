@@ -35,7 +35,8 @@ export async function POST(req:Request){
     const mayCreate=(access.role==="admin"||access.role==="manager"||access.role==="account_manager")&&access.permissions.manage_projects||((access.role==="contractor"||access.role==="employee")&&access.permissions.create_projects)
     if(!mayCreate)return Response.json({error:"A manager must grant you project-creation permission first."},{status:403})
     const body=z.object({name:z.string().trim().min(1).max(120),description:z.string().trim().max(500).default("")}).strict().parse(await req.json())
-    const project=await createTimeProject(body,access.email,getAuditContext(req))
+    const assignCreator=access.role==="contractor"||access.role==="employee"
+    const project=await createTimeProject(body,access.email,getAuditContext(req),assignCreator)
     if(!project)return Response.json({error:"A project with that name already exists."},{status:409})
     return Response.json({project},{status:201})
   }catch(error){

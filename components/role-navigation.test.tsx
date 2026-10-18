@@ -58,7 +58,7 @@ it("gives contractors a dedicated capture-first home without placing raw entries
   const home=await screen.findByRole("region",{name:"contractor workspace home"})
   expect(within(home).getByRole("button",{name:/log project time/i})).toBeVisible()
   expect(within(home).getByRole("button",{name:/my submissions/i})).toBeVisible()
-  expect(within(home).getByText(/Only your own database-registered timesheets/)).toBeVisible()
+  expect(within(home).getByRole("navigation",{name:"contractor dashboard actions"})).toBeVisible()
   expect(screen.queryByText("Employee A")).not.toBeInTheDocument()
 })
 it("keeps the assistant dock compact and vertically resizable beside the landing workspace",async()=>{
@@ -116,7 +116,7 @@ it("groups admin tools beneath Admin, Reports, and Timesheets while preserving l
   const dashboard=await screen.findByRole("navigation",{name:"Admin dashboard commands"})
   expect(screen.getByRole("region",{name:"People and access"})).toBeVisible()
   const organizationHealth=screen.getByRole("complementary",{name:"Organization health"})
-  expect(within(organizationHealth).getByText("Support priorities")).toBeVisible()
+  await userEvent.click(within(organizationHealth).getByText("Support priorities",{selector:"summary"}))
   expect(within(organizationHealth).getByRole("button",{name:/review people needing attention/i})).toBeVisible()
   expect(within(organizationHealth).queryByRole("table")).not.toBeInTheDocument()
   expect(screen.queryByRole("heading",{name:"Raw timesheet entries"})).not.toBeInTheDocument()
@@ -192,7 +192,11 @@ it("adds approval controls when an employee receives a delegated review right",a
 it("opens account-manager raw timesheets only after a period is selected and restores the archive on Back",async()=>{
   testRole="account_manager"
   render(<TimesheetApp role="account_manager" userEmail="accounts@example.com" />)
-  await screen.findByRole("heading",{name:"Business queue fixture"})
+  const dashboard=await screen.findByRole("region",{name:"account_manager workspace home"})
+  expect(within(dashboard).getByRole("button",{name:/final approvals/i})).toBeVisible()
+  await userEvent.click(within(dashboard).getByRole("button",{name:/final approvals/i}))
+  expect(await screen.findByRole("dialog",{name:"Final approvals"})).toBeVisible()
+  await userEvent.click(within(screen.getByRole("dialog",{name:"Final approvals"})).getByRole("button",{name:"Back"}))
   await userEvent.click(screen.getByRole("button",{name:"Timesheets"}))
   const periodIndex=await screen.findByRole("dialog",{name:"Timesheet periods"})
   expect(within(periodIndex).queryByRole("table")).not.toBeInTheDocument()

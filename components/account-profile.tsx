@@ -208,10 +208,6 @@ export function AccountProfile({
         </span>
         <span className="sr-only">Open profile</span>
       </button>
-      <Button type="button" variant="outline" size="icon-sm" onClick={openMenu} title="Edit profile" aria-label="Edit profile">
-        <Pencil aria-hidden="true" />
-      </Button>
-
       {menuOpen && (
         <div className="fixed inset-x-3 top-20 z-30 max-h-[calc(100dvh-6rem)] overflow-y-auto overscroll-contain rounded-lg border border-border bg-popover p-3 text-left shadow-lg sm:absolute sm:inset-x-auto sm:right-0 sm:top-12 sm:w-80" onKeyDown={event => { if (event.key === "Escape") setMenuOpen(false) }}>
           <div className="flex items-center justify-between gap-3">

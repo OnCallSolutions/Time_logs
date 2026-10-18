@@ -118,6 +118,21 @@ export function NoteInput({
       if (entries.length === 0) {
         setError("No time entries were found in those notes.")
       } else {
+        const known=new Set(projects.map(item=>item.name.trim().toLocaleLowerCase()))
+        const missing=[...new Set(entries.map(entry=>entry.project.trim()).filter(name=>name&&!known.has(name.toLocaleLowerCase())))]
+        if(missing.length&&!canCreateProjects)throw new Error(`The AI found project${missing.length===1?"":"s"} not assigned to your account: ${missing.join(", ")}. Ask your manager to assign them.`)
+        for(const projectName of missing){
+          const createResponse=await fetch(apiPath("/api/projects"),{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({name:projectName})})
+          const createData=await createResponse.json()
+          if(!createResponse.ok)throw new Error(createResponse.status===409?`“${projectName}” already exists but is not assigned to you. Ask your manager to assign it.`:(createData.error??`Unable to create project “${projectName}”.`))
+          if(createData.project)known.add(String(createData.project.name).toLocaleLowerCase())
+        }
+        if(missing.length){
+          const refreshed=await fetch(apiPath("/api/projects"),{cache:"no-store"}),refreshedData=await refreshed.json()
+          if(!refreshed.ok)throw new Error(refreshedData.error??"The project was created, but the assigned project list could not be refreshed.")
+          const available:EntryProject[]=Array.isArray(refreshedData.projects)?refreshedData.projects:[]
+          setProjects(available);setProject(current=>available.some(item=>item.name===current)?current:available[0]?.name??"")
+        }
         await onParsed(entries,selectedPeriod.id)
         setNotes("")
       }
@@ -145,8 +160,9 @@ export function NoteInput({
       const response=await fetch(apiPath("/api/projects"),{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({name:newProjectName.trim()})})
       const data=await response.json()
       if(!response.ok)throw new Error(data.error??"Unable to create project.")
+      if(data.project){setProjects(previous=>[...previous.filter(item=>item.id!==data.project.id),data.project]);setProject(data.project.name)}
       setNewProjectName("")
-      setProjectsError("Project created. Ask your manager to assign it before logging time against it.")
+      setProjectsError("Project created and assigned to you. You can log time against it now.")
     }catch(cause){setProjectsError(cause instanceof Error?cause.message:"Unable to create project.")}
     finally{setLoading(false)}
   }
@@ -249,7 +265,7 @@ export function NoteInput({
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
         <p className="text-xs text-muted-foreground" aria-live="polite">
           {error ? (
-            <span className="text-destructive">{error}</span>
+            <span role="alert" className="text-destructive">{error}</span>
           ) : sampleIsPreview ? (
             <span>Display-only sample. Clear it before entering real timesheet notes.</span>
           ) : (
