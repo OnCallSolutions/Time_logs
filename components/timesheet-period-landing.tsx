@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button"
 type Period={id:string;name:string;startDate:string;endDate:string;submissionDeadline:string}
 
 /** Gives each role a period archive before opening its raw timesheet records. */
-export function TimesheetPeriodLanding({entries,onSelect,onLogTime,onRefresh,canCreate=false}:{entries:TimeEntry[];onSelect:(periodId:string)=>void;onLogTime?:()=>void;onRefresh?:()=>void;canCreate?:boolean}){
+export function TimesheetPeriodLanding({entries,onSelect,onLogTime,onRefresh,canCreate=false,personalReadiness=false}:{entries:TimeEntry[];onSelect:(periodId:string)=>void;onLogTime?:()=>void;onRefresh?:()=>void;canCreate?:boolean;personalReadiness?:boolean}){
   const [periods,setPeriods]=useState<Period[]>([])
   const [loading,setLoading]=useState(true)
   const [error,setError]=useState("")
@@ -35,6 +35,8 @@ export function TimesheetPeriodLanding({entries,onSelect,onLogTime,onRefresh,can
   const previewEntries=[...featuredEntries].sort((a,b)=>b.date.localeCompare(a.date)||a.id.localeCompare(b.id)).slice(0,3)
   const featuredHours=featuredEntries.reduce((sum,entry)=>sum+Number(entry.hours||0),0)
   const featuredStatuses={draft:featuredEntries.filter(entry=>entry.status==="draft").length,submitted:featuredEntries.filter(entry=>entry.status==="submitted").length,approved:featuredEntries.filter(entry=>entry.status==="approved").length,rejected:featuredEntries.filter(entry=>entry.status==="rejected").length}
+  const entriesWithoutDescription=featuredEntries.filter(entry=>!entry.description?.trim()).length
+  const needsAction=featuredStatuses.draft+featuredStatuses.rejected
   const featuredPeople=new Set(featuredEntries.map(entry=>entry.contractor).filter(Boolean)).size
   const featuredProjects=new Set(featuredEntries.map(entry=>entry.project).filter(Boolean)).size
   const openAll=()=>onSelect("all")
@@ -58,15 +60,25 @@ export function TimesheetPeriodLanding({entries,onSelect,onLogTime,onRefresh,can
       <section aria-label="Period overview" className="flex min-h-40 min-w-0 flex-col border-y border-emerald-200 bg-gradient-to-br from-emerald-50/70 via-white to-orange-50/60 p-4">
         {featuredPeriod?<>
           <header className="flex flex-wrap items-start justify-between gap-3 border-b border-emerald-200 pb-3"><div className="flex min-w-0 items-start gap-2"><CalendarClock className="mt-0.5 size-5 shrink-0 text-emerald-700" aria-hidden="true"/><div className="min-w-0"><p className="text-[10px] font-semibold uppercase text-emerald-800">{active?"Current period":upcoming.length?"Next period":"Most recent period"}</p><h3 className="truncate text-base font-semibold text-emerald-950">{featuredPeriod.name}</h3><p className="text-xs text-slate-600">{featuredPeriod.startDate} – {featuredPeriod.endDate}</p></div></div><Button size="sm" onClick={()=>onSelect(featuredPeriod.id)}>Open timesheets<ChevronRight className="size-3.5"/></Button></header>
-          <div className="grid grid-cols-2 gap-2 py-3 sm:grid-cols-3 lg:grid-cols-6">
-            <OverviewStat label="Entries" value={featuredEntries.length} tone="blue"/>
-            <OverviewStat label="Hours" value={`${featuredHours.toLocaleString(undefined,{maximumFractionDigits:2})}h`} tone="green"/>
-            <OverviewStat label="People" value={featuredPeople} tone="sky"/>
-            <OverviewStat label="Projects" value={featuredProjects} tone="orange"/>
+          <div className={`grid grid-cols-2 gap-2 py-3 sm:grid-cols-3 ${personalReadiness?"lg:grid-cols-5":"lg:grid-cols-6"}`}>
+            <OverviewStat label="Entries recorded" value={featuredEntries.length} tone="blue"/>
+            <OverviewStat label="Hours recorded" value={`${featuredHours.toLocaleString(undefined,{maximumFractionDigits:2})}h`} tone="green"/>
+            <OverviewStat label={personalReadiness?"Projects":"People"} value={personalReadiness?featuredProjects:featuredPeople} tone="sky"/>
+            {!personalReadiness&&<OverviewStat label="Projects" value={featuredProjects} tone="orange"/>}
             <OverviewStat label="Awaiting review" value={featuredStatuses.submitted} tone="blue"/>
             <OverviewStat label="Approved" value={featuredStatuses.approved} tone="green"/>
           </div>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-y border-slate-200 py-2 text-xs"><span className="text-orange-900">{featuredStatuses.draft} drafts</span><span className="text-red-800">{featuredStatuses.rejected} returned for correction</span><span className={Date.parse(featuredPeriod.submissionDeadline)<Date.now()&&featuredStatuses.submitted+featuredStatuses.draft>0?"text-red-800":"text-slate-700"}><Clock3 className="mr-1 inline size-3.5"/>Submit by {dueLabel(featuredPeriod)}</span></div>
+          {personalReadiness&&active?.id===featuredPeriod.id&&<section aria-label="Submission readiness" className="mt-3 border border-orange-200 bg-orange-50/50 p-2.5">
+            <div className="flex flex-wrap items-start justify-between gap-2"><div><h4 className="text-xs font-semibold text-orange-950">Current-period submission readiness</h4><p className="text-[10px] text-slate-700">Progress reflects saved entries only; no expected hours or workdays are assumed.</p></div><Button size="sm" variant="outline" className="h-7 border-orange-300 bg-white px-2 text-xs text-orange-950 hover:bg-orange-100" onClick={()=>onSelect(featuredPeriod.id)}><CheckCircle2 className="size-3.5"/>Review timesheets</Button></div>
+            <div className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+              <ReadinessStat label="Saved entries" value={featuredEntries.length} tone="blue"/>
+              <ReadinessStat label="Drafts to submit" value={featuredStatuses.draft} tone={featuredStatuses.draft?"orange":"green"}/>
+              <ReadinessStat label="Returned to correct" value={featuredStatuses.rejected} tone={featuredStatuses.rejected?"red":"green"}/>
+              <ReadinessStat label="No description" value={entriesWithoutDescription} tone={entriesWithoutDescription?"orange":"green"}/>
+            </div>
+            <p role="status" className={`mt-2 text-[11px] ${Date.parse(featuredPeriod.submissionDeadline)<=Date.now()&&needsAction?"text-red-800":"text-slate-700"}`}>{Date.parse(featuredPeriod.submissionDeadline)<=Date.now()&&needsAction?"The submission deadline has passed. Contact your manager about next steps.":needsAction?`${needsAction} entries need your attention before submission.`:featuredEntries.length?"No drafts or returned entries are waiting on you.":"No entries have been recorded in this period yet."}{entriesWithoutDescription>0?` ${entriesWithoutDescription} ${entriesWithoutDescription===1?"entry has":"entries have"} no description; check whether details should be added.`:""}</p>
+          </section>}
           <section aria-label="Current timesheet preview" className="mt-3 min-w-0 border-l-2 border-sky-400 bg-white/80">
             <header className="flex items-center justify-between gap-2 border-b border-sky-100 px-2.5 py-1.5"><h4 className="text-xs font-semibold text-sky-950">Recent work · preview</h4><span className="text-[10px] uppercase text-slate-500">Display only</span></header>
             {previewEntries.length?<ul className="divide-y divide-slate-100">{previewEntries.map(entry=><li key={entry.id} className="grid min-w-0 grid-cols-[5.5rem_minmax(0,1fr)_auto] items-center gap-2 px-2.5 py-1.5 text-xs">
@@ -87,6 +99,11 @@ function OverviewStat({label,value,tone}:{label:string;value:string|number;tone:
   return <div className={`min-w-0 border-l-2 px-2 py-1.5 ${colors[tone]}`}><p className="truncate text-[10px]">{label}</p><p className="truncate text-sm font-semibold tabular-nums">{value}</p></div>
 }
 
+function ReadinessStat({label,value,tone}:{label:string;value:number;tone:"blue"|"green"|"orange"|"red"}){
+  const colors={blue:"border-blue-200 bg-blue-50 text-blue-950",green:"border-emerald-200 bg-emerald-50 text-emerald-950",orange:"border-orange-200 bg-orange-50 text-orange-950",red:"border-red-200 bg-red-50 text-red-950"}
+  return <div className={`flex min-w-0 items-center justify-between gap-2 border-l-2 px-2 py-1 ${colors[tone]}`}><span className="truncate text-[10px]">{label}</span><strong className="text-xs tabular-nums">{value}</strong></div>
+}
+
 function PeriodGroup({title,periods,today,onSelect,dueLabel,periodEntries}:{title:string;periods:Period[];today:string;onSelect:(id:string)=>void;dueLabel:(period:Period)=>string;periodEntries:(period:Period)=>TimeEntry[]}){
   return <section className="mb-2"><h3 className="px-2 py-1 text-[10px] font-semibold uppercase text-slate-600">{title}</h3><div className="space-y-1">{periods.map(period=>{
     const rows=periodEntries(period)
@@ -94,8 +111,8 @@ function PeriodGroup({title,periods,today,onSelect,dueLabel,periodEntries}:{titl
     const approved=rows.filter(entry=>entry.status==="approved").length
     const submittedAt=rows.map(entry=>entry.submittedAt).filter((value):value is string=>!!value).sort().at(-1)
     const due=Date.parse(period.submissionDeadline)
-    const tone=period.startDate<=today&&period.endDate>=today?"border-emerald-500 bg-emerald-50 hover:bg-emerald-100":period.startDate>today?"border-sky-400 bg-white hover:bg-sky-50":"border-orange-400 bg-white hover:bg-orange-50"
-    return <button key={period.id} type="button" onClick={()=>onSelect(period.id)} className={`group flex w-full items-center justify-between gap-3 rounded-md border-l-2 px-2.5 py-2 text-left transition ${tone}`}>
+    const tone=period.startDate<=today&&period.endDate>=today?"border-emerald-600 bg-emerald-50 hover:bg-emerald-100":period.startDate>today?"border-sky-500 bg-white hover:bg-sky-50":"border-orange-500 bg-white hover:bg-orange-50"
+    return <button key={period.id} type="button" onClick={()=>onSelect(period.id)} className={`group flex w-full items-center justify-between gap-3 rounded-sm border border-l-4 px-2.5 py-2 text-left shadow-sm transition ${tone}`}>
       <span className="min-w-0 flex-1"><span className="block truncate text-xs font-semibold text-slate-950">{period.name}</span><span className="block text-[10px] text-slate-600">{period.startDate} – {period.endDate}</span><span className={`mt-0.5 block text-[10px] ${period.endDate<today?"text-slate-600":due<Date.now()?"text-red-800":"text-slate-600"}`}><Clock3 className="mr-1 inline size-3"/>{period.endDate<today?submittedAt?`Submitted on ${new Intl.DateTimeFormat(undefined,{month:"short",day:"numeric",year:"numeric"}).format(new Date(submittedAt))}`:"No submission recorded":"Submit by "+dueLabel(period)}</span></span>
       <span className="shrink-0 text-right"><span className="block text-xs font-semibold tabular-nums text-slate-900">{rows.length} {rows.length===1?"entry":"entries"}</span><span className="block text-[10px] tabular-nums text-slate-600">{hours.toLocaleString(undefined,{maximumFractionDigits:2})}h · {approved} approved</span><ChevronRight className="ml-auto mt-1 size-3.5 text-slate-500 transition group-hover:translate-x-0.5"/></span>
     </button>

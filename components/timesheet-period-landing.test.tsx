@@ -40,3 +40,23 @@ it("offers a combined saved-timesheets view when no period is selected",async()=
   await userEvent.click(await screen.findByRole("button",{name:/All saved periods/}))
   expect(onSelect).toHaveBeenCalledWith("all")
 })
+
+it("shows personal record readiness and opens the period for review",async()=>{
+  const onSelect=vi.fn()
+  vi.stubGlobal("fetch",vi.fn(async()=>new Response(JSON.stringify({periods:[
+    {id:"current",name:"October",startDate:"2026-10-01",endDate:"2026-10-31",submissionDeadline:"2026-11-02T17:00:00.000Z"},
+  ]}))))
+  render(<TimesheetPeriodLanding personalReadiness entries={[
+    {id:"draft",date:"2026-10-10",hours:3,status:"draft",contractor:"Taylor",project:"Field",description:"Work"},
+    {id:"returned",date:"2026-10-11",hours:2,status:"rejected",contractor:"Taylor",project:"Field",description:""},
+    {id:"submitted",date:"2026-10-12",hours:4,status:"submitted",contractor:"Taylor",project:"Field",description:"Review"},
+  ] as never} onSelect={onSelect}/> )
+  expect(await screen.findByRole("region",{name:"Submission readiness"})).toHaveTextContent("Progress reflects saved entries only; no expected hours or workdays are assumed.")
+  const readiness=screen.getByRole("region",{name:"Submission readiness"})
+  expect(within(readiness).getByText("Drafts to submit").parentElement).toHaveTextContent("1")
+  expect(within(readiness).getByText("Returned to correct").parentElement).toHaveTextContent("1")
+  expect(within(readiness).getByText("No description").parentElement).toHaveTextContent("1")
+  expect(readiness).toHaveTextContent("2 entries need your attention before submission.")
+  await userEvent.click(within(readiness).getByRole("button",{name:"Review timesheets"}))
+  expect(onSelect).toHaveBeenCalledWith("current")
+})

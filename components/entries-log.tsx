@@ -287,7 +287,7 @@ export function EntriesLog({
         await onStatusChange(review.entry.id, review.decision, note || undefined, review.entry.revision)
         setReview(null)
       }} />}
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-orange-200 bg-gradient-to-r from-orange-50 via-white to-sky-50 px-3 py-2">
+      <div className="flex flex-wrap items-center justify-between gap-1.5 border-b border-orange-200 bg-gradient-to-r from-orange-50 via-white to-sky-50 px-2.5 py-1.5">
         <div>
           <h2 className="text-sm font-semibold">{title}</h2>
           <p className="text-[11px] text-muted-foreground">
@@ -295,14 +295,14 @@ export function EntriesLog({
             {description}
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          {canClear&&<Button variant="destructive" size="sm" className="h-8" onClick={() => setClearConfirmationOpen(true)}><Trash2 className="size-3.5" aria-hidden="true" />Clear all</Button>}
-          {canExport&&<Button variant="outline" size="sm" className="h-8 border-emerald-300 bg-emerald-50 text-emerald-900 hover:bg-emerald-100" disabled={!visibleEntries.length} onClick={()=>downloadTimesheetCsv(visibleEntries)}><Download className="size-3.5" aria-hidden="true"/>Export ({visibleEntries.length})</Button>}
+        <div className="flex flex-wrap items-center gap-1">
+          {canClear&&<Button variant="destructive" size="sm" className="h-7 px-2 text-xs" onClick={() => setClearConfirmationOpen(true)}><Trash2 className="size-3.5" aria-hidden="true" />Clear all</Button>}
+          {canExport&&<Button variant="outline" size="sm" className="h-7 border-emerald-300 bg-emerald-50 px-2 text-xs text-emerald-900 hover:bg-emerald-100" disabled={!visibleEntries.length} onClick={()=>downloadTimesheetCsv(visibleEntries)}><Download className="size-3.5" aria-hidden="true"/>Export ({visibleEntries.length})</Button>}
         </div>
       </div>
-      {periodView&&<div className="flex flex-wrap items-center gap-2 border-b border-indigo-200 bg-indigo-50/70 px-3 py-1.5">
-        <label className="flex items-center gap-2 text-xs font-semibold text-indigo-950">Timesheet period
-          <select aria-label="Timesheet period" value={periodSelection} onChange={event=>setPeriodSelection(event.target.value)} disabled={!periodsLoaded||periods.length===0} className="h-8 max-w-full rounded-md border border-indigo-200 bg-white px-2 text-sm font-normal text-slate-900">
+      {periodView&&<div className="flex flex-wrap items-center gap-1.5 border-b border-indigo-200 bg-indigo-50/70 px-2.5 py-1">
+        <label className="flex items-center gap-1.5 text-[11px] font-semibold text-indigo-950">Timesheet period
+          <select aria-label="Timesheet period" value={periodSelection} onChange={event=>setPeriodSelection(event.target.value)} disabled={!periodsLoaded||periods.length===0} className="h-7 max-w-full rounded-md border border-indigo-200 bg-white px-2 text-xs font-normal text-slate-900">
             <option value="current">Current period{activePeriod?` · ${activePeriod.name}`:""}</option>
             <option value="archived">Archived periods · all</option>
             <option value="all">All saved periods</option>
@@ -310,39 +310,39 @@ export function EntriesLog({
             {[...periods].sort((a,b)=>b.startDate.localeCompare(a.startDate)).map(period=><option key={period.id} value={period.id}>{period.startDate<=today&&period.endDate>=today?"Current":period.startDate>today?"Upcoming":"Archived"} · {period.name} ({period.startDate} – {period.endDate})</option>)}
           </select>
         </label>
-        <span role="status" className="text-xs text-indigo-900">{!periodsLoaded?"Loading period history…":periods.length===0?"No periods are configured; showing all saved timesheets.":periodSelection==="current"&&!activePeriod?"No period is active today. Select an archived or upcoming period.":periodSelection==="archived"?"Archived entries remain stored and can be retrieved by period.":`Showing ${periodEntries.length} entries for ${periodSelection==="current"?activePeriod?.name??"the current period":periodSelection==="all"?"all periods":periodSelection==="unassigned"?"dates outside configured periods":periods.find(period=>period.id===periodSelection)?.name??"the selected period"}.`}</span>
+        <span role="status" className="text-[11px] text-indigo-900">{!periodsLoaded?"Loading period history…":periods.length===0?"No periods are configured; showing all saved timesheets.":periodSelection==="current"&&!activePeriod?"No period is active today. Select an archived or upcoming period.":periodSelection==="archived"?"Archived entries remain stored and can be retrieved by period.":`Showing ${periodEntries.length} entries for ${periodSelection==="current"?activePeriod?.name??"the current period":periodSelection==="all"?"all periods":periodSelection==="unassigned"?"dates outside configured periods":periods.find(period=>period.id===periodSelection)?.name??"the selected period"}.`}</span>
       </div>}
       {(canSubmit||periodView)&&<p role="status" className={`border-b px-3 py-1 text-[11px] ${submissionClosed?"border-red-200 bg-red-50 text-red-900":"border-orange-200 bg-orange-50/70 text-orange-950"}`}>{deadlineMessage}</p>}
 
-      <div className="border-b border-sky-200 bg-sky-50/50 p-2">
-        <div className="grid gap-1.5 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="border-b border-sky-200 bg-sky-50/50 p-1.5">
+        <div className="grid gap-1 sm:grid-cols-2 xl:grid-cols-4">
           <label className="flex min-w-0 basis-full items-center gap-2 sm:flex-1 sm:basis-auto">
             <Search className="size-4 shrink-0" aria-hidden="true" />
-            <input aria-label="Search entries" placeholder="Search person, project, work, date" value={query} onChange={event => setQuery(event.target.value)} className="h-9 w-full min-w-0 rounded-md border border-sky-200 bg-white px-3 text-sm" />
+            <input aria-label="Search entries" placeholder="Search person, project, work, date" value={query} onChange={event => setQuery(event.target.value)} className="h-8 w-full min-w-0 rounded-md border border-sky-200 bg-white px-2.5 text-xs" />
           </label>
-          <select aria-label="Filter entry status" value={status} onChange={event => setStatus(event.target.value as EntryStatus | "all")} className="h-9 rounded-md border border-blue-200 bg-white px-2 text-sm">
+          <select aria-label="Filter entry status" value={status} onChange={event => setStatus(event.target.value as EntryStatus | "all")} className="h-8 rounded-md border border-blue-200 bg-white px-2 text-xs">
             <option value="all">All statuses</option>
             {(["draft", "submitted", "approved", "rejected"] as const).map(value => <option key={value} value={value}>{value.charAt(0).toUpperCase() + value.slice(1)}</option>)}
           </select>
-          <select aria-label="Filter entry project" value={project} onChange={event=>setProject(event.target.value)} className="h-9 min-w-0 rounded-md border border-orange-200 bg-white px-2 text-sm">
+          <select aria-label="Filter entry project" value={project} onChange={event=>setProject(event.target.value)} className="h-8 min-w-0 rounded-md border border-orange-200 bg-white px-2 text-xs">
             <option value="all">All projects</option>{[...new Set(periodEntries.map(entry=>entry.project))].sort((a,b)=>a.localeCompare(b)).map(value=><option key={value} value={value}>{value}</option>)}
           </select>
-          <select aria-label="Sort entries" value={sortBy} onChange={event=>setSortBy(event.target.value)} className="h-9 rounded-md border border-violet-200 bg-white px-2 text-sm">
+          <select aria-label="Sort entries" value={sortBy} onChange={event=>setSortBy(event.target.value)} className="h-8 rounded-md border border-violet-200 bg-white px-2 text-xs">
             <option value="date_newest">Newest date</option><option value="date_oldest">Oldest date</option><option value="project_az">Project A-Z</option><option value="person_az">Person A-Z</option><option value="hours_high">Hours: high to low</option><option value="hours_low">Hours: low to high</option><option value="status">Status</option>
           </select>
         </div>
-        <details className="group mt-1.5 border-t border-sky-200/80 pt-1.5">
+        <details className="group mt-1 border-t border-sky-200/80 pt-1">
           <summary className="flex cursor-pointer list-none items-center gap-2 text-xs font-medium text-sky-900 hover:text-sky-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 [&::-webkit-details-marker]:hidden"><ChevronRight className="size-3.5 transition-transform group-open:rotate-90" aria-hidden="true"/>More filters and grouping<span className="text-slate-500">· Showing {visibleEntries.length} / {periodEntries.length}</span></summary>
-          <div className="mt-2 grid gap-1.5 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="mt-1.5 grid gap-1 sm:grid-cols-2 xl:grid-cols-4">
             <label className="flex items-center gap-2 text-xs font-medium text-slate-700">From<input aria-label="Entries from date" type="date" value={dateFrom} max={dateThrough||undefined} onChange={event=>setDateFrom(event.target.value)} className="h-8 min-w-0 flex-1 rounded-md border border-emerald-200 bg-white px-2 text-sm"/></label>
             <label className="flex items-center gap-2 text-xs font-medium text-slate-700">Through<input aria-label="Entries through date" type="date" value={dateThrough} min={dateFrom||undefined} onChange={event=>setDateThrough(event.target.value)} className="h-8 min-w-0 flex-1 rounded-md border border-emerald-200 bg-white px-2 text-sm"/></label>
             <select aria-label="Group entries" value={groupBy} onChange={event=>setGroupBy(event.target.value)} className="h-8 rounded-md border border-teal-200 bg-white px-2 text-sm"><option value="project">Group by project</option><option value="day">Group by day</option><option value="person">Group by person</option><option value="none">No grouping</option></select>
             <div className="flex items-center justify-between gap-2"><span className="text-xs font-medium text-slate-600">{visibleEntries.length} visible</span><Button variant="outline" size="sm" className="h-8" title="Reset search, filters, sorting, and grouping" aria-label="Reset timesheet view" disabled={!filtersActive} onClick={clearFilters}><FilterX className="size-4"/>Reset view</Button></div>
           </div>
         </details>
-        {selectable && <details aria-label="Entry submission controls" className="group mt-1.5 border-t border-orange-200 pt-1.5">
+        {selectable && <details aria-label="Entry submission controls" className="group mt-1 border-t border-orange-200 pt-1">
           <summary className="flex cursor-pointer list-none items-center gap-2 text-xs font-medium text-orange-950 hover:text-orange-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 [&::-webkit-details-marker]:hidden"><ChevronRight className="size-3.5 transition-transform group-open:rotate-90" aria-hidden="true"/>Bulk actions<span className="text-slate-600">· {selected.length} selected / {matchingEligible.length} eligible</span></summary>
-          <div className="mt-2 flex flex-wrap items-center gap-1.5 border-l-2 border-orange-400 bg-orange-50/60 p-2">
+          <div className="mt-1.5 flex flex-wrap items-center gap-1 border-l-2 border-orange-400 bg-orange-50/60 p-1.5">
           <Button variant="outline" size="sm" disabled={!eligible.length} onClick={() => setSelectedIds(eligible.map(entry => entry.id))}>Select all eligible ({eligible.length})</Button>
           <Button variant="ghost" size="sm" disabled={!selected.length} onClick={() => setSelectedIds([])}>Clear selection</Button>
           {canSubmit&&<SubmissionActions entries={submissions.filter(entry=>selectedIdSet.has(entry.id))} openRequest={submissionRequest} destination={submissionDestination} onStatusChange={onStatusChange} onSubmitted={id => setSelectedIds(previous => previous.filter(current => current !== id))} />}
@@ -350,18 +350,18 @@ export function EntriesLog({
           </div>
         </details>}
         {visibleEntries.length === 0 && <p role="status" className="p-4 text-sm text-muted-foreground">{periodView&&periodsLoaded&&periods.length>0&&periodSelection==="current"&&!activePeriod?"No timesheet period is active today. Select an archived or upcoming period to retrieve entries.":periodView&&periodsLoaded&&periods.length===0?"No saved timesheets match the current filters.":"No matching entries."}</p>}
-        <div tabIndex={0} aria-label="Scrollable time entries" className="timesheet-scroll-region max-h-[calc(100dvh-14rem)] min-h-48 overflow-auto overscroll-y-auto">
-        <table className="w-full min-w-[1080px] border-collapse text-left">
+        <div tabIndex={0} aria-label="Scrollable time entries" className="timesheet-scroll-region max-h-[calc(100dvh-14rem)] min-h-48 overflow-auto overscroll-y-auto rounded-sm border-2 border-slate-500">
+        <table className="w-full min-w-[1080px] border-collapse border-2 border-slate-500 text-left shadow-sm [&_th]:border-r [&_th]:border-slate-400 [&_td]:border-r [&_td]:border-b [&_td]:border-slate-300 [&_th:last-child]:border-r-0 [&_td:last-child]:border-r-0">
           <thead className="sticky top-0 z-[1] bg-sky-100">
-            <tr className="border-b border-sky-300 text-[10px] uppercase tracking-wide text-sky-950">
+            <tr className="border-b-2 border-sky-500 text-[10px] uppercase tracking-wide text-sky-950">
               {selectable && <th className="px-2 py-1"><input type="checkbox" aria-label="Select all matching eligible entries" checked={allMatchingSelected} disabled={!matchingEligible.length} ref={input => { if (input) input.indeterminate = !allMatchingSelected && matchingEligible.some(entry => selectedIds.includes(entry.id)) }} onChange={event => setSelectedIds(previous => event.target.checked ? [...new Set([...previous, ...matchingEligible.map(entry => entry.id)])] : previous.filter(id => !matchingEligible.some(entry => entry.id === id)))} className="size-3.5 accent-orange-700" /></th>}
-              <th className="px-2 py-1 font-medium">Contractor</th>
-              <th className="px-2 py-1 font-medium">Date</th>
-              <th className="px-2 py-1 font-medium">Project</th>
-              <th className="px-2 py-1 font-medium">Description</th>
-              <th className="px-2 py-1 font-medium">Status</th>
-              <th className="px-2 py-1 text-right font-medium">Hours</th>
-              <th className="sticky right-0 z-[2] w-8 bg-card px-1 py-1" aria-label="Actions" />
+              <th className="px-1.5 py-0.5 font-medium">Contractor</th>
+              <th className="px-1.5 py-0.5 font-medium">Date</th>
+              <th className="px-1.5 py-0.5 font-medium">Project</th>
+              <th className="px-1.5 py-0.5 font-medium">Description</th>
+              <th className="px-1.5 py-0.5 font-medium">Status</th>
+              <th className="px-1.5 py-0.5 text-right font-medium">Hours</th>
+              <th className="sticky right-0 z-[2] w-8 bg-card px-1 py-0.5" aria-label="Actions" />
             </tr>
           </thead>
           <tbody>
@@ -370,7 +370,7 @@ export function EntriesLog({
               const unlocked = !entry.payoutEligible && (entry.status === "draft" || entry.status === "rejected" || (canReview && !own))
               return (
                 <Fragment key={entry.id}>
-              {groupBy!=="none"&&(index===0||entryGroupKey(visibleEntries[index-1],groupBy)!==entryGroupKey(entry,groupBy))&&<tr className="bg-gradient-to-r from-orange-50 via-sky-50 to-emerald-50"><th colSpan={selectable ? 8 : 7} className="border-y border-sky-100 px-2 py-1 text-left text-xs font-semibold text-slate-900">{entryGroupLabel(entry,groupBy)} <span className="ml-1 font-normal text-slate-600">{groupTotals.get(entryGroupKey(entry,groupBy))?.count} entries · {groupTotals.get(entryGroupKey(entry,groupBy))?.hours.toLocaleString(undefined,{maximumFractionDigits:2})}h</span></th></tr>}
+              {groupBy!=="none"&&(index===0||entryGroupKey(visibleEntries[index-1],groupBy)!==entryGroupKey(entry,groupBy))&&<tr className="bg-gradient-to-r from-orange-50 via-sky-50 to-emerald-50"><th colSpan={selectable ? 8 : 7} className="border-y-2 border-sky-300 px-2 py-1 text-left text-xs font-semibold text-slate-900">{entryGroupLabel(entry,groupBy)} <span className="ml-1 font-normal text-slate-600">{groupTotals.get(entryGroupKey(entry,groupBy))?.count} entries · {groupTotals.get(entryGroupKey(entry,groupBy))?.hours.toLocaleString(undefined,{maximumFractionDigits:2})}h</span></th></tr>}
                 <EntryLogRow entry={entry} showIdentity
                   selection={selectable ? { checked: selectedIdSet.has(entry.id) && eligibleIdSet.has(entry.id), disabled: !eligibleIdSet.has(entry.id), onChange: checked => setSelectedIds(previous => checked ? [...new Set([...previous, entry.id])] : previous.filter(id => id !== entry.id)) } : undefined}
                   canEdit={canEdit && unlocked && !ownerEntryIsArchived(entry)} canDelete={canDelete && unlocked && (!deleteOwnOnly||own) && !ownerEntryIsArchived(entry)}

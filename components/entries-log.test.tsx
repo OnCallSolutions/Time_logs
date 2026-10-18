@@ -16,7 +16,7 @@ it("keeps multiple same-project work units as separate entries",()=>{
   expect(screen.getAllByText("Person")).toHaveLength(2)
   expect(screen.getByText("Documentation")).toBeVisible()
   expect(screen.getByText("Testing")).toBeVisible()
-  expect(screen.getByText("Documentation").closest("td")).toHaveClass("px-2","py-1.5")
+  expect(screen.getByText("Documentation").closest("td")).toHaveClass("px-1.5","py-1")
   expect(screen.getAllByText("Draft").find((node)=>node.tagName==="SPAN")).toHaveClass("rounded-full","text-[10px]")
 })
 
