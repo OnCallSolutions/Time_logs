@@ -7,6 +7,8 @@ import userEvent from "@testing-library/user-event"
 import { afterEach,expect,it,vi } from "vitest"
 vi.mock("@/lib/timesheet-pdf",()=>({downloadTimesheetPdf:vi.fn()}))
 import {downloadTimesheetPdf} from "@/lib/timesheet-pdf"
+vi.mock("@/lib/timesheet-export",()=>({downloadTimesheetExport:vi.fn()}))
+import {downloadTimesheetExport} from "@/lib/timesheet-export"
 import { EntriesLog } from "./entries-log"
 afterEach(()=>{cleanup();vi.unstubAllGlobals()})
 it("keeps multiple same-project work units as separate entries",()=>{
@@ -66,12 +68,53 @@ it("offers direct Excel/CSV and PDF downloads only to authorized patrons",async(
   expect(screen.queryByRole("button",{name:"Export (1)"})).not.toBeInTheDocument()
   rerender(<EntriesLog entries={[{...entry,description:"<script>alert(1)</script>"}]} canExport onUpdate={vi.fn()} onStatusChange={vi.fn()} onDelete={vi.fn()} onClear={vi.fn()}/> )
   await user.click(screen.getByRole("button",{name:"Export (1)"}))
-  expect(screen.getByRole("menuitem",{name:"Excel / CSV"})).toBeVisible()
-  expect(screen.getByRole("menuitem",{name:"Download PDF"})).toBeVisible()
+  expect(screen.getByRole("menuitem",{name:"Download CSV"})).toBeVisible()
+  expect(screen.getByRole("menuitem",{name:"Color PDF"})).toBeVisible()
+  expect(screen.getByRole("menuitem",{name:"Black & white PDF"})).toBeVisible()
   vi.mocked(downloadTimesheetPdf).mockResolvedValue()
-  await user.click(screen.getByRole("menuitem",{name:"Download PDF"}))
-  expect(downloadTimesheetPdf).toHaveBeenCalledWith([{...entry,description:"<script>alert(1)</script>"}])
+  await user.click(screen.getByRole("menuitem",{name:"Color PDF"}))
+  expect(downloadTimesheetPdf).toHaveBeenCalledWith([{...entry,description:"<script>alert(1)</script>"}],expect.objectContaining({groupBy:"project",sortBy:"date_newest",colorMode:"color"}))
   expect(screen.queryByRole("menu")).not.toBeInTheDocument()
+})
+
+it("previews the current rows and downloads the chosen format from that preview",async()=>{
+  const user=userEvent.setup()
+  const rows=[entry,{...entry,id:"two",description:"Second visible row",hours:3}]
+  render(<EntriesLog entries={rows} canExport onUpdate={vi.fn()} onStatusChange={vi.fn()} onDelete={vi.fn()} onClear={vi.fn()}/> )
+  await user.click(screen.getByRole("button",{name:"Export (2)"}))
+  await user.click(screen.getByRole("menuitem",{name:/Preview & download/}))
+  expect(await screen.findByRole("dialog",{name:"Timesheet export preview"})).toBeVisible()
+  const preview=screen.getByRole("dialog",{name:"Timesheet export preview"})
+  expect(within(preview).getByText("Documentation")).toBeVisible()
+  expect(within(preview).getByText("Second visible row")).toBeVisible()
+  expect(within(preview).getByText("5h")).toBeVisible()
+  await user.selectOptions(screen.getByRole("combobox",{name:"Export format"}),"json")
+  vi.mocked(downloadTimesheetExport).mockResolvedValue()
+  await user.click(screen.getByRole("button",{name:"Download"}))
+  await waitFor(()=>expect(downloadTimesheetExport).toHaveBeenCalledWith(rows,"json",expect.objectContaining({groupBy:"project"})))
+})
+
+it("passes the active filters, period, sort and grouping to the PDF export",async()=>{
+  const user=userEvent.setup()
+  vi.stubGlobal("fetch",vi.fn().mockResolvedValue(new Response(JSON.stringify({periods:[]}),{status:200,headers:{"Content-Type":"application/json"}})))
+  const rows=[
+    {...entry,id:"match",contractor:"Patron",project:"Alpha",date:"2026-10-18",description:"Visible record",status:"approved" as const},
+    {...entry,id:"hidden",contractor:"Other",project:"Beta",date:"2026-10-17",description:"Hidden record",status:"draft" as const},
+  ]
+  render(<EntriesLog periodView initialPeriodSelection="all" entries={rows} canExport onUpdate={vi.fn()} onStatusChange={vi.fn()} onDelete={vi.fn()} onClear={vi.fn()}/> )
+  expect(await screen.findByText("Visible record")).toBeVisible()
+  await user.click(screen.getByText(/More controls/))
+  await user.type(screen.getByRole("textbox",{name:"Search entries"}),"Patron")
+  await user.selectOptions(screen.getByRole("combobox",{name:"Filter entry status"}),"approved")
+  await user.selectOptions(screen.getByRole("combobox",{name:"Filter entry project"}),"Alpha")
+  await user.selectOptions(screen.getByRole("combobox",{name:"Sort entries"}),"hours_high")
+  await user.selectOptions(screen.getByRole("combobox",{name:"Group entries"}),"person")
+  await user.click(screen.getByRole("button",{name:"Export (1)"}))
+  vi.mocked(downloadTimesheetPdf).mockResolvedValue()
+  await user.click(screen.getByRole("menuitem",{name:"Black & white PDF"}))
+  expect(downloadTimesheetPdf).toHaveBeenCalledWith([rows[0]],expect.objectContaining({
+    period:"All saved periods",search:"Patron",status:"approved",project:"Alpha",sortBy:"hours_high",groupBy:"person",colorMode:"grayscale",
+  }))
 })
 
 it("filters timesheets by text, status, project and date, with selectable sort and grouping",async()=>{

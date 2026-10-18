@@ -8,7 +8,7 @@
  * workflow controls are available, and whether elevated bulk clearing controls
  * should be available.
  */
-import { AlertTriangle, ChevronRight, Download, FileText, FilterX, Search, ClipboardList, Trash2 } from "lucide-react"
+import { AlertTriangle, ChevronRight, Download, Eye, FileText, FilterX, Search, ClipboardList, Trash2 } from "lucide-react"
 import { Fragment,useEffect,useState,type ReactNode } from "react"
 import { EntryLogRow, type EntryMutation, type EntryTransition } from "@/components/entry-log-row"
 import { EntryReviewDialog } from "@/components/manager-workspace"
@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button"
 import { WindowSurface } from "@/components/window-surface"
 import { apiPath } from "@/lib/paths"
 import { downloadTimesheetPdf } from "@/lib/timesheet-pdf"
+import { downloadTimesheetExport,type TimesheetExportFormat } from "@/lib/timesheet-export"
 import { useRetainedViewState } from "@/components/use-retained-view-state"
 import type { EntryStatus, TimeEntry } from "@/lib/types"
 
@@ -178,6 +179,10 @@ export function EntriesLog({
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [exportMenuOpen,setExportMenuOpen]=useState(false)
   const [exportError,setExportError]=useState("")
+  const [exportPreviewOpen,setExportPreviewOpen]=useState(false)
+  const [exportFormat,setExportFormat]=useState<TimesheetExportFormat>("xlsx")
+  const [exportBusy,setExportBusy]=useState(false)
+  const [exportPreviewError,setExportPreviewError]=useState("")
   const [submissionRequest,setSubmissionRequest]=useState(0)
   const [status, setStatus] = useRetainedViewState<EntryStatus | "all">(stateKey?`${stateKey}:status`:undefined,`all`)
   const [project, setProject] = useRetainedViewState(stateKey?`${stateKey}:project`:undefined,`all`)
@@ -282,9 +287,63 @@ export function EntriesLog({
     current.hours += Number(entry.hours) || 0
     groupTotals.set(key,current)
   }
+  const exportPeriodLabel=periodView
+    ?selectedPeriod?`${selectedPeriod.name} (${selectedPeriod.startDate} to ${selectedPeriod.endDate})`
+      :periodSelection==="all"?"All saved periods"
+      :periodSelection==="archived"?"Archived periods"
+      :periodSelection==="unassigned"?"Dates outside configured periods"
+      :periodSelection==="current"?"Current period"
+      :periods.find(period=>period.id===periodSelection)?.name
+    :undefined
+  const exportView={
+    period:exportPeriodLabel,
+    search:query.trim()||undefined,
+    status:status==="all"?undefined:status,
+    project:project==="all"?undefined:project,
+    dateFrom:dateFrom||undefined,
+    dateThrough:dateThrough||undefined,
+    sortBy,
+    groupBy:groupBy as "project"|"day"|"person"|"none",
+  }
+  const exportViewDescription=[
+    exportView.period&&`Period: ${exportView.period}`,
+    exportView.search&&`Search: ${exportView.search}`,
+    exportView.status&&`Status: ${exportView.status}`,
+    exportView.project&&`Project: ${exportView.project}`,
+    (exportView.dateFrom||exportView.dateThrough)&&`Dates: ${exportView.dateFrom||"any"} to ${exportView.dateThrough||"any"}`,
+    `Sort: ${sortBy}`,
+    `Group: ${groupBy}`,
+  ].filter(Boolean).join(" · ")||"All entries"
+  const exportPreviewRows=visibleEntries.slice(0,20)
 
   return (
     <div className="timesheet-workspace-frame flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden bg-gradient-to-b from-white to-sky-50/30 shadow-sm">
+      {exportPreviewOpen&&<WindowSurface title="Timesheet export preview" onBack={()=>{if(!exportBusy)setExportPreviewOpen(false)}} disabled={exportBusy} assistant={false}>
+        <section className="flex h-full min-h-0 w-full flex-col bg-white text-slate-950">
+          <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-sky-200 bg-sky-50 px-4 py-3">
+            <div><h2 className="text-sm font-semibold">Export preview</h2><p className="text-xs text-slate-600">{visibleEntries.length} entries · {total.toLocaleString(undefined,{maximumFractionDigits:2})} total hours</p></div>
+            <label className="flex items-center gap-2 text-xs font-medium">Format<select aria-label="Export format" value={exportFormat} onChange={event=>{setExportFormat(event.target.value as TimesheetExportFormat);setExportPreviewError("")}} disabled={exportBusy} className="h-9 rounded-md border border-slate-300 bg-white px-2 text-sm">
+              <option value="xlsx">Excel workbook (.xlsx)</option><option value="ods">OpenDocument spreadsheet (.ods)</option><option value="csv">CSV (.csv)</option><option value="json">JSON (.json)</option><option value="pdf-color">Color PDF (.pdf)</option><option value="pdf-grayscale">Black &amp; white PDF (.pdf)</option>
+            </select></label>
+          </header>
+          <div className="min-h-0 flex-1 overflow-auto p-3 sm:p-4">
+            <p className="mb-3 break-words text-xs text-slate-600">{exportViewDescription}</p>
+            <div className="overflow-x-auto rounded border border-slate-300">
+              <table className="w-full min-w-[760px] border-collapse text-left text-xs">
+                <thead className="sticky top-0 bg-slate-100 text-slate-900"><tr>{["Contractor","Date","Project","Description","Hours","Status"].map(label=><th key={label} className="border-b border-slate-300 px-2 py-2 font-semibold">{label}</th>)}</tr></thead>
+                <tbody>{exportPreviewRows.map(entry=><tr key={entry.id} className="odd:bg-white even:bg-slate-50"><td className="border-b border-slate-200 px-2 py-2">{entry.contractor}</td><td className="border-b border-slate-200 px-2 py-2">{entry.date}</td><td className="border-b border-slate-200 px-2 py-2">{entry.project}</td><td className="max-w-xl whitespace-pre-wrap break-words border-b border-slate-200 px-2 py-2">{entry.description}</td><td className="border-b border-slate-200 px-2 py-2 text-right tabular-nums">{entry.hours}</td><td className="border-b border-slate-200 px-2 py-2 capitalize">{entry.status}</td></tr>)}</tbody>
+                <tfoot className="bg-sky-100 font-semibold"><tr><td className="border-t-2 border-sky-400 px-2 py-2" colSpan={4}>TOTAL · {visibleEntries.length} {visibleEntries.length===1?"entry":"entries"}</td><td className="border-t-2 border-sky-400 px-2 py-2 text-right tabular-nums">{total.toLocaleString(undefined,{maximumFractionDigits:2})}h</td><td className="border-t-2 border-sky-400 px-2 py-2"/></tr></tfoot>
+              </table>
+            </div>
+            {visibleEntries.length>exportPreviewRows.length&&<p className="mt-2 text-xs text-slate-600">Previewing {exportPreviewRows.length} of {visibleEntries.length} rows. The download includes every matching row.</p>}
+            {exportPreviewError&&<p role="alert" className="mt-3 text-sm text-red-800">{exportPreviewError}</p>}
+          </div>
+          <footer className="flex shrink-0 justify-end gap-2 border-t border-slate-200 bg-white p-3">
+            <Button variant="outline" disabled={exportBusy} onClick={()=>setExportPreviewOpen(false)}>Cancel</Button>
+            <Button disabled={exportBusy||!visibleEntries.length} onClick={()=>{setExportBusy(true);setExportPreviewError("");void downloadTimesheetExport(visibleEntries,exportFormat,exportView).then(()=>setExportPreviewOpen(false)).catch(()=>setExportPreviewError("The file could not be generated. Try another format or retry.")).finally(()=>setExportBusy(false))}}><Download className="size-4"/>{exportBusy?"Preparing…":"Download"}</Button>
+          </footer>
+        </section>
+      </WindowSurface>}
       {clearConfirmationOpen && <WindowSurface title="Confirm clearing timesheets" onBack={() => setClearConfirmationOpen(false)} compact resizable>
         <section className="flex w-full max-w-xl flex-col bg-white text-slate-950">
           <header className="flex items-start gap-3 border-b border-red-200 bg-red-50 p-4">
@@ -315,8 +374,10 @@ export function EntriesLog({
           {canExport&&<div className="relative">
             <Button variant="outline" size="sm" className="h-7 border-emerald-300 bg-emerald-50 px-2 text-xs text-emerald-900 hover:bg-emerald-100" disabled={!visibleEntries.length} aria-haspopup="menu" aria-expanded={exportMenuOpen} onClick={()=>setExportMenuOpen(open=>!open)}><Download className="size-3.5" aria-hidden="true"/>Export ({visibleEntries.length})</Button>
             {exportMenuOpen&&<div role="menu" aria-label="Timesheet export formats" className="absolute right-0 top-full z-30 mt-1 min-w-40 rounded-md border border-slate-200 bg-white p-1 shadow-lg">
-              <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-600" onClick={()=>{downloadTimesheetCsv(visibleEntries);setExportMenuOpen(false)}}><Download className="size-3.5" aria-hidden="true"/>Excel / CSV</button>
-              <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-600" onClick={()=>{setExportError("");setExportMenuOpen(false);void downloadTimesheetPdf(visibleEntries).catch(()=>setExportError("PDF could not be generated. Try again."))}}><FileText className="size-3.5" aria-hidden="true"/>Download PDF</button>
+              <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-600" onClick={()=>{downloadTimesheetCsv(visibleEntries);setExportMenuOpen(false)}}><Download className="size-3.5" aria-hidden="true"/>Download CSV</button>
+              <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-600" onClick={()=>{setExportPreviewError("");setExportFormat("xlsx");setExportMenuOpen(false);setExportPreviewOpen(true)}}><Eye className="size-3.5" aria-hidden="true"/>Preview &amp; download…</button>
+              <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-600" onClick={()=>{setExportError("");setExportMenuOpen(false);void downloadTimesheetPdf(visibleEntries,{...exportView,colorMode:"color"}).catch(()=>setExportError("PDF could not be generated. Try again."))}}><FileText className="size-3.5" aria-hidden="true"/>Color PDF</button>
+              <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-600" onClick={()=>{setExportError("");setExportMenuOpen(false);void downloadTimesheetPdf(visibleEntries,{...exportView,colorMode:"grayscale"}).catch(()=>setExportError("PDF could not be generated. Try again."))}}><FileText className="size-3.5" aria-hidden="true"/>Black & white PDF</button>
             </div>}
             {exportError&&<p role="alert" className="absolute right-0 top-full z-30 mt-1 w-56 rounded border border-red-200 bg-white p-2 text-xs text-red-800 shadow">{exportError}</p>}
           </div>}
