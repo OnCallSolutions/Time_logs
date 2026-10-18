@@ -1626,7 +1626,7 @@ export async function listEntryRejections(actorEmail:string|null,limit=250):Prom
 export async function submitTimeEntryWithAudit(
   ownerEmail: string,
   id: string,
-  patch: Partial<ParsedEntry> & { status: "submitted"; reviewManagerEmail?: string | null },
+  patch: Partial<ParsedEntry> & { status: "submitted"; reviewManagerEmail: string },
   includeAll: boolean,
   reviewerEmail: string | undefined,
   expectedRevision: string,
@@ -1650,7 +1650,7 @@ export async function submitTimeEntryWithAudit(
       project = COALESCE(${patch.project ?? null}, project),
       description = COALESCE(${patch.description ?? null}, description),
       status = 'submitted',
-      review_manager_email = CASE WHEN ${patch.reviewManagerEmail !== undefined} THEN ${patch.reviewManagerEmail ?? null} ELSE review_manager_email END,
+      review_manager_email = ${patch.reviewManagerEmail}::text,
       reviewed_by = NULL,
       reviewed_at = NULL,
       review_note = NULL,
@@ -1662,7 +1662,7 @@ export async function submitTimeEntryWithAudit(
       AND (
         EXISTS (SELECT 1 FROM timesheet_periods)
         AND EXISTS (SELECT 1 FROM timesheet_periods p WHERE work_date BETWEEN p.start_date AND p.end_date
-          AND (now() <= p.submission_deadline OR (${actorRole} = 'manager' AND now() <= p.submission_deadline + make_interval(days => p.manager_grace_days))))
+          AND (now() <= p.submission_deadline OR (${actorRole}::text = 'manager' AND now() <= p.submission_deadline + make_interval(days => p.manager_grace_days))))
         OR (NOT EXISTS (SELECT 1 FROM timesheet_periods) AND NOT EXISTS (
           SELECT 1 FROM organization_workflow_settings WHERE id='organization' AND timesheet_submission_deadline <= now()
         ))

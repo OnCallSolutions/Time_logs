@@ -28,9 +28,23 @@ it("shows selectable current and archived periods before raw entries",async()=>{
   expect(preview).toHaveTextContent("Recent work")
   expect(preview).toHaveTextContent("3h")
   expect(preview).toHaveTextContent("approved")
+  expect(preview).toHaveTextContent("Latest 1 of 1")
   expect(within(preview).queryByRole("button")).not.toBeInTheDocument()
   await userEvent.click(screen.getByRole("button",{name:/October/}))
   expect(onSelect).toHaveBeenCalledWith("current")
+})
+
+it("shows up to six latest entries in the personal period preview",async()=>{
+  vi.stubGlobal("fetch",vi.fn(async()=>new Response(JSON.stringify({periods:[
+    {id:"current",name:"October",startDate:"2026-10-01",endDate:"2026-10-31",submissionDeadline:"2026-11-02T17:00:00.000Z"},
+  ]}))))
+  const entries=Array.from({length:8},(_,index)=>({id:`entry-${index}`,date:`2026-10-${String(23-index).padStart(2,"0")}`,hours:1,status:"draft",contractor:"Taylor",project:`Project ${index}`,description:`Work ${index}`}))
+  render(<TimesheetPeriodLanding entries={entries as never} onSelect={vi.fn()}/> )
+  const preview=await screen.findByRole("region",{name:"Current timesheet preview"})
+  expect(preview).toHaveTextContent("Latest 6 of 8")
+  expect(within(preview).getByText("Project 0")).toBeInTheDocument()
+  expect(within(preview).getByText("Project 5")).toBeInTheDocument()
+  expect(within(preview).queryByText("Project 6")).not.toBeInTheDocument()
 })
 
 it("offers a combined saved-timesheets view when no period is selected",async()=>{
