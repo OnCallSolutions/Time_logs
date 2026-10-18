@@ -219,9 +219,10 @@ export async function PATCH(
     if(patch.reviewManagerEmail!==undefined){
       if(patch.status!=="submitted"||current.ownerEmail?.toLowerCase()!==access.email.toLowerCase())return Response.json({error:"A manager can only be selected when submitting your own work."},{status:403})
     }
-    if(patch.status==="submitted"&&(access.role==="contractor"||access.role==="employee")){
-      if(current.ownerEmail?.toLowerCase()!==access.email.toLowerCase())return Response.json({error:"Only the account owner can route a personal timesheet for review."},{status:403})
-      const reviewer=await resolveSubmissionReviewer(access.email)
+    if(patch.status==="submitted"){
+      if((access.role==="contractor"||access.role==="employee")&&current.ownerEmail?.toLowerCase()!==access.email.toLowerCase())return Response.json({error:"Only the account owner can route a personal timesheet for review."},{status:403})
+      const submitterEmail=current.ownerEmail??access.email
+      const reviewer=await resolveSubmissionReviewer(submitterEmail)
       if(!reviewer)return Response.json({error:"No active manager currently has both team-view and approval rights. Ask an administrator to assign a reviewer before submitting."},{status:400})
       if(patch.reviewManagerEmail&&patch.reviewManagerEmail.toLowerCase()!==reviewer.email)return Response.json({error:"Reviewing manager is assigned by the company and cannot be changed during submission."},{status:403})
       patch={...patch,reviewManagerEmail:reviewer.email}
@@ -282,7 +283,7 @@ export async function PATCH(
         submitted=await submitTimeEntryWithAudit(
           access.email,
           id,
-          patch as typeof patch & {status:"submitted"},
+          patch as typeof patch & {status:"submitted";reviewManagerEmail:string},
           access.includeAll,
           access.canReview ? access.email : undefined,
           revision,
@@ -297,7 +298,7 @@ export async function PATCH(
         // before telling the user to retry an operation that may already have saved.
         try {
           const persisted=await getTimeEntry(access.email,id,access.includeAll)
-          const expectedReviewer=patch.reviewManagerEmail
+          const expectedReviewer=patch.reviewManagerEmail!
           const requestedFieldsPersisted=(patch.contractor===undefined||persisted?.contractor===patch.contractor)&&
             (patch.date===undefined||persisted?.date.slice(0,10)===patch.date)&&
             (patch.hours===undefined||persisted?.hours===patch.hours)&&
@@ -305,7 +306,7 @@ export async function PATCH(
             (patch.description===undefined||persisted?.description===patch.description)
           if(persisted?.status==="submitted"&&persisted.ownerEmail?.toLowerCase()===current.ownerEmail?.toLowerCase()&&
             requestedFieldsPersisted&&
-            (expectedReviewer===undefined||(expectedReviewer===null?persisted.reviewManagerEmail==null:persisted.reviewManagerEmail?.toLowerCase()===expectedReviewer.toLowerCase()))){
+            persisted.reviewManagerEmail?.toLowerCase()===expectedReviewer.toLowerCase()){
             console.warn("[entries] submission confirmed after persistence error",{id,...persistenceFailureDetails(writeError)})
             return Response.json({entry:persisted})
           }

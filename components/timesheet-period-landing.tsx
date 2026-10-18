@@ -32,7 +32,7 @@ export function TimesheetPeriodLanding({entries,onSelect,onLogTime,onRefresh,can
   const dueLabel=(period:Period)=>new Intl.DateTimeFormat(undefined,{month:"short",day:"numeric",year:"numeric",hour:"numeric",minute:"2-digit"}).format(new Date(period.submissionDeadline))
   const featuredPeriod=active??upcoming[0]??archived[0]
   const featuredEntries=featuredPeriod?periodEntries(featuredPeriod):[]
-  const previewEntries=[...featuredEntries].sort((a,b)=>b.date.localeCompare(a.date)||a.id.localeCompare(b.id)).slice(0,3)
+  const previewEntries=[...featuredEntries].sort((a,b)=>b.date.localeCompare(a.date)||a.id.localeCompare(b.id)).slice(0,6)
   const featuredHours=featuredEntries.reduce((sum,entry)=>sum+Number(entry.hours||0),0)
   const featuredStatuses={draft:featuredEntries.filter(entry=>entry.status==="draft").length,submitted:featuredEntries.filter(entry=>entry.status==="submitted").length,approved:featuredEntries.filter(entry=>entry.status==="approved").length,rejected:featuredEntries.filter(entry=>entry.status==="rejected").length}
   const entriesWithoutDescription=featuredEntries.filter(entry=>!entry.description?.trim()).length
@@ -89,7 +89,7 @@ export function TimesheetPeriodLanding({entries,onSelect,onLogTime,onRefresh,can
             <p role="status" className={`mt-2 text-[11px] ${Date.parse(featuredPeriod.submissionDeadline)<=Date.now()&&needsAction?"text-red-800":"text-slate-700"}`}>{Date.parse(featuredPeriod.submissionDeadline)<=Date.now()&&needsAction?"The submission deadline has passed. Contact your manager about next steps.":needsAction?`${needsAction} entries need your attention before submission.`:featuredEntries.length?"No drafts or returned entries are waiting on you.":"No entries have been recorded in this period yet."}{entriesWithoutDescription>0?` ${entriesWithoutDescription} ${entriesWithoutDescription===1?"entry has":"entries have"} no description; check whether details should be added.`:""}</p>
           </section>}
           <section aria-label="Current timesheet preview" className="mt-3 min-w-0 border-l-2 border-sky-400 bg-white/80">
-            <header className="flex items-center justify-between gap-2 border-b border-sky-100 px-2.5 py-1.5"><h4 className="text-xs font-semibold text-sky-950">Recent work · preview</h4><span className="text-[10px] uppercase text-slate-500">Display only</span></header>
+            <header className="flex items-center justify-between gap-2 border-b border-sky-100 px-2.5 py-1.5"><h4 className="text-xs font-semibold text-sky-950">Recent work · preview</h4><span className="text-[10px] text-slate-600">Latest {previewEntries.length} of {featuredEntries.length} · Display only</span></header>
             {previewEntries.length?<ul className="divide-y divide-slate-100">{previewEntries.map(entry=><li key={entry.id} className="grid min-w-0 grid-cols-[5.5rem_minmax(0,1fr)_auto] items-center gap-2 px-2.5 py-1.5 text-xs">
               <time dateTime={entry.date} className="text-[10px] tabular-nums text-slate-600">{entry.date}</time>
               <span className="min-w-0"><span className="block truncate font-medium text-slate-900" title={entry.project}>{entry.project}</span><span className="block truncate text-[10px] text-slate-600" title={entry.description}>{entry.description||"No description"}</span></span>
