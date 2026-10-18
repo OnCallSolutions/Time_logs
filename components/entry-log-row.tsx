@@ -56,7 +56,7 @@ export function EntryLogRow({ entry, showIdentity, canEdit, canDelete, canSubmit
   const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false)
   const pending = useRef(false)
   const editing = !!draft && canEdit
-  const inputClass = "w-full min-w-24 rounded-md border border-input bg-white px-2 py-2 text-sm focus:ring-2 focus:ring-orange-300"
+  const inputClass = "w-full min-w-24 rounded-md border border-sky-200 bg-white px-2 py-2 text-sm focus:border-orange-400 focus:ring-2 focus:ring-orange-200"
 
   /**
    * Saves one snapshot or performs a status transition without duplicate requests.
@@ -137,10 +137,13 @@ export function EntryLogRow({ entry, showIdentity, canEdit, canDelete, canSubmit
       </div></td>
     </tr>
     {editing && <WindowSurface title="Edit time entry" disabled={busy} onBack={cancel}>
-      <form noValidate onSubmit={event => { event.preventDefault(); void save() }} className="flex min-h-0 w-full flex-col bg-white">
-        <h2 className="shrink-0 border-b px-4 py-3 text-base font-semibold">Edit time entry</h2>
+      <form noValidate onSubmit={event => { event.preventDefault(); void save() }} className="flex min-h-0 w-full flex-col bg-gradient-to-br from-sky-50 via-white to-emerald-50">
+        <header className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-sky-200 bg-gradient-to-r from-sky-100 via-white to-emerald-100 px-4 py-2.5">
+          <div><h2 className="text-base font-semibold text-sky-950">Edit time entry</h2><p className="text-xs text-slate-600">Update the record, then save your changes.</p></div>
+          <div className="flex items-center gap-2"><Button type="button" variant="outline" title="Cancel edit" aria-label="Cancel edit" disabled={busy} onClick={cancel}><X className="size-4"/>Cancel</Button><Button type="submit" title="Save entry" aria-label="Save entry" disabled={busy} className="bg-emerald-700 text-white hover:bg-emerald-800"><Save className="size-4"/>{busy?"Saving...":"Save"}</Button></div>
+        </header>
         <div className="min-h-0 flex-1 overflow-auto p-4">
-          <div className="mx-auto grid max-w-4xl grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="mx-auto grid max-w-4xl grid-cols-1 gap-4 rounded-md border border-sky-100 bg-white/85 p-4 shadow-sm sm:grid-cols-2">
             <label className="min-w-0 text-sm font-medium">Contractor<input autoFocus aria-label="Contractor" className={inputClass + " mt-1"} value={draft.contractor} disabled={busy} onChange={event => setDraft({ ...draft, contractor: event.target.value })} /></label>
             <label className="min-w-0 text-sm font-medium">Project<input aria-label="Project" className={inputClass + " mt-1"} value={draft.project} disabled={busy} onChange={event => setDraft({ ...draft, project: event.target.value })} /></label>
             <label className="min-w-0 text-sm font-medium">Date<input type="date" aria-label="Date" className={inputClass + " mt-1"} value={draft.date} disabled={busy} onChange={event => setDraft({ ...draft, date: event.target.value })} /></label>
@@ -149,10 +152,6 @@ export function EntryLogRow({ entry, showIdentity, canEdit, canDelete, canSubmit
             {error && <p role="alert" className="text-sm text-destructive sm:col-span-2">{error}</p>}
           </div>
         </div>
-        <footer className="flex shrink-0 justify-end gap-2 border-t bg-white px-4 py-3">
-          <Button variant="outline" title="Cancel edit" aria-label="Cancel edit" disabled={busy} onClick={cancel}><X className="size-4" />Cancel</Button>
-          <Button type="submit" title="Save entry" aria-label="Save entry" disabled={busy}><Save className="size-4" />{busy ? "Saving..." : "Save"}</Button>
-        </footer>
       </form>
     </WindowSurface>}
   </Fragment>

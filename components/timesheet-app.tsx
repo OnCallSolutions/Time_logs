@@ -247,10 +247,13 @@ export function TimesheetApp({
   const previousRole = useRef(initialRole)
   const [messagesOpen,setMessagesOpen]=useState(false)
   const assistantDockRef=useRef<HTMLDivElement>(null)
-  const assistantResizeStart=useRef<{pointerId:number;y:number;height:number}|null>(null)
-  const assistantWidthResizeStart=useRef<{pointerId:number;x:number;width:number}|null>(null)
+  const assistantResizeStart=useRef<{pointerId:number;y:number;height:number;left:number;bottom:number}|null>(null)
+  const assistantWidthResizeStart=useRef<{pointerId:number;x:number;width:number;right:number}|null>(null)
+  const assistantDragStart=useRef<{pointerId:number;x:number;y:number;left:number;top:number}|null>(null)
+  const assistantWasManuallyResized=useRef(false)
   const [assistantHeight,setAssistantHeight]=useState(380)
   const [assistantWidth,setAssistantWidth]=useState(0)
+  const [assistantPosition,setAssistantPosition]=useState<{left:number;top:number}|null>(null)
   const [assistantDockOpen,setAssistantDockOpen]=useState(false)
   const [assistantFocusRequest,setAssistantFocusRequest]=useState(0)
   const [assistantMessageContext,setAssistantMessageContext]=useState("")
@@ -266,8 +269,11 @@ export function TimesheetApp({
    * @returns void after capturing the pointer and initial dimensions.
    */
   function beginAssistantResize(event:ReactPointerEvent<HTMLDivElement>):void {
-    const measuredHeight=assistantDockRef.current?.getBoundingClientRect().height
-    assistantResizeStart.current={pointerId:event.pointerId,y:event.clientY,height:measuredHeight&&measuredHeight>0?measuredHeight:assistantHeight}
+    const bounds=assistantDockRef.current?.getBoundingClientRect()
+    const measuredHeight=bounds?.height
+    assistantResizeStart.current={pointerId:event.pointerId,y:event.clientY,height:measuredHeight&&measuredHeight>0?measuredHeight:assistantHeight,left:bounds?.left??12,bottom:bounds?.bottom??window.innerHeight-12}
+    if(bounds)setAssistantPosition({left:bounds.left,top:bounds.top})
+    assistantWasManuallyResized.current=true
     event.currentTarget.setPointerCapture?.(event.pointerId)
     event.preventDefault()
   }
@@ -279,8 +285,11 @@ export function TimesheetApp({
   function moveAssistantResize(event:ReactPointerEvent<HTMLDivElement>):void {
     const start=assistantResizeStart.current
     if(!start||start.pointerId!==event.pointerId)return
-    const maximum=Math.max(300,Math.floor(window.innerHeight*.78))
-    setAssistantHeight(Math.max(300,Math.min(maximum,start.height+start.y-event.clientY)))
+    const maximum=Math.max(220,window.innerHeight-24)
+    const minimum=Math.min(300,maximum)
+    const height=Math.max(minimum,Math.min(maximum,start.height+start.y-event.clientY))
+    setAssistantHeight(height)
+    setAssistantPosition({left:Math.max(8,Math.min(start.left,window.innerWidth-80)),top:Math.max(8,start.bottom-height)})
   }
   /**
    * Ends the current assistant resize gesture.
@@ -291,18 +300,76 @@ export function TimesheetApp({
     if(assistantResizeStart.current?.pointerId===event.pointerId)assistantResizeStart.current=null
   }
   function beginAssistantWidthResize(event:ReactPointerEvent<HTMLDivElement>):void {
-    const width=assistantDockRef.current?.getBoundingClientRect().width??Math.min(window.innerWidth*.5,704)
-    assistantWidthResizeStart.current={pointerId:event.pointerId,x:event.clientX,width}
+    const bounds=assistantDockRef.current?.getBoundingClientRect()
+    const width=bounds?.width??Math.min(window.innerWidth*.5,704)
+    assistantWidthResizeStart.current={pointerId:event.pointerId,x:event.clientX,width,right:bounds?.right??window.innerWidth-12}
+    if(bounds)setAssistantPosition({left:bounds.left,top:bounds.top})
     event.currentTarget.setPointerCapture?.(event.pointerId);event.preventDefault()
   }
   function moveAssistantWidthResize(event:ReactPointerEvent<HTMLDivElement>):void {
     const start=assistantWidthResizeStart.current
     if(!start||start.pointerId!==event.pointerId)return
-    setAssistantWidth(Math.max(320,Math.min(Math.floor(window.innerWidth*.72),start.width+start.x-event.clientX)))
+    const maximum=Math.max(240,window.innerWidth-24),minimum=Math.min(320,maximum)
+    const width=Math.max(minimum,Math.min(maximum,start.width+start.x-event.clientX))
+    setAssistantWidth(width)
+    setAssistantPosition(position=>({left:Math.max(8,start.right-width),top:position?.top??assistantDockRef.current?.getBoundingClientRect().top??8}))
   }
   function endAssistantWidthResize(event:ReactPointerEvent<HTMLDivElement>):void {
     if(assistantWidthResizeStart.current?.pointerId===event.pointerId)assistantWidthResizeStart.current=null
   }
+  function beginAssistantDrag(event:ReactPointerEvent<HTMLElement>):void {
+    if((event.target as HTMLElement).closest("button,a,input,select,textarea"))return
+    const bounds=assistantDockRef.current?.getBoundingClientRect()
+    if(!bounds)return
+    assistantDragStart.current={pointerId:event.pointerId,x:event.clientX,y:event.clientY,left:bounds.left,top:bounds.top}
+    setAssistantPosition({left:bounds.left,top:bounds.top})
+    event.currentTarget.setPointerCapture?.(event.pointerId)
+    event.preventDefault()
+  }
+  function moveAssistantDrag(event:ReactPointerEvent<HTMLElement>):void {
+    const start=assistantDragStart.current
+    const bounds=assistantDockRef.current?.getBoundingClientRect()
+    if(!start||!bounds||start.pointerId!==event.pointerId)return
+    const maxLeft=Math.max(8,window.innerWidth-bounds.width-8),maxTop=Math.max(8,window.innerHeight-bounds.height-8)
+    setAssistantPosition({left:Math.max(8,Math.min(maxLeft,start.left+event.clientX-start.x)),top:Math.max(8,Math.min(maxTop,start.top+event.clientY-start.y))})
+  }
+  function endAssistantDrag(event:ReactPointerEvent<HTMLElement>):void {
+    if(assistantDragStart.current?.pointerId===event.pointerId)assistantDragStart.current=null
+  }
+  function resizeAssistantHeightByKeyboard(delta:number):void {
+    assistantWasManuallyResized.current=true
+    const bounds=assistantDockRef.current?.getBoundingClientRect()
+    const maximum=Math.max(180,window.innerHeight-24),minimum=Math.min(300,maximum)
+    setAssistantHeight(height=>{
+      const next=Math.max(minimum,Math.min(maximum,height+delta))
+      if(bounds)setAssistantPosition(position=>({left:position?.left??bounds.left,top:Math.max(8,(position?.top??bounds.top)+bounds.height-next)}))
+      return next
+    })
+  }
+  function resizeAssistantWidthByKeyboard(delta:number):void {
+    const bounds=assistantDockRef.current?.getBoundingClientRect()
+    const maximum=Math.max(240,window.innerWidth-24),minimum=Math.min(320,maximum)
+    setAssistantWidth(width=>{
+      const next=Math.max(minimum,Math.min(maximum,(width||bounds?.width||Math.min(window.innerWidth*.5,704))+delta))
+      if(bounds)setAssistantPosition(position=>({left:Math.max(8,(position?.left??bounds.left)+bounds.width-next),top:position?.top??bounds.top}))
+      return next
+    })
+  }
+  useEffect(()=>{
+    if(!assistantDockOpen)return
+    const clampToViewport=()=>{
+      const bounds=assistantDockRef.current?.getBoundingClientRect()
+      const maxHeight=Math.max(180,window.innerHeight-24),maxWidth=Math.max(240,window.innerWidth-24)
+      setAssistantHeight(height=>Math.min(height,maxHeight))
+      setAssistantWidth(width=>width?Math.min(width,maxWidth):0)
+      if(bounds)setAssistantPosition(position=>position?{
+        left:Math.max(8,Math.min(position.left,window.innerWidth-bounds.width-8)),
+        top:Math.max(8,Math.min(position.top,window.innerHeight-bounds.height-8)),
+      }:null)
+    }
+    window.addEventListener("resize",clampToViewport)
+    return()=>window.removeEventListener("resize",clampToViewport)
+  },[assistantDockOpen])
   const permissionRequest=useRef(0)
   useEffect(()=>{
     if(role!==previousRole.current) {
@@ -695,10 +762,10 @@ export function TimesheetApp({
   }
 
   const accountsContent=<BusinessAccounts key={`${role}:${permissions.send_to_accounts}:${permissions.view_accounts}:${permissions.review_accounts}:${permissions.ai_accounts}`} canSend={false} canReview={permissions.view_accounts&&permissions.review_accounts&&(role==="account_manager"||role==="admin")} canAI={permissions.view_accounts&&permissions.ai_accounts&&(role==="account_manager"||role==="admin")} canAuthorize={permissions.authorize_payouts} canPreviewSamples={role==="admin"} onManagePeriods={permissions.manage_timesheet_periods?()=>setAccountManagerTool("periods"):undefined} onManageProjects={permissions.manage_projects?()=>setAccountManagerTool("projects"):undefined}/>
-  const assistantPane=accessDenied||!assistantDockOpen?null:<div ref={assistantDockRef} data-assistant-overlay="true" style={{height:assistantHeight,width:assistantWidth||undefined,maxWidth:"calc(100vw - 1.5rem)",maxHeight:"calc(100dvh - 1.5rem)"}} className="fixed bottom-3 right-3 z-[60] min-h-[18rem] min-w-0 w-[min(50vw,44rem)] max-sm:w-[calc(100vw-1.5rem)]">
-    <div role="separator" aria-label="Resize assistant width" aria-orientation="vertical" aria-valuenow={assistantWidth||undefined} tabIndex={0} onPointerDown={beginAssistantWidthResize} onPointerMove={moveAssistantWidthResize} onPointerUp={endAssistantWidthResize} onPointerCancel={endAssistantWidthResize} onKeyDown={event=>{if(event.key==="ArrowLeft")setAssistantWidth(value=>Math.min(Math.floor(window.innerWidth*.72),(value||Math.min(window.innerWidth*.5,704))+32));if(event.key==="ArrowRight")setAssistantWidth(value=>Math.max(320,(value||Math.min(window.innerWidth*.5,704))-32))}} className="absolute -left-2 top-1/2 z-10 hidden h-16 w-4 -translate-y-1/2 cursor-ew-resize rounded-full bg-transparent after:absolute after:left-1/2 after:top-1/2 after:h-10 after:w-1 after:-translate-x-1/2 after:-translate-y-1/2 after:rounded-full after:bg-emerald-500/50 hover:after:bg-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 sm:block" />
-    <div role="separator" aria-label="Resize assistant panel" aria-orientation="horizontal" aria-valuenow={assistantHeight} tabIndex={0} onPointerDown={beginAssistantResize} onPointerMove={moveAssistantResize} onPointerUp={endAssistantResize} onPointerCancel={endAssistantResize} onKeyDown={event=>{if(event.key==="ArrowUp")setAssistantHeight(value=>Math.min(Math.floor(window.innerHeight*.78),value+32));if(event.key==="ArrowDown")setAssistantHeight(value=>Math.max(300,value-32))}} className="absolute -top-2 left-1/2 z-10 h-4 w-16 -translate-x-1/2 cursor-ns-resize rounded-full bg-transparent after:absolute after:left-1/2 after:top-1/2 after:h-1 after:w-10 after:-translate-x-1/2 after:-translate-y-1/2 after:rounded-full after:bg-emerald-500/50 hover:after:bg-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500" />
-    <AssistantPanel organizationName={organizationName} workspaceContext="main" handoffContext={assistantHandoff} onHandoffUsed={()=>setAssistantHandoff("")} onClose={()=>setAssistantDockOpen(false)} onNavigate={(destination,handoff)=>{if(handoff)setAssistantHandoff(handoff);if(destination==="messages")setMessagesOpen(true);else openWorkspacePage(destination as View)}} onRefresh={()=>{setEntriesRefresh(value=>value+1);messageInbox.refresh()}} messageContext={assistantMessageContext} onContextUsed={()=>setAssistantMessageContext("")} onCompose={draft=>{setAssistantCompose(draft);setMessagesOpen(true)}} focusRequest={assistantFocusRequest} onPreferredHeight={height=>setAssistantHeight(current=>current===height?current:height)}/>
+  const assistantPane=accessDenied||!assistantDockOpen?null:<div ref={assistantDockRef} data-assistant-overlay="true" style={{height:assistantHeight,width:assistantWidth||undefined,left:assistantPosition?.left,top:assistantPosition?.top,right:assistantPosition?"auto":12,bottom:assistantPosition?"auto":12,minHeight:"min(18rem, calc(100dvh - 1.5rem))",maxWidth:"calc(100vw - 1.5rem)",maxHeight:"calc(100dvh - 1.5rem)"}} className="fixed z-[60] min-w-0 w-[min(50vw,44rem)] max-sm:w-[calc(100vw-1.5rem)]">
+    <div role="separator" aria-label="Resize assistant width" aria-orientation="vertical" aria-valuenow={assistantWidth||undefined} tabIndex={0} onPointerDown={beginAssistantWidthResize} onPointerMove={moveAssistantWidthResize} onPointerUp={endAssistantWidthResize} onPointerCancel={endAssistantWidthResize} onKeyDown={event=>{if(event.key==="ArrowLeft")resizeAssistantWidthByKeyboard(32);if(event.key==="ArrowRight")resizeAssistantWidthByKeyboard(-32)}} className="absolute -left-2 top-1/2 z-10 hidden h-16 w-4 -translate-y-1/2 cursor-ew-resize rounded-full bg-transparent after:absolute after:left-1/2 after:top-1/2 after:h-10 after:w-1 after:-translate-x-1/2 after:-translate-y-1/2 after:rounded-full after:bg-emerald-500/50 hover:after:bg-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 sm:block" />
+    <div role="separator" aria-label="Resize assistant panel" aria-orientation="horizontal" aria-valuenow={assistantHeight} tabIndex={0} onPointerDown={beginAssistantResize} onPointerMove={moveAssistantResize} onPointerUp={endAssistantResize} onPointerCancel={endAssistantResize} onKeyDown={event=>{if(event.key==="ArrowUp")resizeAssistantHeightByKeyboard(32);if(event.key==="ArrowDown")resizeAssistantHeightByKeyboard(-32)}} className="absolute -top-2 left-1/2 z-10 h-4 w-16 -translate-x-1/2 cursor-ns-resize rounded-full bg-transparent after:absolute after:left-1/2 after:top-1/2 after:h-1 after:w-10 after:-translate-x-1/2 after:-translate-y-1/2 after:rounded-full after:bg-emerald-500/50 hover:after:bg-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500" />
+    <AssistantPanel organizationName={organizationName} workspaceContext="main" handoffContext={assistantHandoff} onHandoffUsed={()=>setAssistantHandoff("")} onClose={()=>setAssistantDockOpen(false)} onDragStart={beginAssistantDrag} onDragMove={moveAssistantDrag} onDragEnd={endAssistantDrag} onNavigate={(destination,handoff)=>{if(handoff)setAssistantHandoff(handoff);if(destination==="messages")setMessagesOpen(true);else openWorkspacePage(destination as View)}} onRefresh={()=>{setEntriesRefresh(value=>value+1);messageInbox.refresh()}} messageContext={assistantMessageContext} onContextUsed={()=>setAssistantMessageContext("")} onCompose={draft=>{setAssistantCompose(draft);setMessagesOpen(true)}} focusRequest={assistantFocusRequest} onPreferredHeight={height=>{if(!assistantWasManuallyResized.current)setAssistantHeight(current=>current===height?current:height)}}/>
   </div>
   const pageTitle=view==="period-index"?"Timesheet periods":view==="personal"?`${role==="manager"?"My managerial timesheets":"My timesheets"} · ${personalStatusLabel}`:view==="log"&&(role==="employee"||role==="contractor")?`My timesheets · ${personalStatusLabel}`:view==="log"?(permissions.view_all_timesheets?"Organization timesheets":permissions.view_team?"Team entries":role==="contractor"?"Contractor time submissions":"Employee time entries"):view==="approvals"?"Review queue":view==="report"||view==="my-report"?"Reports":view==="activity"?"Account activity":view==="permissions"?"Manage employees and contractors":view==="accounts"?"Final approvals":view==="periods"?"Timesheet periods":view==="admin"?adminStartSection==="reports"?"Reports":adminStartSection==="timesheets"?"Timesheets":"Admin dashboard":"Workspace"
   return (

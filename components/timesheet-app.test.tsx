@@ -360,11 +360,35 @@ describe("TimesheetApp admin directory", () => {
     await user.click(screen.getByRole("button", { name: "Go to DevOnCall assistant" }))
     const mainAssistant = await screen.findByRole("region", { name: "DevOnCall assistant" })
     expect(within(mainAssistant).getByRole("heading", { name: "DevOnCall" })).toBeVisible()
-    expect(document.querySelector("[data-assistant-overlay='true']")).toHaveClass("fixed", "bottom-3", "right-3")
+    expect(document.querySelector("[data-assistant-overlay='true']")).toHaveClass("fixed")
+    expect((document.querySelector("[data-assistant-overlay='true']") as HTMLElement).style.right).toBe("12px")
     const composer = within(mainAssistant).getByLabelText("Ask DevOnCall")
     await waitFor(() => expect(composer).toHaveFocus())
     expect(within(mainAssistant).getByText("Tanovo Time · Workspace assistant")).toBeVisible()
     expect(screen.getAllByRole("region", { name: "DevOnCall assistant" })).toHaveLength(1)
+  })
+
+  it("lets patrons drag the assistant and resize it upward without leaving the viewport", async () => {
+    const user = await renderAdminPanel()
+    await user.click(screen.getByRole("button", { name: "Back" }))
+    await user.click(within(screen.getByRole("dialog", { name: "Admin" })).getByRole("button", { name: "Back" }))
+    await user.click(screen.getByRole("button", { name: "Go to DevOnCall assistant" }))
+    const assistant=await screen.findByRole("region",{name:"DevOnCall assistant"})
+    const overlay=document.querySelector<HTMLElement>("[data-assistant-overlay='true']")!
+    vi.spyOn(overlay,"getBoundingClientRect").mockReturnValue({x:500,y:300,left:500,top:300,right:900,bottom:680,width:400,height:380,toJSON:()=>({})})
+    const header=within(assistant).getByRole("heading",{name:"DevOnCall"}).closest("header")!
+    fireEvent.pointerDown(header,{pointerId:11,clientX:540,clientY:320})
+    fireEvent.pointerMove(header,{pointerId:11,clientX:440,clientY:220})
+    fireEvent.pointerUp(header,{pointerId:11,clientX:440,clientY:220})
+    expect(overlay.style.left).toBe("400px")
+    expect(overlay.style.top).toBe("200px")
+
+    const resize=screen.getByRole("separator",{name:"Resize assistant panel"})
+    fireEvent.pointerDown(resize,{pointerId:12,clientY:200})
+    fireEvent.pointerMove(resize,{pointerId:12,clientY:-1000})
+    fireEvent.pointerUp(resize,{pointerId:12,clientY:-1000})
+    expect(Number.parseFloat(overlay.style.height)).toBeLessThan(window.innerHeight)
+    expect(Number.parseFloat(overlay.style.top)).toBeGreaterThanOrEqual(8)
   })
 
   it("saves role and permission changes only from the edit dialog", async () => {

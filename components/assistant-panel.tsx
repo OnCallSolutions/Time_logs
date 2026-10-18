@@ -5,6 +5,7 @@
  */
 "use client"
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
+import type { PointerEvent as ReactPointerEvent } from "react"
 import { AlertTriangle, Check, LoaderCircle, Send, Sparkles, Trash2, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { WindowSurface } from "@/components/window-surface"
@@ -12,10 +13,10 @@ import { apiPath } from "@/lib/paths"
 import type { AssistantAction, AssistantProposal } from "@/lib/assistant-contract"
 type ChatMessage = { role: "user" | "assistant"; content: string }
 type AssistantPeriod={id:string;name:string;startDate:string;endDate:string}
-type Props = { organizationName?:string;workspaceContext?:string;handoffContext?:string;onClose?:()=>void;onNavigate:(destination:string,handoff?:string)=>void;onHandoffUsed?:()=>void;onRefresh:()=>void;messageContext:string;onContextUsed:()=>void;onCompose:(draft:{recipient:string;body:string;confirmed:boolean})=>void;focusRequest?:number;onPreferredHeight?:(height:number)=>void }
+type Props = { organizationName?:string;workspaceContext?:string;handoffContext?:string;onClose?:()=>void;onDragStart?:(event:ReactPointerEvent<HTMLElement>)=>void;onDragMove?:(event:ReactPointerEvent<HTMLElement>)=>void;onDragEnd?:(event:ReactPointerEvent<HTMLElement>)=>void;onNavigate:(destination:string,handoff?:string)=>void;onHandoffUsed?:()=>void;onRefresh:()=>void;messageContext:string;onContextUsed:()=>void;onCompose:(draft:{recipient:string;body:string;confirmed:boolean})=>void;focusRequest?:number;onPreferredHeight?:(height:number)=>void }
 
 /** @param props - Authorized client actions and optional user-shared message context. @returns JSX.Element with responsive conversation and confirmation controls. */
-export function AssistantPanel({organizationName="DevOnCall",workspaceContext="main",handoffContext,onClose,onNavigate,onHandoffUsed,onRefresh,messageContext,onContextUsed,onCompose,focusRequest=0,onPreferredHeight}:Props) {
+export function AssistantPanel({organizationName="DevOnCall",workspaceContext="main",handoffContext,onClose,onDragStart,onDragMove,onDragEnd,onNavigate,onHandoffUsed,onRefresh,messageContext,onContextUsed,onCompose,focusRequest=0,onPreferredHeight}:Props) {
   const [messages,setMessages]=useState<ChatMessage[]>([]),[proposals,setProposals]=useState<AssistantProposal[]>([])
   const [conversationReady,setConversationReady]=useState(false)
   const [question,setQuestion]=useState(""),[busy,setBusy]=useState(false),[error,setError]=useState(""),[notice,setNotice]=useState("")
@@ -50,8 +51,10 @@ export function AssistantPanel({organizationName="DevOnCall",workspaceContext="m
       const header=section.querySelector("header")?.getBoundingClientRect().height??64
       const composer=section.querySelector("form")?.getBoundingClientRect().height??76
       if(!conversation.scrollHeight&&header<=0&&composer<=0)return
-      const content=Math.min(conversation.scrollHeight,Math.floor(window.innerHeight*.52))
-      onPreferredHeight(Math.max(300,Math.min(Math.floor(window.innerHeight*.72),Math.ceil(header+composer+content))))
+      const available=Math.max(180,window.innerHeight-24)
+      const minimum=Math.min(300,available)
+      const content=Math.min(conversation.scrollHeight,Math.floor(available*.65))
+      onPreferredHeight(Math.min(available,Math.max(minimum,Math.ceil(header+composer+content))))
     }
     update()
     if(typeof ResizeObserver==="undefined")return
@@ -102,7 +105,7 @@ export function AssistantPanel({organizationName="DevOnCall",workspaceContext="m
     return `${action.status[0].toUpperCase()+action.status.slice(1)} timesheet ${action.id.slice(0,8)}`
   }
   return <section aria-label={`${organizationName} assistant`} className="flex h-full min-h-0 w-full flex-col overflow-hidden rounded-lg border border-emerald-300/70 bg-white/95 shadow-sm backdrop-blur">
-    <header className="flex shrink-0 items-center gap-3 border-b border-emerald-200 bg-emerald-50/90 px-4 py-3"><span className="flex size-9 items-center justify-center rounded-md bg-orange-600 text-white"><Sparkles className="size-5"/></span><div className="min-w-0 flex-1"><h2 className="font-semibold">{organizationName}</h2><p className="text-xs text-muted-foreground">Tanovo Time · {workspaceContext==="main"?"Workspace assistant":`${workspaceContext} assistant`}</p></div>{onClose&&<Button variant="ghost" size="icon-sm" aria-label="Close window assistant" onClick={onClose}><X className="size-4"/></Button>}</header>
+    <header title={onDragStart?"Drag to move assistant window":undefined} onPointerDown={onDragStart} onPointerMove={onDragMove} onPointerUp={onDragEnd} onPointerCancel={onDragEnd} className={`flex shrink-0 items-center gap-3 border-b border-emerald-200 bg-emerald-50/90 px-4 py-3 ${onDragStart?"touch-none select-none cursor-grab active:cursor-grabbing":""}`}><span className="flex size-9 items-center justify-center rounded-md bg-orange-600 text-white"><Sparkles className="size-5"/></span><div className="min-w-0 flex-1"><h2 className="font-semibold">{organizationName}</h2><p className="text-xs text-muted-foreground">Tanovo Time · {workspaceContext==="main"?"Workspace assistant":`${workspaceContext} assistant`}</p></div>{onClose&&<Button variant="ghost" size="icon-sm" aria-label="Close window assistant" onClick={onClose}><X className="size-4"/></Button>}</header>
     <div ref={conversationRef} aria-live="polite" className="min-h-0 flex-1 space-y-3 overflow-auto bg-emerald-50/25 p-4">
       {!conversationReady&&<p role="status" className="text-sm text-muted-foreground">Syncing assistant memory...</p>}
       {!messages.length&&conversationReady&&<p className="max-w-2xl text-sm text-muted-foreground">Ask about {workspaceContext==="main"?"your workspace":workspaceContext}, request an action, or ask me to open another workspace. I’ll show proposed changes for you to confirm.</p>}
