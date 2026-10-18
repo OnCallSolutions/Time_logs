@@ -68,6 +68,7 @@ import { AccountProfile } from "@/components/account-profile"
 import { AddPerson } from "./add-person"
 import { NoteInput } from "@/components/note-input"
 import { EntriesLog } from "@/components/entries-log"
+import { TimesheetPeriodLanding } from "@/components/timesheet-period-landing"
 import { ManagerReport } from "@/components/manager-report"
 import { SignOutButton } from "@/components/sign-out-button"
 import { Button } from "@/components/ui/button"
@@ -82,7 +83,7 @@ import type {
   UserRole,
 } from "@/lib/types"
 
-type View = "home" | "log" | "personal" | "approvals" | "report" | "my-report" | "activity" | "admin" | "messages" | "permissions" | "accounts" | "periods"
+type View = "home" | "period-index" | "log" | "personal" | "approvals" | "report" | "my-report" | "activity" | "admin" | "messages" | "permissions" | "accounts" | "periods"
 type AdminStartSection = "landing" | "admin" | "reports" | "timesheets"
 type WorkspaceHistoryFrame = { view: View; adminStartSection: AdminStartSection; pageWindow: boolean }
 
@@ -341,6 +342,7 @@ export function TimesheetApp({
   const [workspaceHistory,setWorkspaceHistory]=useState<WorkspaceHistoryFrame[]>([])
   const [workspaceWindow,setWorkspaceWindow] = useState<"overview"|"workflow"|"notes"|"projects"|null>(null)
   const [accountManagerTool,setAccountManagerTool]=useState<"periods"|"projects"|null>(null)
+  const [initialTimesheetPeriod,setInitialTimesheetPeriod]=useState("current")
   const entriesEndpoint = apiPath("/api/entries")
   /**
    * Opens a complete role page while preserving its parent command group for Back.
@@ -685,6 +687,12 @@ export function TimesheetApp({
   const ownEntries=entries.filter(entry=>entry.ownerEmail?.toLowerCase()===userEmail?.toLowerCase())
   const visibleOwnEntries=personalStatus==="all"?ownEntries:ownEntries.filter(entry=>entry.status===personalStatus)
   const personalStatusLabel=personalStatuses.find(([status])=>status===personalStatus)?.[1]??"All entries"
+  const personalTimesheetView=role==="employee"||role==="contractor"||(role==="manager"&&!permissions.view_team)
+  function openPeriodTimesheets(periodId:string):void {
+    setInitialTimesheetPeriod(periodId)
+    setPersonalStatus("all")
+    openWorkspacePage(personalTimesheetView?"personal":"log")
+  }
 
   const accountsContent=<BusinessAccounts key={`${role}:${permissions.send_to_accounts}:${permissions.view_accounts}:${permissions.review_accounts}:${permissions.ai_accounts}`} canSend={false} canReview={permissions.view_accounts&&permissions.review_accounts&&(role==="account_manager"||role==="admin")} canAI={permissions.view_accounts&&permissions.ai_accounts&&(role==="account_manager"||role==="admin")} canAuthorize={permissions.authorize_payouts} canPreviewSamples={role==="admin"} onManagePeriods={permissions.manage_timesheet_periods?()=>setAccountManagerTool("periods"):undefined} onManageProjects={permissions.manage_projects?()=>setAccountManagerTool("projects"):undefined}/>
   const assistantPane=accessDenied||!assistantDockOpen?null:<div ref={assistantDockRef} data-assistant-overlay="true" style={{height:assistantHeight,width:assistantWidth||undefined,maxWidth:"calc(100vw - 1.5rem)",maxHeight:"calc(100dvh - 1.5rem)"}} className="fixed bottom-3 right-3 z-[60] min-h-[18rem] min-w-0 w-[min(50vw,44rem)] max-sm:w-[calc(100vw-1.5rem)]">
@@ -692,7 +700,7 @@ export function TimesheetApp({
     <div role="separator" aria-label="Resize assistant panel" aria-orientation="horizontal" aria-valuenow={assistantHeight} tabIndex={0} onPointerDown={beginAssistantResize} onPointerMove={moveAssistantResize} onPointerUp={endAssistantResize} onPointerCancel={endAssistantResize} onKeyDown={event=>{if(event.key==="ArrowUp")setAssistantHeight(value=>Math.min(Math.floor(window.innerHeight*.78),value+32));if(event.key==="ArrowDown")setAssistantHeight(value=>Math.max(300,value-32))}} className="absolute -top-2 left-1/2 z-10 h-4 w-16 -translate-x-1/2 cursor-ns-resize rounded-full bg-transparent after:absolute after:left-1/2 after:top-1/2 after:h-1 after:w-10 after:-translate-x-1/2 after:-translate-y-1/2 after:rounded-full after:bg-emerald-500/50 hover:after:bg-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500" />
     <AssistantPanel organizationName={organizationName} workspaceContext="main" handoffContext={assistantHandoff} onHandoffUsed={()=>setAssistantHandoff("")} onClose={()=>setAssistantDockOpen(false)} onNavigate={(destination,handoff)=>{if(handoff)setAssistantHandoff(handoff);if(destination==="messages")setMessagesOpen(true);else openWorkspacePage(destination as View)}} onRefresh={()=>{setEntriesRefresh(value=>value+1);messageInbox.refresh()}} messageContext={assistantMessageContext} onContextUsed={()=>setAssistantMessageContext("")} onCompose={draft=>{setAssistantCompose(draft);setMessagesOpen(true)}} focusRequest={assistantFocusRequest} onPreferredHeight={height=>setAssistantHeight(current=>current===height?current:height)}/>
   </div>
-  const pageTitle=view==="personal"?`${role==="manager"?"My managerial timesheets":"My timesheets"} · ${personalStatusLabel}`:view==="log"&&(role==="employee"||role==="contractor")?`My timesheets · ${personalStatusLabel}`:view==="log"?(permissions.view_all_timesheets?"Organization timesheets":permissions.view_team?"Team entries":role==="contractor"?"Contractor time submissions":"Employee time entries"):view==="approvals"?"Review queue":view==="report"||view==="my-report"?"Reports":view==="activity"?"Account activity":view==="permissions"?"Manage employees and contractors":view==="accounts"?"Final approvals":view==="periods"?"Timesheet periods":view==="admin"?adminStartSection==="reports"?"Reports":adminStartSection==="timesheets"?"Timesheets":"Admin dashboard":"Workspace"
+  const pageTitle=view==="period-index"?"Timesheet periods":view==="personal"?`${role==="manager"?"My managerial timesheets":"My timesheets"} · ${personalStatusLabel}`:view==="log"&&(role==="employee"||role==="contractor")?`My timesheets · ${personalStatusLabel}`:view==="log"?(permissions.view_all_timesheets?"Organization timesheets":permissions.view_team?"Team entries":role==="contractor"?"Contractor time submissions":"Employee time entries"):view==="approvals"?"Review queue":view==="report"||view==="my-report"?"Reports":view==="activity"?"Account activity":view==="permissions"?"Manage employees and contractors":view==="accounts"?"Final approvals":view==="periods"?"Timesheet periods":view==="admin"?adminStartSection==="reports"?"Reports":adminStartSection==="timesheets"?"Timesheets":"Admin dashboard":"Workspace"
   return (
     <WindowAssistantProvider renderAssistant={(workspace,onClose,onPreferredHeight)=><AssistantPanel organizationName={organizationName} workspaceContext={workspace} handoffContext={assistantHandoff} onHandoffUsed={()=>setAssistantHandoff("")} onClose={onClose} onNavigate={(destination,handoff)=>{if(handoff)setAssistantHandoff(handoff);if(destination==="messages")setMessagesOpen(true);else openWorkspacePage(destination as View)}} onRefresh={()=>{setEntriesRefresh(value=>value+1);messageInbox.refresh()}} messageContext="" onContextUsed={()=>{}} onCompose={draft=>{setAssistantCompose(draft);setMessagesOpen(true)}} onPreferredHeight={onPreferredHeight}/> }>
     <main className="app-workspace tech-surface flex h-dvh min-h-svh w-full min-w-0 flex-col gap-3 overflow-x-hidden overflow-y-auto overscroll-y-auto bg-background px-3 pb-8 pt-3 sm:px-5 md:pt-4">
@@ -723,9 +731,9 @@ export function TimesheetApp({
           <Button variant="outline" onClick={()=>openWorkspacePage("admin","timesheets")}><Layers3 className="size-4"/>Timesheets</Button>
           {permissions.manage_projects&&<Button variant="outline" onClick={()=>setWorkspaceWindow("projects")}><FolderKanban className="size-4"/>Projects</Button>}
         </> : <>
-          {role!=="account_manager"&&<Button variant="outline" onClick={()=>openWorkspacePage(role==="manager"&&permissions.view_team?"log":"personal")}><Layers3 className="size-4"/>Timesheets</Button>}
+          {role!=="account_manager"&&<Button variant="outline" onClick={()=>openWorkspacePage("period-index")}><Layers3 className="size-4"/>Timesheets</Button>}
           {(canReviewEntries||canAIReview)&&<Button variant="outline" onClick={()=>openWorkspacePage("approvals")}><CheckCircle2 className="size-4"/>Approvals</Button>}
-          {role==="account_manager"&&permissions.view_all_timesheets&&<Button variant="outline" onClick={()=>openWorkspacePage("log")}><Layers3 className="size-4"/>Timesheets</Button>}
+          {role==="account_manager"&&permissions.view_all_timesheets&&<Button variant="outline" onClick={()=>openWorkspacePage("period-index")}><Layers3 className="size-4"/>Timesheets</Button>}
           {role==="account_manager"&&permissions.view_accounts&&<Button variant="outline" onClick={()=>openWorkspacePage("accounts")}><ShieldCheck className="size-4"/>Final timesheets</Button>}
           <Button variant="outline" onClick={()=>openWorkspacePage(canViewTeamReports?"report":"my-report")}><BarChart3 className="size-4"/>{canViewTeamReports?"Reports":"My report"}</Button>
           {canViewAdmin&&<Button variant="outline" onClick={()=>openWorkspacePage("admin","admin")}><ShieldCheck className="size-4"/>Admin</Button>}
@@ -734,7 +742,7 @@ export function TimesheetApp({
           {permissions.manage_projects&&<Button variant="outline" onClick={()=>setWorkspaceWindow("projects")}><FolderKanban className="size-4"/>Projects</Button>}
         </>}
       </nav>}
-      {!accessDenied&&!(view==="log"||view==="personal"||(view==="admin"&&adminStartSection==="timesheets"))&&<SubmissionDeadlineNotice/>}
+      {!accessDenied&&!(view==="log"||view==="personal"||view==="period-index"||(view==="admin"&&adminStartSection==="timesheets"))&&<SubmissionDeadlineNotice/>}
       {lifecycleOpen&&!accessDenied&&(canViewAdmin||(role==="manager"&&permissions.delegate_permissions))&&<WindowSurface title={canViewAdmin?"Access lifecycle":"Temporary coverage"} onBack={()=>setLifecycleOpen(false)}><section className="min-h-0 w-full overflow-auto bg-white"><AccessLifecyclePanel key={role} admin={canViewAdmin} permissions={permissions}/></section></WindowSurface>}
       {canViewAdmin && technologyReports && <SecurityRiskWindow onClose={() => setTechnologyReports(false)} />}
 
@@ -768,13 +776,15 @@ export function TimesheetApp({
             canCreate={permissions.create_entries}
             canReview={canReviewEntries||canAIReview}
             canReports={canViewTeamReports}
-            onTimesheets={()=>openWorkspacePage(role==="manager"&&permissions.view_team?"log":"personal")}
+            onTimesheets={()=>openWorkspacePage("period-index")}
             onReviews={()=>openWorkspacePage("approvals")}
             onLogTime={()=>setWorkspaceWindow("notes")}
           />}
           {view!=="home"&&<>
           {savedStatus&&!syncError&&<p role="status" className="border-y border-green-200 bg-green-50 px-4 py-2 text-sm text-green-900">{savedStatus}</p>}
           {loadingEntries && <div className="rounded-lg border border-border bg-muted/50 px-4 py-3 text-sm text-muted-foreground" role="status">Loading saved entries...</div>}
+
+      {view==="period-index"&&<TimesheetPeriodLanding entries={personalTimesheetView?ownEntries:entries} onSelect={openPeriodTimesheets} canCreate={permissions.create_entries} onLogTime={()=>setWorkspaceWindow("notes")} onRefresh={()=>setEntriesRefresh(value=>value+1)}/>}
 
       {view === "log" || view === "personal" ? (
         <>
@@ -812,6 +822,7 @@ export function TimesheetApp({
           canSubmit={canSubmitEntries}
           canSubmitOthers={role==="manager"&&view==="log"}
           periodView={view==="log"||view==="personal"}
+          initialPeriodSelection={initialTimesheetPeriod}
           canExport={permissions.export_entries}
           canEdit={permissions.edit_entries}
           canDelete={permissions.delete_entries}

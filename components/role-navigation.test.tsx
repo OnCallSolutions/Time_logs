@@ -42,6 +42,8 @@ it("gives employees personal corrections without privileged controls",async()=>{
   expect(screen.queryByText("Employee A")).not.toBeInTheDocument()
   expect(screen.queryByRole("button",{name:/prepare ai review|ai security reports|^admin$/i})).not.toBeInTheDocument()
   await userEvent.click(screen.getByRole("button",{name:"Timesheets"}))
+  const periodIndex=await screen.findByRole("dialog",{name:"Timesheet periods"})
+  await userEvent.click(within(periodIndex).getByRole("button",{name:/October 2026/}))
   await screen.findByText("Employee A")
   const timesheets=screen.getByRole("dialog",{name:"My timesheets · All entries"})
   await userEvent.click(within(timesheets).getByRole("button",{name:/needs correction/i}))
@@ -88,6 +90,8 @@ it("keeps AI recommendations advisory until a manager confirms",async()=>{
   await userEvent.click(within(screen.getByRole("dialog",{name:"AI review results"})).getByRole("button",{name:"Back"}))
   await userEvent.click(within(approvals).getByRole("button",{name:"Back"}))
   await userEvent.click(screen.getByRole("button",{name:"Timesheets"}))
+  const periodIndex=await screen.findByRole("dialog",{name:"Timesheet periods"})
+  await userEvent.click(within(periodIndex).getByRole("button",{name:/October 2026/}))
   expect(await screen.findByRole("dialog",{name:"Team entries"})).toBeInTheDocument()
 })
 it("returns from a report to the exact approval page and restores its filters",async()=>{
@@ -185,6 +189,19 @@ it("adds approval controls when an employee receives a delegated review right",a
   expect(within(screen.getByRole("dialog",{name:"Review queue"})).getAllByRole("button",{name:/Review queue/i}).length).toBeGreaterThan(0)
   expect(screen.queryByRole("button",{name:"Admin"})).not.toBeInTheDocument()
 })
+it("opens account-manager raw timesheets only after a period is selected and restores the archive on Back",async()=>{
+  testRole="account_manager"
+  render(<TimesheetApp role="account_manager" userEmail="accounts@example.com" />)
+  await screen.findByRole("heading",{name:"Business queue fixture"})
+  await userEvent.click(screen.getByRole("button",{name:"Timesheets"}))
+  const periodIndex=await screen.findByRole("dialog",{name:"Timesheet periods"})
+  expect(within(periodIndex).queryByRole("table")).not.toBeInTheDocument()
+  await userEvent.click(within(periodIndex).getByRole("button",{name:/October 2026/}))
+  const rawSheets=await screen.findByRole("dialog",{name:"Organization timesheets"})
+  expect(within(rawSheets).getByRole("combobox",{name:"Timesheet period"})).toHaveValue("period-1")
+  await userEvent.click(within(rawSheets).getByRole("button",{name:"Back"}))
+  expect(await screen.findByRole("dialog",{name:"Timesheet periods"})).toBeVisible()
+})
 it("keeps admin landing focused on people rather than timesheets or business queues",async()=>{
   testRole="admin"
   render(<TimesheetApp role="admin" userEmail="admin@example.com" />)
@@ -213,6 +230,8 @@ it("refreshes the submitter's status and rejection reason when their browser reg
   render(<TimesheetApp role="employee" userEmail="employee@example.com" />)
   await screen.findByRole("region",{name:"employee workspace home"})
   await userEvent.click(screen.getByRole("button",{name:"Timesheets"}))
+  const periodIndex=await screen.findByRole("dialog",{name:"Timesheet periods"})
+  await userEvent.click(within(periodIndex).getByRole("button",{name:/October 2026/}))
   await screen.findByText("Employee A")
   servedEntries=entries.map(entry=>entry.id==="submitted"?{...entry,status:"rejected",reviewNote:"Correct the submitted hours"}:entry)
   fireEvent(window,new Event("focus"))
