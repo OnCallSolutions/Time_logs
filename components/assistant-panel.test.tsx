@@ -47,3 +47,11 @@ it("requires a separate explicit confirmation for an assistant-proposed deletion
   await user.click(within(confirmation).getByRole("button", { name: "Cancel" }))
   expect(fetch).toHaveBeenCalledTimes(3)
 })
+
+it("shows an explicit dock control when embedded in a workspace window",()=>{
+  const onToggleDock=vi.fn()
+  render(<AssistantPanel workspaceContext="Reports" docked onToggleDock={onToggleDock} onNavigate={vi.fn()} onRefresh={vi.fn()} messageContext="" onContextUsed={vi.fn()} onCompose={vi.fn()}/> )
+  expect(screen.getByRole("button",{name:"Undock AI assistant"})).toBeVisible()
+  screen.getByRole("button",{name:"Undock AI assistant"}).click()
+  expect(onToggleDock).toHaveBeenCalledOnce()
+})

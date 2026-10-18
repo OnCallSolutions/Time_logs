@@ -126,7 +126,7 @@ function jsonResponse(data: unknown, status = 200) {
  *
  * @returns The installed fetch mock for additional assertions.
  */
-function mockTimesheetFetch() {
+function mockTimesheetFetch(entries:unknown[] = []) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     const method = init?.method ?? "GET"
@@ -139,7 +139,7 @@ function mockTimesheetFetch() {
     if (url === "/tanovo-time/api/assistant/conversations" && method === "POST") return jsonResponse({ messages: [] })
 
     if (url === "/tanovo-time/api/entries") {
-      return jsonResponse({ entries: [] })
+      return jsonResponse({ entries })
     }
     if (url === "/tanovo-time/api/timesheet-periods") return jsonResponse({ periods: [{ id: "period-october", name: "October 2026", startDate: "2026-10-01", endDate: "2026-10-31", submissionDeadline: "2026-11-02T17:00:00.000Z", managerGraceDays: 3, reminderDays: 3 }] })
 
@@ -182,6 +182,60 @@ function mockTimesheetFetch() {
         requestPath: "/tanovo-time/api/entries/entry-1",
         requestId: "req-test-1",
         occurredAt: "2026-10-17T12:00:00.000Z",
+      },{
+        id:"audit-rights",
+        actorEmail:"manager@example.com",
+        action:"user_access_updated",
+        targetType:"managed_user_access",
+        targetId:"employee@example.com",
+        metadata:{fromRole:"contractor",toRole:"employee",permissionsChanged:true,beforePermissions:{review_entries:false},afterPermissions:{review_entries:true}},
+        ipAddress:null,userAgent:null,requestMethod:"PATCH",requestPath:"/tanovo-time/api/users",requestId:null,
+        occurredAt:"2026-10-17T11:59:00.000Z",
+      },{
+        id:"audit-period",
+        actorEmail:"manager@example.com",
+        action:"timesheet_period_created",
+        targetType:"timesheet_period",
+        targetId:"period-id",
+        metadata:{name:"November 2026",startDate:"2026-11-01",endDate:"2026-11-30"},
+        ipAddress:null,userAgent:null,requestMethod:"POST",requestPath:"/tanovo-time/api/timesheet-periods",requestId:null,
+        occurredAt:"2026-10-17T11:58:00.000Z",
+      },{
+        id:"audit-period-update",
+        actorEmail:"admin@example.com",
+        action:"timesheet_period_updated",
+        targetType:"timesheet_period",
+        targetId:"period-id",
+        metadata:{reason:"Adjusted deadline",before:{name:"November 2026",endDate:"2026-11-30"},after:{name:"November 2026",endDate:"2026-12-01"}},
+        ipAddress:null,userAgent:null,requestMethod:"PATCH",requestPath:"/tanovo-time/api/timesheet-periods",requestId:null,
+        occurredAt:"2026-10-17T11:57:30.000Z",
+      },{
+        id:"audit-project",
+        actorEmail:"manager@example.com",
+        action:"project_created",
+        targetType:"time_project",
+        targetId:"project-id",
+        metadata:{name:"Facility retrofit"},
+        ipAddress:null,userAgent:null,requestMethod:"POST",requestPath:"/tanovo-time/api/projects",requestId:null,
+        occurredAt:"2026-10-17T11:57:00.000Z",
+      },{
+        id:"audit-project-update",
+        actorEmail:"admin@example.com",
+        action:"project_updated",
+        targetType:"time_project",
+        targetId:"project-id",
+        metadata:{name:"Facility retrofit",active:false,previousActive:true},
+        ipAddress:null,userAgent:null,requestMethod:"PATCH",requestPath:"/tanovo-time/api/projects",requestId:null,
+        occurredAt:"2026-10-17T11:56:00.000Z",
+      },{
+        id:"audit-api-error",
+        actorEmail:"contractor@example.com",
+        action:"client_error_reported",
+        targetType:"client_error",
+        targetId:"e4b21455-ca7d-468c-aee9-3b6a9d3767ea",
+        metadata:{operation:"entry.submit",route:"/api/entries/[id]",httpMethod:"PATCH",httpStatus:503,errorCode:"42P18",message:"Submission could not be confirmed."},
+        ipAddress:null,userAgent:null,requestMethod:"POST",requestPath:"/tanovo-time/api/client-errors",requestId:null,
+        occurredAt:"2026-10-17T11:55:00.000Z",
       }] })
     }
 
@@ -309,6 +363,63 @@ describe("TimesheetApp admin directory", () => {
     expect(within(activity).queryByRole("region", { name: "Activity detail" })).not.toBeInTheDocument()
   })
 
+  it("opens a dedicated API error report with the endpoint, HTTP status, diagnostic code, and reference",async()=>{
+    const user=userEvent.setup()
+    render(<TimesheetApp role="admin" userEmail="admin@example.com" userName="Admin User"/>)
+    const commands=await screen.findByRole("navigation",{name:"Admin dashboard commands"})
+    await user.click(within(commands).getByRole("button",{name:"Reports"}))
+    const reports=await screen.findByRole("dialog",{name:"Reports"})
+    await user.click(within(reports).getByRole("button",{name:"Open API error report"}))
+    const report=await screen.findByRole("dialog",{name:"API error report"})
+    await waitFor(()=>expect(fetchCalls.some(call=>call.url==="/tanovo-time/api/audit?limit=250")).toBe(true))
+    expect(await within(report).findByText("PATCH /api/entries/[id]",{exact:false})).toBeVisible()
+    expect(within(report).getByText("42P18")).toBeVisible()
+    expect(within(report).getByText("503")).toBeVisible()
+    expect(within(report).getByText(/e4b21455-ca7d-468c-aee9-3b6a9d3767ea/)).toBeVisible()
+  })
+
+  it("opens dedicated admin reports for access, period, and project creation history",async()=>{
+    const user=userEvent.setup()
+    render(<TimesheetApp role="admin" userEmail="admin@example.com" userName="Admin User"/>)
+    const commands=await screen.findByRole("navigation",{name:"Admin dashboard commands"})
+    await user.click(within(commands).getByRole("button",{name:"Reports"}))
+    const reports=await screen.findByRole("dialog",{name:"Reports"})
+
+    await user.click(within(reports).getByRole("button",{name:"View rights changes"}))
+    let report=await screen.findByRole("dialog",{name:"Access change history"})
+    const rightsRow=within(report).getByRole("row",{name:/manager@example.com user access updated/i})
+    expect(rightsRow).toHaveTextContent("employee@example.com")
+    expect(rightsRow).toHaveTextContent("Oct 17, 2026")
+    const exportButton=within(report).getByRole("button",{name:"Export 1 visible report events as CSV"})
+    expect(exportButton).toBeEnabled()
+    const originalCreate=Object.getOwnPropertyDescriptor(URL,"createObjectURL")
+    const createObjectUrl=vi.fn(()=>"blob:test")
+    Object.defineProperty(URL,"createObjectURL",{configurable:true,value:createObjectUrl})
+    const clickLink=vi.spyOn(HTMLAnchorElement.prototype,"click").mockImplementation(()=>{})
+    await user.click(exportButton)
+    expect(createObjectUrl).toHaveBeenCalledOnce()
+    expect(clickLink).toHaveBeenCalledOnce()
+    clickLink.mockRestore()
+    if(originalCreate)Object.defineProperty(URL,"createObjectURL",originalCreate)
+    else Reflect.deleteProperty(URL,"createObjectURL")
+    await user.click(within(report).getByRole("row",{name:/manager@example.com user access updated/i}))
+    expect(await within(report).findByRole("region",{name:"Activity detail"})).toHaveTextContent("beforePermissions")
+    await user.click(within(report).getByRole("button",{name:"Close activity window"}))
+
+    await user.click(within(reports).getByRole("button",{name:"View period history"}))
+    report=await screen.findByRole("dialog",{name:"Timesheet period history"})
+    const periodRow=within(report).getByRole("row",{name:/manager@example.com timesheet period created/i})
+    expect(periodRow).toHaveTextContent("November 2026")
+    expect(periodRow).toHaveTextContent("2026-11-01 – 2026-11-30")
+    expect(within(report).getByRole("row",{name:/admin@example.com timesheet period updated/i})).toBeVisible()
+    await user.click(within(report).getByRole("button",{name:"Close activity window"}))
+
+    await user.click(within(reports).getByRole("button",{name:"View project history"}))
+    report=await screen.findByRole("dialog",{name:"Project history"})
+    expect(within(report).getByRole("row",{name:/manager@example.com project created/i})).toHaveTextContent("Facility retrofit")
+    expect(within(report).getByRole("row",{name:/admin@example.com project updated/i})).toBeVisible()
+  })
+
   it("uses the admin landing area to find people and resolve access issues", async () => {
     const user = await renderAdminPanel()
     await user.click(screen.getByRole("button", { name: "Back" }))
@@ -361,12 +472,18 @@ describe("TimesheetApp admin directory", () => {
     expect(within(captureWindow).queryByRole("button",{name:"Restore window"})).not.toBeInTheDocument()
     expect(within(captureWindow).getByTestId("note-input")).toBeVisible()
     await user.click(within(captureWindow).getByRole("button",{name:"Back"}))
-    const reviewDisclosure = within(entryWindow).getByText("Review queue")
-    expect(reviewDisclosure).toBeVisible()
-    expect(reviewDisclosure.closest("details")).not.toHaveProperty("open", true)
-    await user.click(reviewDisclosure)
-    expect(within(entryWindow).getByRole("heading", { name: "Prepare and send for approval" })).toBeVisible()
-    expect(within(entryWindow).getByRole("button", { name: "AI suggestions" })).toBeVisible()
+    await waitFor(()=>expect(entryWindow).toBeVisible())
+    const reviewLauncher=within(entryWindow).getByRole("button",{name:"Review queue"})
+    expect(reviewLauncher).toBeVisible()
+    expect(reviewLauncher.closest("details")).toBeNull()
+    await user.click(reviewLauncher)
+    const reviewWindow=await screen.findByRole("dialog",{name:"Review queue"})
+    expect(reviewWindow).toHaveAttribute("data-window-expanded","true")
+    expect(within(reviewWindow).getByRole("heading",{name:"Timesheets awaiting review"})).toBeVisible()
+    expect(within(reviewWindow).getByRole("button", { name: "AI suggestions" })).toBeVisible()
+    await user.click(within(reviewWindow).getByRole("button", { name: "Back" }))
+    await waitFor(()=>expect(entryWindow).toBeVisible())
+    expect(within(entryWindow).getByTestId("entries-log")).toBeInTheDocument()
     expect(within(entryWindow).getByRole("button", { name: "Refresh entries" })).toBeVisible()
     await user.click(within(entryWindow).getByRole("button", { name: "Back" }))
     await user.click(within(timesheets).getByRole("button", { name: "Back" }))
@@ -375,6 +492,27 @@ describe("TimesheetApp admin directory", () => {
     await user.click(within(reportsAgain).getByRole("button", { name: "Open analytics report" }))
     const analyticsReport = await screen.findByRole("dialog", { name: "Analytics reports" })
     expect(within(analyticsReport).getByTestId("manager-report")).toBeInTheDocument()
+  })
+
+  it("shows every entry for the selected period in the scrollable preview", async () => {
+    const entries=Array.from({length:12},(_,index)=>({
+      id:`entry-${index}`,
+      date:`2026-10-${String(23-index).padStart(2,"0")}`,
+      hours:1.25,
+      status:"draft",
+      contractor:"Taylor",
+      project:`Period project ${index}`,
+      description:`Period work ${index}`,
+    }))
+    mockTimesheetFetch(entries)
+    const user=userEvent.setup()
+    render(<TimesheetApp role="admin" userEmail="admin@example.com" userName="Admin User"/>)
+    const commands=await screen.findByRole("navigation",{name:"Admin dashboard commands"})
+    await user.click(within(commands).getByRole("button",{name:"Timesheets"}))
+    const period=await screen.findByRole("region",{name:"Selected timesheet period"})
+    expect(within(period).getByText("Showing 12 of 12")).toBeVisible()
+    for(const index of entries.keys()) expect(within(period).getByText(`Period project ${index}`)).toBeInTheDocument()
+    expect(period.querySelector("div.overflow-auto")).toBeInTheDocument()
   })
 
   it("opens the floating assistant over the workspace and focuses its composer", async () => {

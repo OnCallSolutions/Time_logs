@@ -126,9 +126,9 @@ export function SubmissionActions({ entries, destination = "manager", onStatusCh
     <Button size="sm" disabled={!entries.length || busy} onClick={() => void analyze()}><Sparkles className="size-4" />AI prepare selected ({entries.length})</Button>
     {!open && completed > 0 && <p role="status" className="text-sm text-green-800">{completed} entries submitted for review.</p>}
     {open && <WindowSurface title={mode === "ai" ? "AI submission preparation" : "Confirm submission"} disabled={busy && !analyzing} onBack={close}>
-      <section className="flex min-h-0 w-full flex-col bg-white">
+      <section className="flex max-h-full min-h-0 w-full flex-col overflow-y-auto bg-white">
         <header className="shrink-0 border-b px-4 py-3"><h2 className="font-semibold">{target}</h2><p className="text-sm text-muted-foreground">{snapshot.length} remaining / {totalHours.toLocaleString()}h / {completed} submitted</p></header>
-        <div className="min-h-0 flex-1 overflow-auto p-4">
+        <div className="space-y-1 p-4">
           {destination==="manager"&&<div aria-label="Reviewing manager" className="mb-4 rounded-md border border-blue-200 bg-blue-50 p-3 text-sm"><p className="text-xs font-semibold uppercase text-blue-800">Assigned reviewing manager</p>{manager?<><p className="mt-1 font-semibold text-blue-950">{manager.displayName}</p><p className="text-xs text-blue-800">{manager.assignment==="added_by_manager"?"Assigned because this manager added your account.":"Assigned from the currently available authorized managers."}</p></>:<p role="status" className="mt-1 text-blue-900">Finding your reviewing manager...</p>}</div>}
           {busy && <p role="status" className="mb-3 text-sm">{advice.length || mode === "manual" ? "Submitting confirmed entries..." : "Preparing selected entries..."}</p>}
           {error && <p role="alert" className="mb-3 text-sm text-destructive">{error}</p>}

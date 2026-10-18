@@ -48,6 +48,7 @@ import {
   BarChart3,
   CheckCircle2,
   Clock3,
+  Download,
   FolderKanban,
   ListChecks,
   MessageSquare,
@@ -224,6 +225,8 @@ type AdminAuditEvent = {
   occurredAt: string
 }
 
+type AdminAuditReport = "access" | "periods" | "projects" | "api-errors"
+
 /**
  * Coordinates the signed-in user's role-aware timesheet workspace.
  *
@@ -399,10 +402,12 @@ export function TimesheetApp({
   const [issueContext, setIssueContext] = useState<IssueContext | null>(null)
   const [issueReportOpen, setIssueReportOpen] = useState(false)
   useEffect(()=>{if(!syncError)return;const timeout=window.setTimeout(()=>setSyncError(null),9000);return()=>window.clearTimeout(timeout)},[syncError])
-  function showTrackedFailure(cause:unknown,operation:string,route:string,status?:number):void{
+  function showTrackedFailure(cause:unknown,operation:string,route:string,status?:number,method?:"GET"|"POST"|"PUT"|"PATCH"|"DELETE"):void{
     const message=cause instanceof Error?cause.message:"The action could not be completed."
-    const reference=reportClientFailure({operation,route,status,message})
-    setIssueContext({reference,operation,route,status,message})
+    const rawCode=cause&&typeof cause==="object"&&"code" in cause?cause.code:undefined
+    const code=typeof rawCode==="string"&&/^[A-Z0-9_.-]{1,40}$/.test(rawCode)?rawCode:undefined
+    const reference=reportClientFailure({operation,route,status,method,code,message})
+    setIssueContext({reference,operation,route,status,method,code,message})
     setSyncError(message.includes(reference)?message:`${message} Reference: ${reference}`)
   }
   const [clearEntriesConfirmationOpen, setClearEntriesConfirmationOpen] = useState(false)
@@ -637,10 +642,10 @@ export function TimesheetApp({
       body: JSON.stringify({ entries: parsed,periodId }),
     })
     const data = await res.json()
-      if (!res.ok) throw new Error(`${data.error ?? "Failed to save entries."}${data.reference?` Reference: ${data.reference}`:""}`)
+      if (!res.ok) throw Object.assign(new Error(`${data.error ?? "Failed to save entries."}${data.reference?` Reference: ${data.reference}`:""}`),{code:data.code})
     setEntries((prev) => [...(data.entries ?? []), ...prev])
     setSyncError(null)
-    }catch(cause){showTrackedFailure(cause,"entry.create","/api/entries");throw cause
+    }catch(cause){showTrackedFailure(cause,"entry.create","/api/entries",undefined,"POST");throw cause
     }finally{invalidateEntriesCache();pendingEntryWrites.current--;entryReadEpoch.current++}
   }
 
@@ -665,7 +670,7 @@ export function TimesheetApp({
       })
       statusCode=response.status
       const data = await response.json()
-      if (!response.ok) throw new Error(`${data.error??"Failed to update entry."}${data.reference?` Reference: ${data.reference}`:""}`)
+      if (!response.ok) throw Object.assign(new Error(`${data.error??"Failed to update entry."}${data.reference?` Reference: ${data.reference}`:""}`),{code:data.code})
       setEntries(previous => role==="manager"&&data.entry.ownerEmail?.toLowerCase()!==userEmail?.toLowerCase()&&data.entry.status!=="submitted" ? previous.filter(entry=>entry.id!==id) : previous.map(entry => entry.id === id ? { ...entry, ...data.entry } : entry))
       setSyncError(null)
       if(patch.status)setSavedStatus(patch.status==="approved"?"Manager approval recorded; forwarded for final account review.":patch.status==="rejected"?"Returned to the submitter for correction.":patch.status==="submitted"?"Submitted for independent review.":"Recalled to draft.")
@@ -673,7 +678,7 @@ export function TimesheetApp({
       const error = cause instanceof Error && ["TimeoutError", "AbortError"].includes(cause.name)
         ? new Error("Request timed out. Refresh entries before retrying; the server may have saved the update.")
         : cause instanceof Error ? cause : new Error("Failed to update entry.")
-      showTrackedFailure(error,patch.status?`entry.${patch.status}`:"entry.update","/api/entries/[id]",statusCode)
+      showTrackedFailure(error,patch.status?`entry.${patch.status}`:"entry.update","/api/entries/[id]",statusCode,"PATCH")
       throw error
     }finally{invalidateEntriesCache();pendingEntryWrites.current--;entryReadEpoch.current++}
   }
@@ -711,12 +716,12 @@ export function TimesheetApp({
       .then(async (res) => {
         statusCode=res.status
         const data = await res.json()
-        if (!res.ok) throw new Error(data.error ?? "Failed to delete entry.")
+        if (!res.ok) throw Object.assign(new Error(data.error ?? "Failed to delete entry."),{code:data.code})
         setSyncError(null)
       })
       .catch((err) => {
         setEntries(previous)
-        showTrackedFailure(err,"entry.delete","/api/entries/[id]",statusCode)
+        showTrackedFailure(err,"entry.delete","/api/entries/[id]",statusCode,"DELETE")
       })
       .finally(()=>{invalidateEntriesCache();pendingEntryWrites.current--;entryReadEpoch.current++})
   }
@@ -770,7 +775,7 @@ export function TimesheetApp({
         : await fetch(apiPath("/api/entries"), { method: "DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({scope:"all_entries"}) })
       statusCode=res.status
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error ?? "Failed to clear entries.")
+      if (!res.ok) throw Object.assign(new Error(data.error ?? "Failed to clear entries."),{code:data.code})
       const refresh = await fetch(apiPath("/api/entries"), { cache: "no-store" })
       const current = await refresh.json()
       if (!refresh.ok) throw new Error(current.error ?? "Unable to refresh entries after clearing.")
@@ -778,7 +783,7 @@ export function TimesheetApp({
       setSyncError(null)
     } catch (err) {
       setEntries(previous)
-      showTrackedFailure(err,"entries.clear","/api/entries",statusCode)
+      showTrackedFailure(err,"entries.clear","/api/entries",statusCode,clearEntriesScope==="preview_reset"?"POST":"DELETE")
     } finally {
       setClearEntriesBusy(false)
       setClearEntriesConfirmationOpen(false)
@@ -811,11 +816,11 @@ export function TimesheetApp({
   const assistantPane=accessDenied||!assistantDockOpen?null:<div ref={assistantDockRef} data-assistant-overlay="true" style={{height:assistantHeight,width:assistantWidth||undefined,left:assistantPosition?.left,top:assistantPosition?.top,right:assistantPosition?"auto":12,bottom:assistantPosition?"auto":12,minHeight:"min(18rem, calc(100dvh - 1.5rem))",maxWidth:"calc(100vw - 1.5rem)",maxHeight:"calc(100dvh - 1.5rem)"}} className="fixed z-[60] min-w-0 w-[min(50vw,44rem)] max-sm:w-[calc(100vw-1.5rem)]">
     <div role="separator" aria-label="Resize assistant width" aria-orientation="vertical" aria-valuenow={assistantWidth||undefined} tabIndex={0} onPointerDown={beginAssistantWidthResize} onPointerMove={moveAssistantWidthResize} onPointerUp={endAssistantWidthResize} onPointerCancel={endAssistantWidthResize} onKeyDown={event=>{if(event.key==="ArrowLeft")resizeAssistantWidthByKeyboard(32);if(event.key==="ArrowRight")resizeAssistantWidthByKeyboard(-32)}} className="absolute -left-2 top-1/2 z-10 hidden h-16 w-4 -translate-y-1/2 cursor-ew-resize rounded-full bg-transparent after:absolute after:left-1/2 after:top-1/2 after:h-10 after:w-1 after:-translate-x-1/2 after:-translate-y-1/2 after:rounded-full after:bg-emerald-500/50 hover:after:bg-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 sm:block" />
     <div role="separator" aria-label="Resize assistant panel" aria-orientation="horizontal" aria-valuenow={assistantHeight} tabIndex={0} onPointerDown={beginAssistantResize} onPointerMove={moveAssistantResize} onPointerUp={endAssistantResize} onPointerCancel={endAssistantResize} onKeyDown={event=>{if(event.key==="ArrowUp")resizeAssistantHeightByKeyboard(32);if(event.key==="ArrowDown")resizeAssistantHeightByKeyboard(-32)}} className="absolute -top-2 left-1/2 z-10 h-4 w-16 -translate-x-1/2 cursor-ns-resize rounded-full bg-transparent after:absolute after:left-1/2 after:top-1/2 after:h-1 after:w-10 after:-translate-x-1/2 after:-translate-y-1/2 after:rounded-full after:bg-emerald-500/50 hover:after:bg-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500" />
-    <AssistantPanel organizationName={organizationName} workspaceContext="main" handoffContext={assistantHandoff} onHandoffUsed={()=>setAssistantHandoff("")} onClose={()=>setAssistantDockOpen(false)} onDragStart={beginAssistantDrag} onDragMove={moveAssistantDrag} onDragEnd={endAssistantDrag} onNavigate={(destination,handoff)=>{if(handoff)setAssistantHandoff(handoff);if(destination==="messages")setMessagesOpen(true);else openWorkspacePage(destination as View)}} onRefresh={()=>{setEntriesRefresh(value=>value+1);messageInbox.refresh()}} messageContext={assistantMessageContext} onContextUsed={()=>setAssistantMessageContext("")} onCompose={draft=>{setAssistantCompose(draft);setMessagesOpen(true)}} focusRequest={assistantFocusRequest} onPreferredHeight={height=>{if(!assistantWasManuallyResized.current)setAssistantHeight(current=>current===height?current:height)}}/>
+    <AssistantPanel organizationName={organizationName} workspaceContext="main" handoffContext={assistantHandoff} onHandoffUsed={()=>setAssistantHandoff("")} onClose={()=>setAssistantDockOpen(false)} onDragStart={beginAssistantDrag} onDragMove={moveAssistantDrag} onDragEnd={endAssistantDrag} docked={!assistantPosition} onToggleDock={()=>{if(assistantPosition){setAssistantPosition(null)}else{const bounds=assistantDockRef.current?.getBoundingClientRect();if(bounds)setAssistantPosition({left:bounds.left,top:bounds.top})}}} onNavigate={(destination,handoff)=>{if(handoff)setAssistantHandoff(handoff);if(destination==="messages")setMessagesOpen(true);else openWorkspacePage(destination as View)}} onRefresh={()=>{setEntriesRefresh(value=>value+1);messageInbox.refresh()}} messageContext={assistantMessageContext} onContextUsed={()=>setAssistantMessageContext("")} onCompose={draft=>{setAssistantCompose(draft);setMessagesOpen(true)}} focusRequest={assistantFocusRequest} onPreferredHeight={height=>{if(!assistantWasManuallyResized.current)setAssistantHeight(current=>current===height?current:height)}}/>
   </div>
   const pageTitle=view==="home"?`${role.replaceAll("_"," ")} dashboard`:view==="period-index"?"Timesheet periods":view==="personal"?`${role==="manager"?"My managerial timesheets":"My timesheets"} · ${personalStatusLabel}`:view==="log"&&(role==="employee"||role==="contractor")?`My timesheets · ${personalStatusLabel}`:view==="log"?(permissions.view_all_timesheets?"Organization timesheets":permissions.view_team?"Team entries":role==="contractor"?"Contractor time submissions":"Employee time entries"):view==="approvals"?"Review queue":view==="report"||view==="my-report"?"Reports":view==="activity"?"Account activity":view==="permissions"?"Manage employees and contractors":view==="accounts"?"Final approvals":view==="periods"?"Timesheet periods":view==="admin"?adminStartSection==="reports"?"Reports":adminStartSection==="timesheets"?"Timesheets":"Admin dashboard":"Workspace"
   return (
-    <WindowAssistantProvider renderAssistant={(workspace,onClose,onPreferredHeight)=><AssistantPanel organizationName={organizationName} workspaceContext={workspace} handoffContext={assistantHandoff} onHandoffUsed={()=>setAssistantHandoff("")} onClose={onClose} onNavigate={(destination,handoff)=>{if(handoff)setAssistantHandoff(handoff);if(destination==="messages")setMessagesOpen(true);else openWorkspacePage(destination as View)}} onRefresh={()=>{setEntriesRefresh(value=>value+1);messageInbox.refresh()}} messageContext="" onContextUsed={()=>{}} onCompose={draft=>{setAssistantCompose(draft);setMessagesOpen(true)}} onPreferredHeight={onPreferredHeight}/> }>
+    <WindowAssistantProvider renderAssistant={(workspace,onClose,onPreferredHeight,controls)=><AssistantPanel organizationName={organizationName} workspaceContext={workspace} handoffContext={assistantHandoff} onHandoffUsed={()=>setAssistantHandoff("")} onClose={onClose} {...(controls??{})} onNavigate={(destination,handoff)=>{if(handoff)setAssistantHandoff(handoff);if(destination==="messages")setMessagesOpen(true);else openWorkspacePage(destination as View)}} onRefresh={()=>{setEntriesRefresh(value=>value+1);messageInbox.refresh()}} messageContext="" onContextUsed={()=>{}} onCompose={draft=>{setAssistantCompose(draft);setMessagesOpen(true)}} onPreferredHeight={onPreferredHeight}/> }>
     <main className={`app-workspace tech-surface flex h-dvh min-h-0 w-full min-w-0 flex-col gap-3 ${isTimesheetEntriesView?"overflow-hidden":"overflow-x-hidden overflow-y-auto overscroll-y-auto"} bg-background px-3 pb-8 pt-3 sm:px-5 md:pt-4`}>
       {syncError&&<div role="alert" className="fixed right-4 top-4 z-[160] flex w-[min(36rem,calc(100vw-2rem))] items-start gap-3 border border-red-300 bg-white px-4 py-3 text-sm text-red-950 shadow-xl"><span className="min-w-0 flex-1 break-words">{syncError}</span>{issueContext&&<Button type="button" variant="outline" size="sm" className="h-7 shrink-0 border-orange-300 bg-orange-50 px-2 text-orange-900 hover:bg-orange-100" onClick={()=>setIssueReportOpen(true)}>Report to admins</Button>}<button type="button" aria-label="Dismiss error message" title="Dismiss error message" onClick={()=>setSyncError(null)} className="grid size-7 shrink-0 place-items-center rounded border border-red-200 text-red-800 hover:bg-red-50"><X className="size-4"/></button></div>}
       {issueReportOpen&&issueContext&&<IssueReportWindow context={issueContext} onClose={()=>{setIssueReportOpen(false);setIssueContext(null)}}/>}
@@ -1190,10 +1195,12 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
   const [activityCursor,setActivityCursor]=useState<{occurredAt:string;id:string}|null>(null)
   const [activityLoadingMore,setActivityLoadingMore]=useState(false)
   const [activityWindowOpen, setActivityWindowOpen] = useState(false)
+  const [activityReport,setActivityReport]=useState<AdminAuditReport|null>(null)
   const [directoryOpen,setDirectoryOpen] = useState(rightsOnly)
   const [adminSection,setAdminSection] = useState<"admin"|"reports"|"timesheets"|null>(initialSection??null)
   const [adminSectionHistory,setAdminSectionHistory]=useState<Array<"admin"|"reports"|"timesheets"|null>>([])
   const [adminTimesheetTool,setAdminTimesheetTool]=useState<"periods"|"entries"|null>(null)
+  const [reviewQueueOpen,setReviewQueueOpen]=useState(false)
   const [adminPeriodSelection,setAdminPeriodSelection]=useState("current")
   const [adminPeriods,setAdminPeriods]=useState<Array<{id:string;name:string;startDate:string;endDate:string}>>([])
   const [adminPeriodsLoading,setAdminPeriodsLoading]=useState(false)
@@ -1564,7 +1571,8 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
    *
    * @returns A promise that resolves after the activity window is populated.
    */
-  async function openActivityWindow() {
+  async function openActivityWindow(report:AdminAuditReport|null=null) {
+    setActivityReport(report)
     setActivityWindowOpen(true)
     setActivityError(null)
 
@@ -1628,7 +1636,7 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
     approved:selectedPeriodEntries.filter(entry=>entry.status==="approved").length,
     rejected:selectedPeriodEntries.filter(entry=>entry.status==="rejected").length,
   }
-  const selectedPeriodRecent=[...selectedPeriodEntries].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,6)
+  const selectedPeriodRecent=[...selectedPeriodEntries].sort((a,b)=>b.date.localeCompare(a.date))
 
   return (
     <div style={rightsOnly?undefined:{minHeight:"calc(100dvh - 13rem)"}} className="tech-surface flex min-h-0 min-w-0 flex-1 flex-col gap-2.5 bg-white text-slate-950">
@@ -1696,8 +1704,12 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
           <header className="border-b border-blue-200 bg-blue-50 px-3 py-2"><h2 className="font-semibold text-blue-950">Reports</h2><p className="text-xs text-blue-900">Admin reporting hub: operational analytics, activity history, and security risk findings. Raw entries stay in Timesheets.</p></header>
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             <section className="flex flex-col items-start gap-2 border-l-4 border-blue-600 bg-blue-50/70 p-3"><h3 className="text-sm font-semibold text-blue-950">Timesheet analytics</h3><p className="flex-1 text-xs text-blue-900">Organized summaries and analysis across the available timesheet records.</p><Button variant="outline" className="justify-start border-blue-200 bg-white text-blue-900 hover:bg-blue-100" onClick={()=>setAdminReportOpen(true)}><BarChart3 className="size-4"/>Open analytics report</Button></section>
-            <section className="flex flex-col items-start gap-2 border-l-4 border-orange-500 bg-orange-50/70 p-3"><h3 className="text-sm font-semibold text-orange-950">Activity and audit log</h3><p className="flex-1 text-xs text-orange-900">Investigate who did what, when, and which request or record was involved.</p><Button variant="outline" className="justify-start border-orange-200 bg-white text-orange-900 hover:bg-orange-100" onClick={openActivityWindow}><Activity className="size-4"/>Open activity log</Button></section>
+            <section className="flex flex-col items-start gap-2 border-l-4 border-orange-500 bg-orange-50/70 p-3"><h3 className="text-sm font-semibold text-orange-950">Activity and audit log</h3><p className="flex-1 text-xs text-orange-900">Investigate who did what, when, and which request or record was involved.</p><Button variant="outline" className="justify-start border-orange-200 bg-white text-orange-900 hover:bg-orange-100" onClick={()=>void openActivityWindow()}><Activity className="size-4"/>Open activity log</Button></section>
             <section className="flex flex-col items-start gap-2 border-l-4 border-red-500 bg-red-50/70 p-3"><h3 className="text-sm font-semibold text-red-950">Security risk report</h3><p className="flex-1 text-xs text-red-900">Review AI-highlighted activity patterns and security findings before taking action.</p><Button variant="outline" className="justify-start border-red-200 bg-white text-red-900 hover:bg-red-100" onClick={()=>onSecurity?.()}><ShieldCheck className="size-4"/>Open security risks</Button></section>
+            <section className="flex flex-col items-start gap-2 border-l-4 border-sky-600 bg-sky-50/70 p-3"><h3 className="text-sm font-semibold text-sky-950">Access change history</h3><p className="flex-1 text-xs text-sky-900">See who changed a patron’s role, account access, or permissions and when.</p><Button variant="outline" className="justify-start border-sky-200 bg-white text-sky-900 hover:bg-sky-100" onClick={()=>void openActivityWindow("access")}><Users className="size-4"/>View rights changes</Button></section>
+            <section className="flex flex-col items-start gap-2 border-l-4 border-emerald-600 bg-emerald-50/70 p-3"><h3 className="text-sm font-semibold text-emerald-950">Timesheet period history</h3><p className="flex-1 text-xs text-emerald-900">See who created or changed a period and when, including the saved before-and-after settings.</p><Button variant="outline" className="justify-start border-emerald-200 bg-white text-emerald-900 hover:bg-emerald-100" onClick={()=>void openActivityWindow("periods")}><CalendarClock className="size-4"/>View period history</Button></section>
+            <section className="flex flex-col items-start gap-2 border-l-4 border-orange-600 bg-orange-50/70 p-3"><h3 className="text-sm font-semibold text-orange-950">Project history</h3><p className="flex-1 text-xs text-orange-900">See who created, assigned, or archived projects and when.</p><Button variant="outline" className="justify-start border-orange-200 bg-white text-orange-900 hover:bg-orange-100" onClick={()=>void openActivityWindow("projects")}><FolderKanban className="size-4"/>View project history</Button></section>
+            <section className="flex flex-col items-start gap-2 border-l-4 border-red-600 bg-red-50/70 p-3"><h3 className="text-sm font-semibold text-red-950">API errors</h3><p className="flex-1 text-xs text-red-900">Inspect failed calls, HTTP statuses, diagnostic codes, and request references.</p><Button variant="outline" className="justify-start border-red-200 bg-white text-red-900 hover:bg-red-100" onClick={()=>void openActivityWindow("api-errors")}><Activity className="size-4"/>Open API error report</Button></section>
             <section className="flex flex-col items-start gap-2 border-l-4 border-orange-600 bg-orange-50/70 p-3"><div className="flex w-full items-center justify-between gap-2"><h3 className="text-sm font-semibold text-orange-950">Issues and requests</h3><span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-900">{issueSummary.open} open · {issueSummary.urgent} urgent</span></div><p className="flex-1 text-xs text-orange-900">Review {issueSummary.uniqueErrors} unique failure patterns, compare repeated reports, track repairs, and dequeue resolved issues. Report and repair history is available to the admin assistant for scrutiny.</p><Button variant="outline" className="justify-start border-orange-200 bg-white text-orange-900 hover:bg-orange-100" onClick={()=>setAdminIssuesOpen(true)}><Activity className="size-4"/>Open issue queue</Button></section>
             <section className="flex flex-col items-start gap-2 border-l-4 border-emerald-600 bg-emerald-50/70 p-3"><h3 className="text-sm font-semibold text-emerald-950">AI workflow activity</h3><p className="flex-1 text-xs text-emerald-900">Inspect sanitized response times, outcomes, proposal counts, and failure categories.</p><Button variant="outline" className="justify-start border-emerald-200 bg-white text-emerald-900 hover:bg-emerald-100" onClick={()=>setAssistantRunsOpen(true)}><Activity className="size-4"/>Open AI activity</Button></section>
           </div>
@@ -1727,8 +1739,9 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
       {!rightsOnly&&adminTimesheetTool==="periods"&&<WindowSurface title="Timesheet period settings" onBack={()=>setAdminTimesheetTool(null)}><section className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-white p-2 sm:p-3"><header className="mb-2 shrink-0 border-l-4 border-orange-500 bg-orange-50 px-3 py-2"><h2 className="font-semibold text-orange-950">Timesheet periods and submission windows</h2><p className="text-xs text-orange-900">Create a new period or edit and save an existing window. When a period's dates take effect, it becomes the current empty timesheet view for everyone; prior periods remain available in Timesheets archives.</p></header><SubmissionDeadlineSettings defaultOpen/></section></WindowSurface>}
       {!rightsOnly&&adminTimesheetTool==="entries"&&<WindowSurface title="Timesheet view" onBack={()=>setAdminTimesheetTool(null)}><section className="flex min-h-0 w-full flex-col gap-1 overflow-hidden bg-white p-2 sm:p-3">
         <header className="flex flex-wrap items-center justify-between gap-2 border-b border-green-200 bg-green-50 px-3 py-1.5"><div className="flex min-w-0 flex-wrap items-baseline gap-x-2"><h2 className="font-semibold text-green-950">Raw timesheet entries</h2><p className="text-xs text-green-900">Search, filter, group, review, and export time records.</p></div><div className="flex flex-wrap gap-1">{canCreateEntries&&<Button variant="outline" size="icon-sm" aria-label="Log time" title="Log time" onClick={onOpenEntryCapture}><Pencil className="size-4"/></Button>}<Button variant="outline" size="icon-sm" aria-label="Refresh entries" title="Refresh entries" onClick={onRefreshEntries}><Activity className="size-4"/></Button></div></header>
-        <EntriesLog stateKey={`admin-timesheets:${userEmail.toLowerCase()}`} userEmail={userEmail} entries={entries} onUpdate={onEntryUpdate} onStatusChange={onEntryStatusChange} onDelete={onEntryDelete} onClear={onEntryClear} canEdit={canEditEntries} canDelete={canDeleteEntries} canClear={canClearEntries} canReview={canReviewEntries} canSubmit={canSubmitEntries} canSubmitOthers canExport={canExportEntries} periodView initialPeriodSelection={adminPeriodSelection} hideHeader periodToolbarCenter={<details className="group relative w-full max-w-2xl rounded-md border border-orange-300 bg-orange-50/70"><summary className="flex h-8 cursor-pointer list-none items-center justify-center gap-2 px-3 text-xs font-semibold text-orange-950 hover:bg-orange-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 [&::-webkit-details-marker]:hidden"><CheckCircle2 className="size-4 text-orange-700" aria-hidden="true"/><span>Review queue</span><span className="rounded-full bg-white px-1.5 py-0.5 text-[10px] tabular-nums">{pendingEntries.length} awaiting</span><ChevronRight className="size-3.5 transition-transform group-open:rotate-90" aria-hidden="true"/></summary><section aria-label="Approval preparation" className="space-y-2 border-t border-orange-200 bg-white p-3"><h3 className="text-sm font-semibold text-orange-950">Prepare and send for approval</h3><p className="text-xs text-orange-900">AI suggestions are advisory. A person confirms every approval, rejection, or return.</p><ApprovalSelection entries={pendingEntries} email={userEmail} canReview={canReviewEntries} canAI={canAIReview} onUpdated={onApprovalUpdated}/></section></details>} title="Raw timesheet entries" description="Source records with period archives, search, status, project and date filters, sorting, grouping, individual edits, and permission-based actions."/>
+        <EntriesLog stateKey={`admin-timesheets:${userEmail.toLowerCase()}`} userEmail={userEmail} entries={entries} onUpdate={onEntryUpdate} onStatusChange={onEntryStatusChange} onDelete={onEntryDelete} onClear={onEntryClear} canEdit={canEditEntries} canDelete={canDeleteEntries} canClear={canClearEntries} canReview={canReviewEntries} canSubmit={canSubmitEntries} canSubmitOthers canExport={canExportEntries} periodView initialPeriodSelection={adminPeriodSelection} hideHeader periodToolbarCenter={(canReviewEntries||canAIReview)&&<Button type="button" variant="outline" size="sm" aria-label="Review queue" title="Open the full review queue" className="h-8 w-full max-w-2xl justify-center border-orange-300 bg-orange-50/70 text-orange-950 hover:bg-orange-100" onClick={()=>setReviewQueueOpen(true)}><CheckCircle2 className="size-4 text-orange-700"/>Review queue<span className="rounded-full bg-white px-1.5 py-0.5 text-[10px] tabular-nums">{pendingEntries.length} awaiting</span></Button>} title="Raw timesheet entries" description="Search, filter, group, review, and export time records."/>
       </section></WindowSurface>}
+      {!rightsOnly&&adminTimesheetTool==="entries"&&reviewQueueOpen&&<WindowSurface title="Review queue" onBack={()=>setReviewQueueOpen(false)}><section className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-white"><header className="shrink-0 border-b border-orange-200 bg-orange-50 px-4 py-3"><h2 className="font-semibold text-orange-950">Timesheets awaiting review</h2><p className="text-xs text-orange-900">{pendingEntries.length} awaiting · AI suggestions are advisory; a person confirms every action.</p></header><div className="min-h-0 flex-1 overflow-auto p-3 sm:p-5"><ApprovalSelection entries={pendingEntries} email={userEmail} canReview={canReviewEntries} canAI={canAIReview} onUpdated={onApprovalUpdated}/></div></section></WindowSurface>}
       {!rightsOnly&&adminReportOpen&&<WindowSurface title="Analytics reports" onBack={()=>setAdminReportOpen(false)}><section className="min-h-0 w-full overflow-auto bg-white p-4 sm:p-6">{reportContent}</section></WindowSurface>}
       {!rightsOnly&&adminIssuesOpen&&<WindowSurface title="Issues and requests" onBack={()=>setAdminIssuesOpen(false)}><AdminIssuesWorkspace onSummaryChange={setIssueSummary}/></WindowSurface>}
       {!rightsOnly&&assistantRunsOpen&&<WindowSurface title="AI workflow activity" onBack={()=>setAssistantRunsOpen(false)}><AssistantRunReport/></WindowSurface>}
@@ -1802,6 +1815,7 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
           hasMore={activityCursor!==null}
           loadingMore={activityLoadingMore}
           onLoadMore={()=>void loadMoreActivity()}
+          report={activityReport}
           onClose={() => setActivityWindowOpen(false)}
         />
       )}
@@ -2164,6 +2178,7 @@ function AuditSummary({label,value,tone}:{label:string;value:string;tone:"blue"|
  */
 function AdminActivityWindow({
   events,
+  report,
   error,
   loading,
   hasMore,
@@ -2172,6 +2187,7 @@ function AdminActivityWindow({
   onClose,
 }: {
   events: AdminAuditEvent[]
+  report:AdminAuditReport|null
   error: string | null
   loading: boolean
   hasMore:boolean
@@ -2183,7 +2199,7 @@ function AdminActivityWindow({
     null,
   )
   const [showSecurity, setShowSecurity] = useState(false)
-  const [showErrors,setShowErrors]=useState(false)
+  const [showErrors,setShowErrors]=useState(report==="api-errors")
   const [search,setSearch]=useState("")
   const [dateFrom,setDateFrom]=useState("")
   const [dateThrough,setDateThrough]=useState("")
@@ -2197,7 +2213,9 @@ function AdminActivityWindow({
   const visibleEvents=events.filter(event=>{
     const day=dayOf(event),period=periodOf(event)
     const haystack=[event.actorEmail,event.action,event.targetType,event.targetId??"",event.requestPath??"",event.requestMethod??"",event.userAgent??"",formatAuditMetadata(event)].join(" ").toLowerCase()
-    return (!showErrors||event.action==="client_error_reported")&&(!dateFrom||day>=dateFrom)&&(!dateThrough||day<=dateThrough)&&(periodFilter==="all"||period?.id===periodFilter)&&(!search.trim()||haystack.includes(search.trim().toLowerCase()))
+    const matchesReport=report==="api-errors"?event.action==="client_error_reported":report===null?true:report==="access"?(event.targetType==="managed_user_access"||event.targetType==="account_identity")&&["user_access_created","user_access_updated"].includes(event.action):report==="periods"?event.targetType==="timesheet_period"&&["timesheet_period_created","timesheet_period_updated"].includes(event.action):event.targetType==="time_project"&&["project_created","project_updated"].includes(event.action)
+    const errorsOnly=report==="api-errors"||showErrors
+    return matchesReport&&(!errorsOnly||event.action==="client_error_reported")&&(!dateFrom||day>=dateFrom)&&(!dateThrough||day<=dateThrough)&&(periodFilter==="all"||period?.id===periodFilter)&&(!search.trim()||haystack.includes(search.trim().toLowerCase()))
   }).sort((a,b)=>sortOrder==="newest"?b.occurredAt.localeCompare(a.occurredAt):a.occurredAt.localeCompare(b.occurredAt))
   const groupedEvents=Array.from(visibleEvents.reduce((groups,event)=>{
     const day=dayOf(event),period=periodOf(event)
@@ -2207,16 +2225,16 @@ function AdminActivityWindow({
   },new Map<string,{label:string;events:AdminAuditEvent[]}>()).entries())
 
   return (
-    <WindowSurface title="All app activity" onBack={onClose}>
+    <WindowSurface title={report===null?"All app activity":report==="access"?"Access change history":report==="periods"?"Timesheet period history":report==="api-errors"?"API error report":"Project history"} onBack={onClose}>
       <section className="tech-surface flex h-full min-h-0 w-full flex-col overflow-hidden border-0 bg-white text-slate-950">
-        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-blue-200 bg-blue-50 px-3 py-1.5">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-x border-t border-blue-300 bg-blue-50 px-4 py-2">
           <div>
             <div className="flex flex-wrap items-center gap-1.5">
               <Activity className="size-4 text-blue-700" aria-hidden="true" />
-              <h2 className="mr-1 text-sm font-semibold text-blue-950">All app activity</h2>
-              <Button variant={showErrors?"default":"outline"} size="sm" onClick={()=>setShowErrors(false)}>All activity</Button>
+              <h2 className="mr-1 text-sm font-semibold text-blue-950">{report===null?"All app activity":report==="access"?"Access change history":report==="periods"?"Timesheet period history":report==="api-errors"?"API error report":"Project history"}</h2>
+              {report===null&&<><Button variant={showErrors?"default":"outline"} size="sm" onClick={()=>setShowErrors(false)}>All activity</Button>
               <Button variant={showErrors?"default":"outline"} size="sm" className={showErrors?"bg-red-700 hover:bg-red-800":"border-red-200 bg-red-50 text-red-800 hover:bg-red-100"} onClick={()=>setShowErrors(true)}>Application errors ({events.filter(event=>event.action==="client_error_reported").length})</Button>
-              <Button variant="outline" className="border-red-200 bg-red-50 text-red-800 hover:bg-red-100" onClick={() => setShowSecurity(true)}>Security risks</Button>
+              <Button variant="outline" className="border-red-200 bg-red-50 text-red-800 hover:bg-red-100" onClick={() => setShowSecurity(true)}>Security risks</Button></>}
             </div>
           </div>
           <Button
@@ -2234,6 +2252,7 @@ function AdminActivityWindow({
 
         <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-sky-200 bg-gradient-to-r from-sky-50 via-white to-emerald-50 px-2 py-1.5">
           <label className="min-w-48 flex-1 text-[11px] font-medium text-slate-700">Search logs<input aria-label="Search audit logs" type="search" value={search} onChange={event=>setSearch(event.target.value)} placeholder="Actor, action, request, target…" className="mt-0.5 h-7 w-full rounded-md border border-slate-300 bg-white px-2 text-xs"/></label>
+          {report&&<Button type="button" variant="outline" size="sm" className="h-8" disabled={!visibleEvents.length} title="Download the filtered events currently loaded" aria-label={`Export ${visibleEvents.length} visible report events as CSV`} onClick={()=>downloadAuditCsv(visibleEvents,report)}><Download className="size-4"/>Export CSV</Button>}
           <details className="group relative min-w-0">
             <summary className="flex h-7 cursor-pointer list-none items-center rounded-md border border-sky-200 bg-white px-2 text-[11px] font-medium text-sky-950 hover:bg-sky-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 [&::-webkit-details-marker]:hidden"><SlidersHorizontal className="mr-1 size-3"/>View options<ChevronDown className="ml-1.5 size-3 transition-transform group-open:rotate-180"/></summary>
             <div className="absolute z-10 mt-1 flex flex-wrap items-end gap-2 rounded-md border border-sky-200 bg-white p-3 shadow-lg">
@@ -2256,7 +2275,7 @@ function AdminActivityWindow({
         </div>}
 
         {showSecurity && <SecurityRiskWindow onClose={() => setShowSecurity(false)} />}
-        {loading || (error&&events.length===0) ? (
+          {loading || (error&&events.length===0) ? (
           <div
             className={`m-4 rounded-lg border px-4 py-3 text-sm ${
               error
@@ -2269,25 +2288,26 @@ function AdminActivityWindow({
           </div>
         ) : visibleEvents.length === 0 ? (
           <div className="px-6 py-16 text-center">
-            <p className="text-sm font-medium">{showErrors?"No application errors recorded":"No app activity recorded yet"}</p>
+            <p className="text-sm font-medium">{showErrors?"No application errors recorded":report?"No matching audit events recorded":"No app activity recorded yet"}</p>
             <p className="mt-1 text-xs text-slate-600">
               {showErrors?"Failed user actions will appear here with a reference and diagnostic context.":"Audited actions will appear here after users change app data."}
             </p>
           </div>
         ) : (
-          <div tabIndex={0} aria-label="Activity table" className="min-h-0 flex-1 overflow-auto overscroll-contain">
-            <table className="w-full min-w-[760px] border-collapse text-left text-xs">
+          <div tabIndex={0} aria-label="Activity table" className="min-h-0 flex-1 overflow-auto overscroll-contain border-x border-b border-slate-300 bg-white shadow-inner">
+            <table className="w-full min-w-[1080px] table-fixed border-collapse text-left text-xs">
             <thead className="sticky top-0 z-[1] bg-blue-50 shadow-sm">
                 <tr className="border-b border-blue-200 text-[10px] uppercase tracking-wide text-blue-900">
-                  <th className="w-36 px-2 py-1 font-medium">Time</th>
-                  <th className="w-48 px-2 py-1 font-medium">Actor</th>
-                  <th className="w-44 px-2 py-1 font-medium">Action</th>
-                  <th className="px-2 py-1 font-medium">Target / request</th>
-                  <th className="w-28 px-2 py-1 text-right font-medium">Details</th>
+                  <th className="w-[16%] px-4 py-2 font-medium">Time</th>
+                  <th className="w-[20%] px-4 py-2 font-medium">Actor</th>
+                  <th className="w-[22%] px-4 py-2 font-medium">Action</th>
+                  <th className="px-4 py-2 font-medium">{report==="api-errors"?"API call":report===null?"Target / request":report==="access"?"Patron":"Created record"}</th>
+                  {report==="api-errors"&&<><th className="w-28 border-l border-blue-200 px-4 py-2 font-medium">HTTP status</th><th className="w-36 border-l border-blue-200 px-4 py-2 font-medium">Error code</th></>}
+                  <th className="w-[12%] px-4 py-2 text-right font-medium">Details</th>
                 </tr>
               </thead>
               {groupedEvents.map(([groupKey,group])=><tbody key={groupKey}>
-                <tr className="sticky top-7 z-[1] bg-emerald-50 text-[11px] text-emerald-950"><th colSpan={5} className="border-y border-emerald-200 px-2 py-1 text-left font-semibold">{group.label}<span className="ml-2 font-normal text-emerald-800">{group.events.length}</span></th></tr>
+                <tr className="sticky top-7 z-[1] bg-emerald-50 text-[11px] text-emerald-950"><th colSpan={report==="api-errors"?7:5} className="border-y border-emerald-200 px-4 py-2 text-left font-semibold">{group.label}<span className="ml-2 font-normal text-emerald-800">{group.events.length}</span></th></tr>
                 {group.events.map((event) => (
                   <Fragment key={event.id}>
                   <tr
@@ -2307,20 +2327,20 @@ function AdminActivityWindow({
                       }
                     }}
                   >
-                    <td className="whitespace-nowrap px-2 py-1 text-[11px] text-slate-600">
+                    <td className="whitespace-nowrap border-r border-slate-100 px-4 py-2 text-[11px] text-slate-600">
                       {formatAdminDateTime(event.occurredAt)}
                     </td>
-                    <td className="px-2 py-1 font-medium"><span className="inline-flex max-w-full truncate rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-[11px] text-sky-950">{event.actorEmail}</span></td>
-                    <td className="px-2 py-1"><span className={`inline-flex max-w-full truncate rounded border px-1.5 py-0.5 text-[11px] font-semibold capitalize ${auditActionTone(event.action)}`}>{formatAuditAction(event.action)}</span></td>
-                    <td className="px-2 py-1 text-[11px] text-slate-600">
-                      <span className={`mr-1 inline-flex rounded border px-1 py-0.5 font-medium ${auditTargetTone(event.targetType)}`}>{event.targetType.replaceAll("_", " ")}</span>
-                      <span className="truncate font-mono">{event.requestMethod??""} {event.requestPath??event.targetId??""}</span>
+                    <td className="border-r border-slate-100 px-4 py-2 font-medium"><span className="inline-flex max-w-full truncate rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-[11px] text-sky-950">{event.actorEmail}</span></td>
+                    <td className="border-r border-slate-100 px-4 py-2"><span className={`inline-flex max-w-full truncate rounded border px-1.5 py-0.5 text-[11px] font-semibold capitalize ${auditActionTone(event.action)}`}>{formatAuditAction(event.action)}</span></td>
+                    <td className="px-4 py-2 text-[11px] text-slate-600">
+                      {report==="api-errors"?<><span className="block truncate font-mono font-semibold text-slate-900">{String(event.metadata.operation??"API request")}</span><span className="block truncate font-mono text-[10px] text-slate-600">{String(event.metadata.httpMethod??"—")} {String(event.metadata.route??event.requestPath??"Unknown route")}</span><span className="block truncate text-[10px] text-slate-500">Ref {event.targetId??"not recorded"}</span></>:report===null?<><span className={`mr-1 inline-flex rounded border px-1 py-0.5 font-medium ${auditTargetTone(event.targetType)}`}>{event.targetType.replaceAll("_", " ")}</span><span className="truncate font-mono">{event.requestMethod??""} {event.requestPath??event.targetId??""}</span></>:<><span className="block truncate font-medium text-slate-900">{report==="access"?event.targetId??"Unknown patron":typeof event.metadata.name==="string"?event.metadata.name:event.targetId??"Unknown record"}</span>{report==="periods"&&<span className="block text-[10px] text-slate-500">{String(event.metadata.startDate??"").slice(0,10)} – {String(event.metadata.endDate??"").slice(0,10)}</span>}</>}
                     </td>
-                    <td className="px-2 py-1 text-right text-[10px] text-slate-600">
+                    {report==="api-errors"&&<><td className="border-l border-slate-100 px-4 py-2"><span className="inline-flex rounded border border-red-200 bg-red-50 px-1.5 py-0.5 font-mono font-semibold text-red-900">{typeof event.metadata.httpStatus==="number"?event.metadata.httpStatus:"—"}</span></td><td className="border-l border-slate-100 px-4 py-2 font-mono text-[11px] text-slate-700">{typeof event.metadata.errorCode==="string"?event.metadata.errorCode:"not supplied"}</td></>}
+                    <td className="px-4 py-2 text-right text-[10px] text-slate-600">
                       {selectedEvent?.id === event.id ? "Close details" : `${Object.keys(event.metadata).length} fields · open`}
                     </td>
                   </tr>
-                  {selectedEvent?.id===event.id&&<tr className="bg-blue-50/70"><td colSpan={5} className="border-b border-blue-200 p-2"><AdminActivityEventDetails event={event} onClose={()=>setSelectedEvent(null)}/></td></tr>}
+                  {selectedEvent?.id===event.id&&<tr className="bg-blue-50/70"><td colSpan={report==="api-errors"?7:5} className="border-b border-blue-200 p-2"><AdminActivityEventDetails event={event} onClose={()=>setSelectedEvent(null)}/></td></tr>}
                   </Fragment>
                 ))}
               </tbody>)}
@@ -2592,6 +2612,23 @@ function formatAdminDate(value: string) {
  * @param value - ISO timestamp returned by the audit API.
  * @returns Localized date-time label or original value when parsing fails.
  */
+function downloadAuditCsv(events:AdminAuditEvent[],report:AdminAuditReport):void {
+  const headers=["Occurred at","Actor","Action","Target type","Target ID","Metadata","Request method","Request path","Request ID"]
+  const cell=(value:unknown)=>{
+    const text=String(value??"")
+    const safe=/^[\u0000-\u0020]*[=+\-@]/.test(text)?`'${text}`:text
+    return `"${safe.replaceAll('"','""')}"`
+  }
+  const rows=events.map(event=>[event.occurredAt,event.actorEmail,formatAuditAction(event.action),event.targetType,event.targetId??"",JSON.stringify(event.metadata),event.requestMethod??"",event.requestPath??"",event.requestId??""])
+  const csv=[headers.map(cell).join(","),...rows.map(row=>row.map(cell).join(","))].join("\r\n")
+  const url=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}))
+  const link=document.createElement("a")
+  link.href=url
+  link.download=`${report}-audit-${new Date().toISOString().slice(0,10)}.csv`
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
 function formatAdminDateTime(value: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value

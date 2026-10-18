@@ -10,7 +10,7 @@ vi.mock("@/lib/effective-permissions",()=>({getEffectivePermissions:vi.fn()}))
 import { getAccountIdentityCreator } from "@/lib/account-identities"
 import { actorRoster } from "@/lib/collaboration"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
-import { resolveAccountManagerReviewer,resolveSubmissionReviewer } from "./submission-reviewer"
+import { resolveAccountManagerReviewer,resolvePatronManager,resolveSubmissionReviewer } from "./submission-reviewer"
 import { resolvePermissions } from "./permissions"
 
 beforeEach(()=>{
@@ -26,6 +26,13 @@ beforeEach(()=>{
 it("routes a patron to the eligible manager who added the account",async()=>{
   vi.mocked(getAccountIdentityCreator).mockResolvedValue("z-manager@example.com")
   expect(await resolveSubmissionReviewer("person@example.com")).toEqual({email:"z-manager@example.com",displayName:"Zed Manager",assignment:"added_by_manager"})
+})
+
+it("resolves the creating manager for project assignment, falling back only to an authorized manager",async()=>{
+  vi.mocked(getAccountIdentityCreator).mockResolvedValue("z-manager@example.com")
+  expect(await resolvePatronManager("person@example.com")).toEqual({email:"z-manager@example.com",displayName:"Zed Manager"})
+  vi.mocked(getAccountIdentityCreator).mockResolvedValue("admin@example.com")
+  expect(await resolvePatronManager("person@example.com")).toEqual({email:"a-manager@example.com",displayName:"Alex Manager"})
 })
 
 it("uses the alphabetically first authorized manager when no manager provisioned the patron",async()=>{

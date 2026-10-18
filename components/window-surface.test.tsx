@@ -90,12 +90,22 @@ it("maps browser Back to the active window Back and restores the parent surface"
 })
 
 it("keeps window AI hidden until its bottom-right assistant button is opened",async()=>{
-  render(<WindowAssistantProvider renderAssistant={(workspace,onClose)=><section aria-label="Window AI">AI for {workspace}<button onClick={onClose}>Close contextual AI</button></section>}>
+  render(<WindowAssistantProvider renderAssistant={(workspace,onClose,_height,controls)=><section aria-label="Window AI" data-docked={controls?.docked}><header aria-label="Move assistant" onPointerDown={controls?.onDragStart} onPointerMove={controls?.onDragMove} onPointerUp={controls?.onDragEnd}>AI for {workspace}</header><button onClick={controls?.onToggleDock}>{controls?.docked?"Undock AI assistant":"Dock AI assistant at bottom right"}</button><button onClick={onClose}>Close contextual AI</button></section>}>
     <WindowSurface title="Reports" onBack={()=>{}}><section>Report workspace</section></WindowSurface>
   </WindowAssistantProvider>)
   expect(screen.queryByRole("region",{name:"Window AI"})).not.toBeInTheDocument()
   await userEvent.click(screen.getByRole("button",{name:"Open Reports AI assistant"}))
-  expect(screen.getByRole("region",{name:"Window AI"})).toHaveTextContent("AI for Reports")
+  const assistant=screen.getByRole("region",{name:"Window AI"})
+  expect(assistant).toHaveTextContent("AI for Reports")
+  expect(assistant).toHaveAttribute("data-docked","true")
+  await userEvent.click(screen.getByRole("button",{name:"Undock AI assistant"}))
+  expect(assistant).toHaveAttribute("data-docked","false")
+  const handle=screen.getByLabelText("Move assistant")
+  fireEvent.pointerDown(handle,{pointerId:1,clientX:100,clientY:100})
+  fireEvent.pointerMove(handle,{pointerId:1,clientX:140,clientY:130})
+  fireEvent.pointerUp(handle,{pointerId:1})
+  await userEvent.click(screen.getByRole("button",{name:"Dock AI assistant at bottom right"}))
+  expect(assistant).toHaveAttribute("data-docked","true")
   await userEvent.click(screen.getByRole("button",{name:"Close contextual AI"}))
   expect(screen.queryByRole("region",{name:"Window AI"})).not.toBeInTheDocument()
 })

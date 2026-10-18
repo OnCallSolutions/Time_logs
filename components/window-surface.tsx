@@ -45,10 +45,13 @@ export function WindowSurface({ title, onBack, disabled = false, children,sessio
   const [expanded, setExpanded] = useState(true)
   const [assistantOpen,setAssistantOpen]=useState(false)
   const [assistantHeight,setAssistantHeight]=useState(360)
+  const [assistantPosition,setAssistantPosition]=useState<{left:number;top:number}|null>(null)
   const [mounted, setMounted] = useState(false)
   const [compactGeometry,setCompactGeometry]=useState<{left:number;top:number;width:number;height:number}|null>(null)
   const resizeTarget = useRef<HTMLDivElement>(null)
+  const assistantTarget = useRef<HTMLDivElement>(null)
   const resizeStart = useRef<{ pointerId: number; edge: string; x: number; y: number; width: number; height: number; left: number; top: number } | null>(null)
+  const assistantDragStart=useRef<{pointerId:number;x:number;y:number;left:number;top:number}|null>(null)
   const historyId = useRef<number | null>(null)
   if (historyId.current === null) historyId.current = createWindowHistoryId()
   const onBackRef = useRef(onBack)
@@ -61,6 +64,16 @@ export function WindowSurface({ title, onBack, disabled = false, children,sessio
     onBackRef.current = onBack
     disabledRef.current = disabled
   }, [onBack, disabled])
+  useEffect(()=>{
+    if(!assistantOpen||!assistantPosition)return
+    const clamp=()=>{
+      const bounds=assistantTarget.current?.getBoundingClientRect()
+      if(!bounds)return
+      setAssistantPosition(position=>position?{left:Math.max(8,Math.min(position.left,window.innerWidth-bounds.width-8)),top:Math.max(8,Math.min(position.top,window.innerHeight-bounds.height-8))}:null)
+    }
+    window.addEventListener("resize",clamp)
+    return()=>window.removeEventListener("resize",clamp)
+  },[assistantOpen,assistantPosition])
   useLayoutEffect(() => {
     if (!mounted || !ref.current) return
     const window = ref.current
@@ -113,6 +126,28 @@ export function WindowSurface({ title, onBack, disabled = false, children,sessio
   function endResize(event: ReactPointerEvent<HTMLDivElement>) {
     if (resizeStart.current?.pointerId === event.pointerId) resizeStart.current = null
   }
+  function beginAssistantDrag(event:ReactPointerEvent<HTMLElement>) {
+    if((event.target as HTMLElement).closest("button,a,input,select,textarea"))return
+    const bounds=assistantTarget.current?.getBoundingClientRect()
+    if(!bounds)return
+    assistantDragStart.current={pointerId:event.pointerId,x:event.clientX,y:event.clientY,left:bounds.left,top:bounds.top}
+    setAssistantPosition({left:bounds.left,top:bounds.top})
+    event.currentTarget.setPointerCapture?.(event.pointerId)
+    event.preventDefault()
+  }
+  function moveAssistantDrag(event:ReactPointerEvent<HTMLElement>) {
+    const start=assistantDragStart.current,bounds=assistantTarget.current?.getBoundingClientRect()
+    if(!start||!bounds||start.pointerId!==event.pointerId)return
+    setAssistantPosition({left:Math.max(8,Math.min(window.innerWidth-bounds.width-8,start.left+event.clientX-start.x)),top:Math.max(8,Math.min(window.innerHeight-bounds.height-8,start.top+event.clientY-start.y))})
+  }
+  function endAssistantDrag(event:ReactPointerEvent<HTMLElement>) {
+    if(assistantDragStart.current?.pointerId===event.pointerId)assistantDragStart.current=null
+  }
+  function toggleAssistantDock() {
+    if(assistantPosition){setAssistantPosition(null);return}
+    const bounds=assistantTarget.current?.getBoundingClientRect()
+    if(bounds)setAssistantPosition({left:bounds.left,top:bounds.top})
+  }
   const resizeEdges = [
     ["n", "inset-x-2 top-0 h-3 cursor-ns-resize"], ["s", "inset-x-2 bottom-0 h-3 cursor-ns-resize"],
     ["e", "inset-y-2 right-0 w-3 cursor-ew-resize"], ["w", "inset-y-2 left-0 w-3 cursor-ew-resize"],
@@ -137,9 +172,9 @@ export function WindowSurface({ title, onBack, disabled = false, children,sessio
           </div>}
         </div>
         <div className="window-content flex min-h-0 flex-1 justify-center overflow-hidden">{children}</div>
-        {assistant&&renderAssistant&&<div className="pointer-events-none absolute bottom-4 right-4 z-30">
-          {assistantOpen?<div style={{height:assistantHeight,maxHeight:"min(72dvh,42rem)"}} className="pointer-events-auto min-h-64 w-[min(34rem,calc(100vw-2rem))] overflow-hidden rounded-lg border border-emerald-300 bg-white shadow-2xl">
-            {renderAssistant(assistantWorkspace,()=>setAssistantOpen(false),setAssistantHeight)}
+        {assistant&&renderAssistant&&<div className={`pointer-events-none fixed z-[90] ${assistantPosition?"":"bottom-4 right-4"}`} style={assistantPosition?{left:assistantPosition.left,top:assistantPosition.top}:undefined}>
+          {assistantOpen?<div ref={assistantTarget} style={{height:assistantHeight,maxHeight:"min(72dvh,42rem)"}} className="pointer-events-auto min-h-64 w-[min(34rem,calc(100vw-2rem))] overflow-hidden rounded-lg border border-emerald-300 bg-white shadow-2xl">
+            {renderAssistant(assistantWorkspace,()=>setAssistantOpen(false),setAssistantHeight,{docked:!assistantPosition,onToggleDock:toggleAssistantDock,onDragStart:beginAssistantDrag,onDragMove:moveAssistantDrag,onDragEnd:endAssistantDrag})}
           </div>:<Button type="button" aria-label={`Open ${title} AI assistant`} title={`Ask AI about ${title}`} onClick={()=>setAssistantOpen(true)} className="pointer-events-auto border border-orange-300 bg-orange-600 text-white shadow-lg hover:bg-orange-700"><Sparkles className="size-4"/>Ask AI</Button>}
         </div>}
         {compactView && resizable && resizeEdges.map(([edge, position]) => <div key={edge} aria-hidden="true" data-resize-edge={edge} className={`absolute z-20 touch-none select-none bg-transparent transition-colors hover:bg-sky-400/50 ${position}`} onPointerDown={beginResize} onPointerMove={moveResize} onPointerUp={endResize} onPointerCancel={endResize}/>) }

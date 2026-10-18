@@ -10,7 +10,9 @@ const inputSchema=z.object({
   reference:z.string().uuid(),
   operation:z.string().regex(/^[a-z][a-z0-9_.-]{1,60}$/i),
   route:z.string().regex(/^\/[a-zA-Z0-9/_\-[\]]{1,160}$/),
+  method:z.enum(["GET","POST","PUT","PATCH","DELETE"]).optional(),
   status:z.number().int().min(400).max(599).optional(),
+  code:z.string().regex(/^[A-Z0-9_.-]{1,40}$/).optional(),
   message:z.string().max(400),
 }).strict()
 
@@ -25,7 +27,7 @@ export async function POST(request:Request){
     const access=await getEffectivePermissions(email)
     if(!email||!access.role)return Response.json({error:"Unauthorized."},{status:401})
     const input=inputSchema.parse(await request.json())
-    await recordAuditEvent({actorEmail:email,action:"client_error_reported",targetType:"client_error",targetId:input.reference,metadata:{operation:input.operation,route:input.route,httpStatus:input.status??null,message:sanitizeMessage(input.message)},...getAuditContext(request)})
+    await recordAuditEvent({actorEmail:email,action:"client_error_reported",targetType:"client_error",targetId:input.reference,metadata:{operation:input.operation,route:input.route,httpMethod:input.method??null,errorCode:input.code??null,httpStatus:input.status??null,message:sanitizeMessage(input.message)},...getAuditContext(request)})
     return Response.json({accepted:true},{status:202,headers:{"Cache-Control":"no-store"}})
   }catch(error){
     const invalid=error instanceof z.ZodError||error instanceof SyntaxError

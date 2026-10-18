@@ -152,7 +152,7 @@ export async function POST(req: Request) {
     const reference=crypto.randomUUID()
     const databaseCode=err&&typeof err==="object"&&"code" in err&&typeof err.code==="string"&&/^[A-Z0-9]{5}$/.test(err.code)?err.code:"unavailable"
     console.error("[entries] create outcome unconfirmed",{reference,databaseCode})
-    return Response.json({error:"The submission could not be confirmed. Refresh entries before retrying; some rows may already have saved.",reference},{status:503})
+    return Response.json({error:"The submission could not be confirmed. Refresh entries before retrying; some rows may already have saved.",reference,code:databaseCode},{status:503})
   }
 }
 

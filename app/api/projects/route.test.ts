@@ -5,15 +5,18 @@ vi.mock("@/lib/access",()=>({getEffectiveUserRole:vi.fn()}))
 vi.mock("@/lib/collaboration",()=>({actorRoster:vi.fn(async()=>[]),employeeRoster:vi.fn()}))
 vi.mock("@/lib/audit",()=>({getAuditContext:vi.fn(()=>({ipAddress:null,userAgent:"test",requestMethod:"POST",requestPath:"/api/projects",requestId:"test"}))}))
 vi.mock("@/lib/db",()=>({createTimeProject:vi.fn(),listTimeProjectAssignments:vi.fn().mockResolvedValue([]),listTimeProjects:vi.fn(),setTimeProjectActive:vi.fn(),setTimeProjectAssignment:vi.fn()}))
+vi.mock("@/lib/submission-reviewer",()=>({resolvePatronManager:vi.fn(async()=>null)}))
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
-import { employeeRoster } from "@/lib/collaboration"
-import { createTimeProject,listTimeProjects,setTimeProjectActive,setTimeProjectAssignment } from "@/lib/db"
+import { actorRoster,employeeRoster } from "@/lib/collaboration"
+import { createTimeProject,listTimeProjectAssignments,listTimeProjects,setTimeProjectActive,setTimeProjectAssignment } from "@/lib/db"
+import { resolvePatronManager } from "@/lib/submission-reviewer"
 import { resolvePermissions } from "@/lib/permissions"
 import { GET,PATCH,POST } from "./route"
 
 beforeEach(()=>{
   vi.resetAllMocks()
+  vi.mocked(resolvePatronManager).mockResolvedValue(null)
   vi.mocked(auth).mockResolvedValue({user:{email:"manager@example.com"}} as never)
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"manager",permissions:resolvePermissions("manager")} as never)
   vi.mocked(listTimeProjects).mockResolvedValue([{id:"10000000-0000-4000-8000-000000000001",name:"Project A",description:"",active:true,createdBy:"manager@example.com",createdAt:"2026-01-01T00:00:00.000Z",updatedAt:"2026-01-01T00:00:00.000Z"}])
@@ -60,6 +63,16 @@ it("allows project creation after manager-granted create_projects permission",as
   expect(createTimeProject).toHaveBeenCalledWith({name:"New Project",description:""},"contractor@example.com",expect.anything(),true)
 })
 
+it("adds the authorized patron's manager to a self-created project's assignments",async()=>{
+  vi.mocked(auth).mockResolvedValue({user:{email:"contractor@example.com"}} as never)
+  vi.mocked(getEffectivePermissions).mockResolvedValue({role:"contractor",permissions:resolvePermissions("contractor",{create_projects:true})} as never)
+  vi.mocked(resolvePatronManager).mockResolvedValue({email:"manager@example.com",displayName:"Manager"})
+  vi.mocked(createTimeProject).mockResolvedValue({id:"10000000-0000-4000-8000-000000000001",name:"New Project",description:"",active:true,createdBy:"contractor@example.com",createdAt:"2026-01-01T00:00:00.000Z",updatedAt:"2026-01-01T00:00:00.000Z"})
+  const response=await POST(new Request("http://localhost/api/projects",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({name:"New Project"})}))
+  expect(response.status).toBe(201)
+  expect(createTimeProject).toHaveBeenCalledWith({name:"New Project",description:""},"contractor@example.com",expect.anything(),true,"manager@example.com")
+})
+
 it("allows an authorized employee to create a project assigned to them",async()=>{
   vi.mocked(auth).mockResolvedValue({user:{email:"employee@example.com"}} as never)
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"employee",permissions:resolvePermissions("employee",{create_projects:true})} as never)
@@ -85,4 +98,19 @@ it("does not expose unassigned projects to contractors",async()=>{
   expect(response.status).toBe(200)
   expect(listTimeProjects).toHaveBeenCalledWith(false,"contractor@example.com")
   expect((await response.json()).projects).toEqual([])
+})
+
+it("includes only project-assigned managers in the manager assignment directory",async()=>{
+  vi.mocked(listTimeProjectAssignments).mockResolvedValue([{projectId:"project-1",email:"manager@example.com"}])
+  vi.mocked(actorRoster).mockResolvedValue([
+    {email:"contractor@example.com",displayName:"Taylor",role:"contractor",accessStatus:"active"},
+    {email:"manager@example.com",displayName:"Morgan Manager",role:"manager",accessStatus:"active"},
+    {email:"other-manager@example.com",displayName:"Other Manager",role:"manager",accessStatus:"active"},
+  ] as never)
+  const response=await GET()
+  expect(response.status).toBe(200)
+  expect((await response.json()).patrons).toEqual([
+    {email:"contractor@example.com",displayName:"Taylor",role:"contractor"},
+    {email:"manager@example.com",displayName:"Morgan Manager",role:"manager"},
+  ])
 })

@@ -23,3 +23,11 @@ it("cancels onboarding without calling the server",async()=>{
   render(<AddPerson/>);await userEvent.click(screen.getByRole("button",{name:"Add contractor/employee"}));await userEvent.click(screen.getByRole("button",{name:"Cancel"}))
   expect(request.mock.calls.some(([,init])=>init?.method==="POST")).toBe(false)
 })
+it("keeps save and cancel directly after the identity fields instead of pinning them to the window bottom",async()=>{
+  const request=vi.fn(async()=>Response.json({companyEmailDomains:["devoncall.net"]}));vi.stubGlobal("fetch",request)
+  render(<AddPerson/>);await userEvent.click(screen.getByRole("button",{name:"Add contractor/employee"}))
+  const form=screen.getByRole("button",{name:"Save official identity"}).closest("form")!
+  expect(form).toHaveClass("overflow-y-auto")
+  expect(form.querySelector(".grid")).not.toHaveClass("flex-1")
+  expect(form.querySelector("footer")).toHaveClass("shrink-0")
+})

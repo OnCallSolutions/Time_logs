@@ -83,9 +83,20 @@ it("orders an individual thread oldest at top and latest at bottom with first-na
   await user.click(screen.getByRole("button",{name:/Alex/}))
   const history=screen.getByLabelText("Message history"),text=history.textContent??""
   expect(text.indexOf("Earlier outgoing")).toBeLessThan(text.indexOf("Latest incoming"))
+  expect(screen.getByRole("separator",{name:"Today"})).toHaveClass("my-2")
+  expect(screen.getByRole("separator",{name:"Today"})).not.toHaveClass("sticky")
   expect(screen.getByText("Alex",{selector:"span"})).toBeVisible()
   expect(screen.getAllByAltText("Alex profile photo")).toHaveLength(2)
   expect(text).not.toContain("→")
+})
+it("sizes message bubbles to their content while capping them at half width on desktop",async()=>{
+  requests()
+  const state=inbox()
+  state.messages[0].body="Short note"
+  render(<MessagesPanel canSend inbox={state}/>);await userEvent.click(screen.getByRole("button",{name:/Taylor/}))
+  const bubble=screen.getByText("Short note").closest("div.rounded-lg")
+  expect(bubble).toHaveClass("w-fit","max-w-[85%]","sm:max-w-[50%]")
+  expect(screen.getByLabelText("Message history")).toHaveClass("min-h-0","flex-1","overflow-auto","overscroll-contain")
 })
 it("separates messages by local calendar day in the open thread",async()=>{
   const state=inbox(),today=new Date(),yesterday=new Date(today);yesterday.setDate(today.getDate()-1)

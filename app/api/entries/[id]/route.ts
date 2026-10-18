@@ -377,9 +377,10 @@ export async function PATCH(
   } catch (err) {
     if(err instanceof z.ZodError||err instanceof SyntaxError)return Response.json({error:"Invalid entry update. Check the selected fields and rejection reason."},{status:400})
     const reference=crypto.randomUUID()
-    console.error("[entries] update failed",{reference,...persistenceFailureDetails(err)})
+    const diagnostics=persistenceFailureDetails(err)
+    console.error("[entries] update failed",{reference,...diagnostics})
     return Response.json(
-      { error: "The update could not be confirmed. Refresh before retrying; the server may have saved it.",reference },
+      { error: "The update could not be confirmed. Refresh before retrying; the server may have saved it.",reference,code:diagnostics.databaseCode },
       { status: 503 },
     )
   }

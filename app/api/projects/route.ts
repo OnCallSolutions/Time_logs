@@ -5,6 +5,7 @@ import { getEffectiveUserRole } from "@/lib/access"
 import { actorRoster,employeeRoster } from "@/lib/collaboration"
 import { createTimeProject, listTimeProjectAssignments, listTimeProjects, setTimeProjectActive, setTimeProjectAssignment } from "@/lib/db"
 import { getAuditContext } from "@/lib/audit"
+import { resolvePatronManager } from "@/lib/submission-reviewer"
 
 export const runtime="nodejs"
 
@@ -21,7 +22,8 @@ export async function GET(){
     const manager=(access.role==="admin"||access.role==="manager"||access.role==="account_manager")&&access.permissions.manage_projects
     const projects=await listTimeProjects(manager,manager?undefined:access.email)
     const assignments=manager?await listTimeProjectAssignments():[]
-    const patrons=manager?(await actorRoster()).filter(user=>user.accessStatus==="active"&&(user.role==="employee"||user.role==="contractor")).map(user=>({email:user.email,displayName:user.displayName,role:user.role})):[]
+    const assignedManagers=new Set(assignments.map(item=>item.email.toLowerCase()))
+    const patrons=manager?(await actorRoster()).filter(user=>user.accessStatus==="active"&&((user.role==="employee"||user.role==="contractor")||((user.role==="manager"||user.role==="account_manager")&&assignedManagers.has(user.email.toLowerCase())))).map(user=>({email:user.email,displayName:user.displayName,role:user.role})):[]
     return Response.json({projects,assignments,patrons},{headers:{"Cache-Control":"no-store"}})
   }catch{
     return Response.json({error:"Unable to load assigned projects."},{status:500})
@@ -36,7 +38,10 @@ export async function POST(req:Request){
     if(!mayCreate)return Response.json({error:"A manager must grant you project-creation permission first."},{status:403})
     const body=z.object({name:z.string().trim().min(1).max(120),description:z.string().trim().max(500).default("")}).strict().parse(await req.json())
     const assignCreator=access.role==="contractor"||access.role==="employee"
-    const project=await createTimeProject(body,access.email,getAuditContext(req),assignCreator)
+    const manager=assignCreator?await resolvePatronManager(access.email):null
+    const project=manager
+      ?await createTimeProject(body,access.email,getAuditContext(req),assignCreator,manager.email)
+      :await createTimeProject(body,access.email,getAuditContext(req),assignCreator)
     if(!project)return Response.json({error:"A project with that name already exists."},{status:409})
     return Response.json({project},{status:201})
   }catch(error){

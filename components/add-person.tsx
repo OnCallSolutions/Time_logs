@@ -55,9 +55,9 @@ export function AddPerson({ admin = false }: { admin?: boolean }) {
     finally { setBusy(false) }
   }
   return <><Button variant="outline" size="sm" onClick={() => { setOpen(true); setNumber(""); setError("") }}><UserPlus className="size-4"/>Add contractor/employee</Button>
-    {open && <WindowSurface title="Official company identity" disabled={busy} onBack={() => setOpen(false)}><form onSubmit={save} className="flex min-h-0 w-full flex-col bg-white">
+    {open && <WindowSurface title="Official company identity" disabled={busy} onBack={() => setOpen(false)}><form onSubmit={save} className="flex max-h-full min-h-0 w-full flex-col overflow-y-auto bg-white">
       <header className="border-b p-4"><h2 className="font-semibold">{correctExisting ? "Correct official identity" : "Add contractor/employee"}</h2></header>
-      <div className="grid min-h-0 flex-1 content-start gap-4 overflow-auto p-4 sm:grid-cols-2">
+      <div className="grid content-start gap-4 p-4 sm:grid-cols-2">
         <label className="text-sm">Official name<input required minLength={2} maxLength={80} disabled={busy || !!number} value={name} onChange={event => setName(event.target.value)} onBlur={() => setName(normalizeOfficialName(name))} className="mt-1 block w-full rounded border p-2"/></label>
         <label className="text-sm">Company account email<input type="email" required maxLength={254} disabled={busy || !!number} value={email} onChange={event => setEmail(event.target.value)} onBlur={() => setEmail(normalizeEmail(email))} className="mt-1 block w-full rounded border p-2"/>{emailDomainWarning&&<span role="status" className="mt-1 flex items-start gap-1.5 text-xs text-amber-800"><AlertTriangle className="mt-0.5 size-3.5 shrink-0"/>{emailDomainWarning}</span>}</label>
         <label className="text-sm">Category<select disabled={busy || !!number} value={role} onChange={event => setRole(event.target.value)} className="mt-1 block w-full rounded border p-2"><option value="contractor">Contractor</option><option value="employee">Employee</option></select></label>
@@ -65,7 +65,7 @@ export function AddPerson({ admin = false }: { admin?: boolean }) {
         {admin && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={correctExisting} disabled={busy || !!number} onChange={event => setCorrectExisting(event.target.checked)}/>Correct an existing account's official name</label>}
         {error && <p role="alert" className="text-sm text-red-700 sm:col-span-2">{error}</p>}
         {number && <p role="status" className="break-all text-sm text-green-800 sm:col-span-2">Saved. Company reference: {number}. The permanent account ID remains stored separately.</p>}
-      </div><footer className="flex justify-end gap-2 border-t p-4"><Button type="button" variant="outline" disabled={busy} onClick={() => setOpen(false)}>{number ? "Close" : "Cancel"}</Button>{!number && <Button type="submit" disabled={busy}><Save className="size-4"/>{busy ? "Saving..." : "Save official identity"}</Button>}</footer>
+      </div><footer className="flex shrink-0 justify-end gap-2 border-t p-4"><Button type="button" variant="outline" disabled={busy} onClick={() => setOpen(false)}>{number ? "Close" : "Cancel"}</Button>{!number && <Button type="submit" disabled={busy}><Save className="size-4"/>{busy ? "Saving..." : "Save official identity"}</Button>}</footer>
     </form></WindowSurface>}
   </>
 }

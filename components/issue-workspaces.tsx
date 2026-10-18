@@ -6,7 +6,7 @@ import { WindowSurface } from "@/components/window-surface"
 import { Button } from "@/components/ui/button"
 import { apiPath } from "@/lib/paths"
 
-export type IssueContext = { reference: string; operation: string; route: string; status?: number; message: string }
+export type IssueContext = { reference: string; operation: string; route: string; status?: number; code?: string; method?: string; message: string }
 type Issue = {
   id: string; reference: string; reporterEmail: string; operation: string; route: string; httpStatus: number | null
   errorSignature: string; similarReports: number
@@ -34,7 +34,7 @@ export function IssueReportWindow({ context, onClose }: { context: IssueContext;
   return <WindowSurface title={submitted ? "Issue sent to administrators" : "Report this failure"} compact resizable onBack={onClose}>
     <section className="w-full space-y-3 overflow-auto bg-white p-4">
       {submitted ? <div role="status" className="border-l-4 border-emerald-500 bg-emerald-50 p-3 text-sm text-emerald-950"><p className="font-semibold">The issue is now in the administrator queue.</p><p className="mt-1 text-xs">Reference: {context.reference}</p><p className="mt-1 text-xs">Administrators can investigate, repair, and resolve the issue.</p></div> : <>
-        <div className="flex items-start gap-2 border-l-4 border-orange-500 bg-orange-50 p-3"><AlertTriangle className="mt-0.5 size-4 shrink-0 text-orange-800"/><div><p className="text-sm font-semibold text-orange-950">Failure details captured automatically</p><p className="mt-1 break-words text-xs text-orange-900">{context.operation} · {context.route}{context.status ? ` · HTTP ${context.status}` : ""}</p><p className="mt-1 break-words text-xs text-slate-700">{context.message}</p></div></div>
+        <div className="flex items-start gap-2 border-l-4 border-orange-500 bg-orange-50 p-3"><AlertTriangle className="mt-0.5 size-4 shrink-0 text-orange-800"/><div><p className="text-sm font-semibold text-orange-950">Failure details captured automatically</p><p className="mt-1 break-words text-xs text-orange-900">{context.operation} · {context.method ? `${context.method} ` : ""}{context.route}{context.status ? ` · HTTP ${context.status}` : ""}{context.code ? ` · Code ${context.code}` : ""}</p><p className="mt-1 break-words text-xs text-slate-700">{context.message}</p></div></div>
         <label className="block text-sm font-medium text-slate-900" htmlFor="issue-details">Additional notes <span className="font-normal text-slate-500">(optional)</span></label>
         <textarea id="issue-details" maxLength={3000} value={details} onChange={event => setDetails(event.target.value)} placeholder="What were you trying to do? What happened, and what did you expect?" className="min-h-28 w-full resize-y rounded-md border border-slate-300 p-2.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500" />
         <p className="text-xs text-slate-600">The technical context is read-only. Please do not include passwords or sensitive personal data. {details.length}/3000</p>

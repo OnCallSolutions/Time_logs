@@ -10,6 +10,23 @@ import { getEffectivePermissions } from "@/lib/effective-permissions"
 
 export type SubmissionReviewer={email:string;displayName:string;assignment:"added_by_manager"|"available_manager"}
 
+/** Resolves the active operational manager who owns a patron's project relationship. */
+export async function resolvePatronManager(ownerEmail:string):Promise<Pick<SubmissionReviewer,"email"|"displayName">|null>{
+  const owner=ownerEmail.toLowerCase()
+  const [creator,roster]=await Promise.all([getAccountIdentityCreator(owner),actorRoster()])
+  const candidates=await Promise.all(roster
+    .filter(actor=>actor.role==="manager"&&actor.accessStatus==="active"&&actor.email.toLowerCase()!==owner)
+    .map(async actor=>{
+      const access=await getEffectivePermissions(actor.email)
+      return access.role==="manager"&&access.permissions.review_entries&&access.permissions.view_team
+        ?{email:actor.email.toLowerCase(),displayName:actor.displayName||actor.email}
+        :null
+    }))
+  const managers=candidates.filter((candidate):candidate is {email:string;displayName:string}=>candidate!==null)
+    .sort((a,b)=>Number(b.email===creator?.toLowerCase())-Number(a.email===creator?.toLowerCase())||a.displayName.localeCompare(b.displayName)||a.email.localeCompare(b.email))
+  return managers[0]??null
+}
+
 /** @param ownerEmail - Authenticated employee/contractor account. @returns Promise<SubmissionReviewer|null> with its locked submission reviewer. */
 export async function resolveSubmissionReviewer(ownerEmail:string):Promise<SubmissionReviewer|null>{
   const owner=ownerEmail.toLowerCase()

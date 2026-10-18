@@ -47,9 +47,9 @@ export function BusinessAccountActions({ rows, managers, canAuthorize, onComplet
   const eligible = action !== "authorize_eligibility" || (canAuthorize && checks.accuracy && checks.compliance && checks.housekeeping)
   return <>
     <Button variant="outline" disabled={!rows.length} onClick={() => { setSnapshot(rows.map(row => ({ ...row }))); setNote(""); setManager(""); setError(""); setChecks({ accuracy: false, compliance: false, housekeeping: false }); setAction("return_manager") }}><ListChecks className="size-4" />Actions for selected ({rows.length})</Button>
-    {snapshot && <WindowSurface title="Business-account timesheet action" disabled={busy} onBack={() => setSnapshot(null)}><section className="flex min-h-0 w-full flex-col bg-white">
+    {snapshot && <WindowSurface title="Business-account timesheet action" disabled={busy} onBack={() => setSnapshot(null)}><section className="flex max-h-full min-h-0 w-full flex-col overflow-y-auto bg-white">
       <header className="shrink-0 border-b p-4"><h2 className="font-semibold">{snapshot.length} selected timesheets</h2><p className="text-sm text-muted-foreground">{snapshot.reduce((sum, row) => sum + Number(row.evidence.hours), 0)} hours</p></header>
-      <div className="min-h-0 flex-1 space-y-4 overflow-auto p-4"><div className="flex flex-wrap gap-2">
+      <div className="space-y-4 p-4"><div className="flex flex-wrap gap-2">
         <Button variant="outline" aria-pressed={action === "return_manager"} disabled={busy} onClick={() => setAction("return_manager")}><CornerUpLeft className="size-4" />Return to manager</Button>
         <Button variant="outline" aria-pressed={action === "return_submitter"} disabled={busy} onClick={() => setAction("return_submitter")}><CornerUpLeft className="size-4" />Return to submitters</Button>
         {canAuthorize && <Button variant="outline" aria-pressed={action === "authorize_eligibility"} disabled={busy} onClick={() => setAction("authorize_eligibility")}><CheckCircle2 className="size-4" />Authorize payout eligibility</Button>}

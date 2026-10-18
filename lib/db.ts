@@ -671,6 +671,11 @@ export async function listManagerWorkforceEmails(managerEmail:string):Promise<st
     SELECT assignment.patron_email AS email FROM time_project_assignments assignment
       JOIN time_projects project ON project.id=assignment.project_id
       WHERE project.active AND (lower(assignment.assigned_by)=lower(${managerEmail}) OR lower(project.created_by)=lower(${managerEmail}))
+    UNION
+    SELECT worker_assignment.patron_email AS email FROM time_project_assignments manager_assignment
+      JOIN time_project_assignments worker_assignment ON worker_assignment.project_id=manager_assignment.project_id
+      JOIN time_projects project ON project.id=manager_assignment.project_id
+      WHERE project.active AND lower(manager_assignment.patron_email)=lower(${managerEmail})
   ) team WHERE lower(team.email)<>lower(${managerEmail}) ORDER BY lower(team.email)`
   return rows.map(row=>String(row.email).toLowerCase())
 }
@@ -683,7 +688,7 @@ export async function isActiveTimeProject(name:string):Promise<boolean>{
 }
 
 /** Adds a unique catalog project and its audit event atomically. */
-export async function createTimeProject(input:{name:string;description:string},actor:string,context:AuditContext,assignCreator=false):Promise<TimeProject|null>{
+export async function createTimeProject(input:{name:string;description:string},actor:string,context:AuditContext,assignCreator=false,assignedManagerEmail?:string|null):Promise<TimeProject|null>{
   await ensureProjectsTable();await ensureAuditEventsTable()
   const rows=await sql`WITH saved AS (
     INSERT INTO time_projects(name,description,created_by) VALUES(${input.name},${input.description},${actor.toLowerCase()})
@@ -691,6 +696,8 @@ export async function createTimeProject(input:{name:string;description:string},a
   ), assigned AS (
     INSERT INTO time_project_assignments(project_id,patron_email,assigned_by)
     SELECT id,lower(created_by),lower(created_by) FROM saved WHERE ${assignCreator}
+    UNION ALL
+    SELECT id,lower(${assignedManagerEmail??null}),lower(created_by) FROM saved WHERE ${assignCreator} AND ${assignedManagerEmail??null} IS NOT NULL
     ON CONFLICT DO NOTHING RETURNING project_id
   ), audited AS (
     INSERT INTO audit_events(actor_email,action,target_type,target_id,metadata,ip_address,user_agent,request_method,request_path,request_id)
@@ -1265,7 +1272,8 @@ export async function upsertManagedAccessUserWithAudit(assignment: {
       SELECT ${actor},CASE WHEN previous.role IS NULL THEN 'user_access_created' ELSE 'user_access_updated' END,
         'managed_user_access',saved.email,jsonb_build_object('fromRole',previous.role,'toRole',saved.role,
         'fromStatus',previous.access_status,'toStatus',saved.access_status,'noteChanged',previous.note IS DISTINCT FROM saved.note,
-        'permissionsChanged',previous.permissions IS DISTINCT FROM saved.permissions),
+        'permissionsChanged',previous.permissions IS DISTINCT FROM saved.permissions,
+        'beforePermissions',previous.permissions,'afterPermissions',saved.permissions),
         ${assignment.context.ipAddress},${assignment.context.userAgent},${assignment.context.requestMethod},${assignment.context.requestPath},${assignment.context.requestId}
       FROM saved LEFT JOIN previous ON true RETURNING target_id
     ) SELECT saved.email,saved.role,saved.access_status,saved.note,saved.permissions,saved.updated_by,saved.created_at,saved.updated_at

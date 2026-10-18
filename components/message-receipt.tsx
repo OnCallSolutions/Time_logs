@@ -13,8 +13,7 @@ import type { AppMessage } from "@/lib/message-policy"
 export function MessageReceipt({message}:{message:AppMessage}){
   const read=!!(message.read_at||message.read_count),delivered=!!(message.delivered_at||message.delivered_count)
   const status=read?"Read":delivered?"Delivered, unread":"Sent"
-  return <span className="inline-flex items-center gap-1 text-xs text-gray-600" aria-label={status}>
+  return <span className="inline-flex items-center text-xs text-gray-600" aria-label={status} title={status}>
     {read?<CheckCheck aria-hidden="true" className="size-3 text-blue-600"/>:delivered?<CheckCheck aria-hidden="true" className="size-3 text-gray-500"/>:<Check aria-hidden="true" className="size-3 text-gray-500"/>}
-    {message.recipient_email?status:`Sent / Delivered to ${message.delivered_count??0} / Read by ${message.read_count??0}`}
   </span>
 }

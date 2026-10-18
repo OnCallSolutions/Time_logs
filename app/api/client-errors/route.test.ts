@@ -8,12 +8,12 @@ import {getEffectivePermissions} from "@/lib/effective-permissions"
 import {recordAuditEvent} from "@/lib/db"
 import {POST} from "./route"
 
-const payload={reference:"e4b21455-ca7d-468c-aee9-3b6a9d3767ea",operation:"entry.submit",route:"/api/entries/[id]",status:503,message:"Save failed for person@example.com"}
+const payload={reference:"e4b21455-ca7d-468c-aee9-3b6a9d3767ea",operation:"entry.submit",route:"/api/entries/[id]",method:"PATCH",status:503,code:"42P18",message:"Save failed for person@example.com"}
 beforeEach(()=>{vi.resetAllMocks();vi.mocked(auth).mockResolvedValue({user:{email:"person@example.com"}} as never);vi.mocked(getEffectivePermissions).mockResolvedValue({role:"contractor",permissions:{}} as never)})
 it("stores sanitized failure context in the audit timeline",async()=>{
   const response=await POST(new Request("http://localhost/api/client-errors",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}))
   expect(response.status).toBe(202)
-  expect(recordAuditEvent).toHaveBeenCalledWith(expect.objectContaining({action:"client_error_reported",targetId:payload.reference,metadata:expect.objectContaining({message:"Save failed for [redacted email]",httpStatus:503})}))
+  expect(recordAuditEvent).toHaveBeenCalledWith(expect.objectContaining({action:"client_error_reported",targetId:payload.reference,metadata:expect.objectContaining({message:"Save failed for [redacted email]",httpStatus:503,errorCode:"42P18",httpMethod:"PATCH"})}))
 })
 it("requires an active account and validates client-provided diagnostics",async()=>{
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:null,permissions:{}} as never)

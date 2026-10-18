@@ -440,9 +440,9 @@ export function MessagesPanel({canSend,canBroadcast=false,inbox,encryption:share
           const dayHeading=messageDayHeading(message.created_at),previousHeading=index?messageDayHeading(threadMessages[index-1].created_at):null
           const previous=threadMessages[index-1]
           const senderChanged=!!previous&&previous.sender_email.toLowerCase()!==message.sender_email.toLowerCase()
-          return <Fragment key={message.id}>{dayHeading!==previousHeading&&<div role="separator" aria-label={dayHeading} className="sticky top-1 z-[1] mx-auto w-fit rounded-full border border-orange-200 bg-white/95 px-3 py-1 text-xs font-medium text-neutral-700 shadow-sm">{dayHeading}</div>}<article id={`message-${message.id}`} className={`flex w-full items-end gap-2 ${senderChanged?"mt-5":""} ${own?(ownMessageAlignment==="right"?"justify-end":"justify-start"):"justify-start"}`}>
+          return <Fragment key={message.id}>{dayHeading!==previousHeading&&<div role="separator" aria-label={dayHeading} className="mx-auto my-2 w-fit rounded-full border border-orange-200 bg-white/95 px-3 py-1 text-xs font-medium text-neutral-700 shadow-sm">{dayHeading}</div>}<article id={`message-${message.id}`} className={`flex w-full items-end gap-2 ${senderChanged?"mt-5":""} ${own?(ownMessageAlignment==="right"?"justify-end":"justify-start"):"justify-start"}`}>
             {!own&&peer&&<ParticipantAvatar email={peer} name={label}/>}
-            <div className={`w-[85%] min-w-0 rounded-lg border px-3 py-2 shadow-sm sm:w-[min(50%,42rem)] ${own?"border-green-300 bg-green-100":"border-orange-300 bg-orange-100"}`}>
+            <div className={`w-fit min-w-0 max-w-[85%] rounded-lg border px-3 py-2 shadow-sm sm:max-w-[50%] ${own?"border-green-300 bg-green-100":"border-orange-300 bg-orange-100"}`}>
               <button type="button" className="block w-full text-left [overflow-wrap:anywhere]" onClick={()=>{setSelectedId(message.id);void read(message)}}>
                 <span className="block text-xs font-semibold text-neutral-700">{label}</span>
                 {message.priority==="high"&&<span className="mt-1 block text-xs font-bold text-red-700">High priority</span>}
