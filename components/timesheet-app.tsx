@@ -870,7 +870,7 @@ export function TimesheetApp({
           {savedStatus&&!syncError&&<p role="status" className="border-y border-green-200 bg-green-50 px-4 py-2 text-sm text-green-900">{savedStatus}</p>}
           {loadingEntries && <div className="rounded-lg border border-border bg-muted/50 px-4 py-3 text-sm text-muted-foreground" role="status">Loading saved entries...</div>}
 
-      {view==="period-index"&&<TimesheetPeriodLanding entries={personalTimesheetView?ownEntries:entries} onSelect={openPeriodTimesheets} canCreate={permissions.create_entries} onLogTime={()=>setWorkspaceWindow("notes")} onRefresh={()=>setEntriesRefresh(value=>value+1)}/>}
+      {view==="period-index"&&<TimesheetPeriodLanding entries={personalTimesheetView?ownEntries:entries} onSelect={openPeriodTimesheets} canCreate={permissions.create_entries} personalReadiness={role==="contractor"} onLogTime={()=>setWorkspaceWindow("notes")} onRefresh={()=>setEntriesRefresh(value=>value+1)}/>}
 
       {view === "log" || view === "personal" ? (
         <>
