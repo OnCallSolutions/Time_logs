@@ -44,6 +44,7 @@ it("persists the assigned manager and explicitly types reviewer parameters in su
   expect(submission.text).toMatch(/status = 'submitted' AND \$\d+::text IS NOT NULL/)
   expect(submission.text).toMatch(/'fromStatus',\s*\$\d+::text/)
   expect(submission.text).toMatch(/\$\d+::text = 'manager'/)
+  expect(submission.text).toMatch(/'hasReviewNote',\s*\$\d+::boolean/)
 })
 it("types an omitted reviewer parameter in the audited status-update guard",async()=>{
   await updateTimeEntryWithAudit("owner@example.invalid",id,{status:"approved"},false,undefined,revision,{actorEmail:actor,action:"entry_approved",metadata:{},context})
