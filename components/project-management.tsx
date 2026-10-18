@@ -9,7 +9,7 @@ type Project={id:string;name:string;description:string;active:boolean;createdBy?
 type Patron={email:string;displayName?:string;role:string}
 type Assignment={projectId:string;email:string}
 
-export function ProjectManagement({canManage=false,canCreate=false}:{canManage?:boolean;canCreate?:boolean}){
+export function ProjectManagement({canManage=false,canCreate=false,fullWidth=false}:{canManage?:boolean;canCreate?:boolean;fullWidth?:boolean}){
   const [projects,setProjects]=useState<Project[]>([])
   const [patrons,setPatrons]=useState<Patron[]>([])
   const [assignments,setAssignments]=useState<Assignment[]>([])
@@ -47,7 +47,7 @@ export function ProjectManagement({canManage=false,canCreate=false}:{canManage?:
     finally{setBusy("")}
   }
 
-  return <section className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4 sm:p-6">
+  return <section className={`flex w-full flex-col gap-4 ${fullWidth?"max-w-none p-3 sm:p-4":"mx-auto max-w-6xl p-4 sm:p-6"}`}>
     <header className="flex flex-wrap items-center justify-between gap-2 border-b border-emerald-200 bg-emerald-50 px-3 py-2">
       <div><h2 className="flex items-center gap-2 font-semibold text-emerald-950"><FolderKanban className="size-4"/>{canManage?"Project assignments":"My projects"}</h2><p className="text-xs text-emerald-900">{canManage?"Create projects and assign them to employees or contractors. Only assigned projects can be used to log time.":"Create projects for your work and use them to record time. Projects you create are assigned to you."}</p></div>
       <span className="text-xs text-slate-600">{projects.filter(project=>project.active).length} active{canManage?` · ${patrons.length} people`:""}</span>

@@ -33,3 +33,19 @@ it("gives contractors a recent-work table and project-hour summary",async()=>{
   await userEvent.click(within(recent).getByRole("button",{name:/All timesheets/}))
   expect(onTimesheets).toHaveBeenCalledOnce()
 })
+
+it("shows account managers a compact personal-timesheet snapshot",async()=>{
+  const onTimesheets=vi.fn()
+  render(<RoleWorkspaceHome role="account_manager" entries={[
+    {id:"submitted",contractor:"Morgan",project:"Operations",date:"2026-10-16",hours:4,status:"submitted",description:"Review packet"},
+    {id:"approved",contractor:"Morgan",project:"Operations",date:"2026-10-15",hours:2,status:"approved",description:"Closeout"},
+  ] as never} pending={0} canCreate={false} canReview canReports={false} canManagePeriods onTimesheets={onTimesheets} onReviews={vi.fn()} onLogTime={vi.fn()} onFinalApprovals={vi.fn()} onPeriodSettings={vi.fn()}/> )
+  const summary=screen.getByRole("region",{name:"My timesheet summary"})
+  expect(summary).toHaveTextContent("2")
+  expect(summary).toHaveTextContent("Awaiting review")
+  const recent=screen.getByRole("region",{name:"Recent personal entries"})
+  expect(recent).toHaveTextContent("Review packet")
+  expect(screen.getByRole("region",{name:"account_manager workspace home"})).toHaveTextContent("6h")
+  await userEvent.click(within(recent).getByRole("button",{name:/All timesheets/}))
+  expect(onTimesheets).toHaveBeenCalledOnce()
+})

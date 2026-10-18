@@ -269,7 +269,7 @@ export function EntriesLog({
   }
 
   return (
-    <div className="w-full min-w-0 overflow-hidden border border-sky-200 bg-gradient-to-b from-white to-sky-50/30 shadow-sm">
+    <div className="flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden border border-sky-300 bg-gradient-to-b from-white to-sky-50/30 shadow-sm">
       {clearConfirmationOpen && <WindowSurface title="Confirm clearing timesheets" onBack={() => setClearConfirmationOpen(false)} compact resizable>
         <section className="flex w-full max-w-xl flex-col bg-white text-slate-950">
           <header className="flex items-start gap-3 border-b border-red-200 bg-red-50 p-4">
@@ -315,7 +315,7 @@ export function EntriesLog({
       {(canSubmit||periodView)&&<p role="status" className={`border-b px-3 py-1 text-[11px] ${submissionClosed?"border-red-200 bg-red-50 text-red-900":"border-orange-200 bg-orange-50/70 text-orange-950"}`}>{deadlineMessage}</p>}
 
       <div className="border-b border-sky-200 bg-sky-50/50 p-1.5">
-        <div className="grid gap-1 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-1 sm:grid-cols-2 xl:grid-cols-[minmax(20rem,1.55fr)_repeat(3,minmax(10rem,1fr))]">
           <label className="flex min-w-0 basis-full items-center gap-2 sm:flex-1 sm:basis-auto">
             <Search className="size-4 shrink-0" aria-hidden="true" />
             <input aria-label="Search entries" placeholder="Search person, project, work, date" value={query} onChange={event => setQuery(event.target.value)} className="h-8 w-full min-w-0 rounded-md border border-sky-200 bg-white px-2.5 text-xs" />
@@ -331,26 +331,31 @@ export function EntriesLog({
             <option value="date_newest">Newest date</option><option value="date_oldest">Oldest date</option><option value="project_az">Project A-Z</option><option value="person_az">Person A-Z</option><option value="hours_high">Hours: high to low</option><option value="hours_low">Hours: low to high</option><option value="status">Status</option>
           </select>
         </div>
-        <details className="group mt-1 border-t border-sky-200/80 pt-1">
-          <summary className="flex cursor-pointer list-none items-center gap-2 text-xs font-medium text-sky-900 hover:text-sky-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 [&::-webkit-details-marker]:hidden"><ChevronRight className="size-3.5 transition-transform group-open:rotate-90" aria-hidden="true"/>More filters and grouping<span className="text-slate-500">· Showing {visibleEntries.length} / {periodEntries.length}</span></summary>
-          <div className="mt-1.5 grid gap-1 sm:grid-cols-2 xl:grid-cols-4">
-            <label className="flex items-center gap-2 text-xs font-medium text-slate-700">From<input aria-label="Entries from date" type="date" value={dateFrom} max={dateThrough||undefined} onChange={event=>setDateFrom(event.target.value)} className="h-8 min-w-0 flex-1 rounded-md border border-emerald-200 bg-white px-2 text-sm"/></label>
-            <label className="flex items-center gap-2 text-xs font-medium text-slate-700">Through<input aria-label="Entries through date" type="date" value={dateThrough} min={dateFrom||undefined} onChange={event=>setDateThrough(event.target.value)} className="h-8 min-w-0 flex-1 rounded-md border border-emerald-200 bg-white px-2 text-sm"/></label>
-            <select aria-label="Group entries" value={groupBy} onChange={event=>setGroupBy(event.target.value)} className="h-8 rounded-md border border-teal-200 bg-white px-2 text-sm"><option value="project">Group by project</option><option value="day">Group by day</option><option value="person">Group by person</option><option value="none">No grouping</option></select>
-            <div className="flex items-center justify-between gap-2"><span className="text-xs font-medium text-slate-600">{visibleEntries.length} visible</span><Button variant="outline" size="sm" className="h-8" title="Reset search, filters, sorting, and grouping" aria-label="Reset timesheet view" disabled={!filtersActive} onClick={clearFilters}><FilterX className="size-4"/>Reset view</Button></div>
+        <details aria-label="More timesheet controls" className="group mt-1 border-t border-sky-200/80 pt-1">
+          <summary className="flex min-h-7 cursor-pointer list-none items-center gap-2 text-xs font-medium text-sky-950 hover:text-sky-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 [&::-webkit-details-marker]:hidden"><ChevronRight className="size-3.5 transition-transform group-open:rotate-90" aria-hidden="true"/>More controls<span className="text-slate-600">· {filtersActive?"custom view":"date range and grouping"}{selectable?` · ${selected.length} selected / ${matchingEligible.length} eligible`:` · ${visibleEntries.length} of ${periodEntries.length} shown`}</span></summary>
+          <div className="mt-1 space-y-1.5 border-t border-sky-100 pt-1.5">
+            <details className="group/filters">
+              <summary className="flex min-h-7 cursor-pointer list-none items-center gap-2 text-xs font-medium text-sky-900 hover:text-sky-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 [&::-webkit-details-marker]:hidden"><ChevronRight className="size-3.5 transition-transform group-open/filters:rotate-90" aria-hidden="true"/>More filters and grouping<span className="text-slate-500">· Showing {visibleEntries.length} / {periodEntries.length}</span></summary>
+              <div className="mt-1 grid gap-1 sm:grid-cols-2 xl:grid-cols-[minmax(16rem,1fr)_minmax(16rem,1fr)_minmax(12rem,0.8fr)_auto]">
+                <label className="flex items-center gap-2 text-xs font-medium text-slate-700">From<input aria-label="Entries from date" type="date" value={dateFrom} max={dateThrough||undefined} onChange={event=>setDateFrom(event.target.value)} className="h-7 min-w-0 flex-1 rounded-md border border-emerald-200 bg-white px-2 text-xs"/></label>
+                <label className="flex items-center gap-2 text-xs font-medium text-slate-700">Through<input aria-label="Entries through date" type="date" value={dateThrough} min={dateFrom||undefined} onChange={event=>setDateThrough(event.target.value)} className="h-7 min-w-0 flex-1 rounded-md border border-emerald-200 bg-white px-2 text-xs"/></label>
+                <select aria-label="Group entries" value={groupBy} onChange={event=>setGroupBy(event.target.value)} className="h-7 rounded-md border border-teal-200 bg-white px-2 text-xs"><option value="project">Group by project</option><option value="day">Group by day</option><option value="person">Group by person</option><option value="none">No grouping</option></select>
+                <div className="flex items-center justify-between gap-2"><span className="text-xs font-medium text-slate-600">{visibleEntries.length} visible</span><Button variant="outline" size="sm" className="h-7" title="Reset search, filters, sorting, and grouping" aria-label="Reset timesheet view" disabled={!filtersActive} onClick={clearFilters}><FilterX className="size-4"/>Reset view</Button></div>
+              </div>
+            </details>
+            {selectable && <details aria-label="Entry submission controls" className="group/actions border-t border-orange-200 pt-1">
+              <summary className="flex min-h-7 cursor-pointer list-none items-center gap-2 text-xs font-medium text-orange-950 hover:text-orange-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 [&::-webkit-details-marker]:hidden"><ChevronRight className="size-3.5 transition-transform group-open/actions:rotate-90" aria-hidden="true"/>Bulk actions<span className="text-slate-600">· {selected.length} selected / {matchingEligible.length} eligible</span></summary>
+              <div className="mt-1 flex flex-wrap items-center gap-1 border-l-2 border-orange-400 bg-orange-50/60 p-1.5">
+                <Button variant="outline" size="sm" disabled={!eligible.length} onClick={() => setSelectedIds(eligible.map(entry => entry.id))}>Select all eligible ({eligible.length})</Button>
+                <Button variant="ghost" size="sm" disabled={!selected.length} onClick={() => setSelectedIds([])}>Clear selection</Button>
+                {canSubmit&&<SubmissionActions entries={submissions.filter(entry=>selectedIdSet.has(entry.id))} openRequest={submissionRequest} destination={submissionDestination} onStatusChange={onStatusChange} onSubmitted={id => setSelectedIds(previous => previous.filter(current => current !== id))} />}
+                {canRequestReview&&onRequestReview&&<Button size="sm" variant="outline" disabled={!requestable.some(entry=>selectedIdSet.has(entry.id))||requestable.filter(entry=>selectedIdSet.has(entry.id)).length>50} onClick={()=>onRequestReview(requestable.filter(entry=>selectedIdSet.has(entry.id)))}>Request reviewer help ({requestable.filter(entry=>selectedIdSet.has(entry.id)).length})</Button>}
+              </div>
+            </details>}
           </div>
         </details>
-        {selectable && <details aria-label="Entry submission controls" className="group mt-1 border-t border-orange-200 pt-1">
-          <summary className="flex cursor-pointer list-none items-center gap-2 text-xs font-medium text-orange-950 hover:text-orange-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 [&::-webkit-details-marker]:hidden"><ChevronRight className="size-3.5 transition-transform group-open:rotate-90" aria-hidden="true"/>Bulk actions<span className="text-slate-600">· {selected.length} selected / {matchingEligible.length} eligible</span></summary>
-          <div className="mt-1.5 flex flex-wrap items-center gap-1 border-l-2 border-orange-400 bg-orange-50/60 p-1.5">
-          <Button variant="outline" size="sm" disabled={!eligible.length} onClick={() => setSelectedIds(eligible.map(entry => entry.id))}>Select all eligible ({eligible.length})</Button>
-          <Button variant="ghost" size="sm" disabled={!selected.length} onClick={() => setSelectedIds([])}>Clear selection</Button>
-          {canSubmit&&<SubmissionActions entries={submissions.filter(entry=>selectedIdSet.has(entry.id))} openRequest={submissionRequest} destination={submissionDestination} onStatusChange={onStatusChange} onSubmitted={id => setSelectedIds(previous => previous.filter(current => current !== id))} />}
-          {canRequestReview&&onRequestReview&&<Button size="sm" variant="outline" disabled={!requestable.some(entry=>selectedIdSet.has(entry.id))||requestable.filter(entry=>selectedIdSet.has(entry.id)).length>50} onClick={()=>onRequestReview(requestable.filter(entry=>selectedIdSet.has(entry.id)))}>Request reviewer help ({requestable.filter(entry=>selectedIdSet.has(entry.id)).length})</Button>}
-          </div>
-        </details>}
         {visibleEntries.length === 0 && <p role="status" className="p-4 text-sm text-muted-foreground">{periodView&&periodsLoaded&&periods.length>0&&periodSelection==="current"&&!activePeriod?"No timesheet period is active today. Select an archived or upcoming period to retrieve entries.":periodView&&periodsLoaded&&periods.length===0?"No saved timesheets match the current filters.":"No matching entries."}</p>}
-        <div tabIndex={0} aria-label="Scrollable time entries" className="timesheet-scroll-region max-h-[calc(100dvh-14rem)] min-h-48 overflow-auto overscroll-y-auto rounded-sm border-2 border-slate-500">
+        <div tabIndex={0} aria-label="Scrollable time entries" className="timesheet-scroll-region min-h-0 flex-1 overflow-auto overscroll-y-auto rounded-sm border-2 border-slate-600 bg-white">
         <table className="w-full min-w-[1080px] border-collapse border-2 border-slate-500 text-left shadow-sm [&_th]:border-r [&_th]:border-slate-400 [&_td]:border-r [&_td]:border-b [&_td]:border-slate-300 [&_th:last-child]:border-r-0 [&_td:last-child]:border-r-0">
           <thead className="sticky top-0 z-[1] bg-sky-100">
             <tr className="border-b-2 border-sky-500 text-[10px] uppercase tracking-wide text-sky-950">
@@ -370,7 +375,7 @@ export function EntriesLog({
               const unlocked = !entry.payoutEligible && (entry.status === "draft" || entry.status === "rejected" || (canReview && !own))
               return (
                 <Fragment key={entry.id}>
-              {groupBy!=="none"&&(index===0||entryGroupKey(visibleEntries[index-1],groupBy)!==entryGroupKey(entry,groupBy))&&<tr className="bg-gradient-to-r from-orange-50 via-sky-50 to-emerald-50"><th colSpan={selectable ? 8 : 7} className="border-y-2 border-sky-300 px-2 py-1 text-left text-xs font-semibold text-slate-900">{entryGroupLabel(entry,groupBy)} <span className="ml-1 font-normal text-slate-600">{groupTotals.get(entryGroupKey(entry,groupBy))?.count} entries · {groupTotals.get(entryGroupKey(entry,groupBy))?.hours.toLocaleString(undefined,{maximumFractionDigits:2})}h</span></th></tr>}
+              {groupBy!=="none"&&(index===0||entryGroupKey(visibleEntries[index-1],groupBy)!==entryGroupKey(entry,groupBy))&&<tr className="bg-emerald-800 text-white"><th colSpan={selectable ? 8 : 7} className="border-y-2 border-emerald-950 px-2 py-1 text-left text-xs font-semibold text-white">{entryGroupLabel(entry,groupBy)} <span className="ml-1 font-normal text-emerald-100">{groupTotals.get(entryGroupKey(entry,groupBy))?.count} entries · {groupTotals.get(entryGroupKey(entry,groupBy))?.hours.toLocaleString(undefined,{maximumFractionDigits:2})}h</span></th></tr>}
                 <EntryLogRow entry={entry} showIdentity
                   selection={selectable ? { checked: selectedIdSet.has(entry.id) && eligibleIdSet.has(entry.id), disabled: !eligibleIdSet.has(entry.id), onChange: checked => setSelectedIds(previous => checked ? [...new Set([...previous, entry.id])] : previous.filter(id => id !== entry.id)) } : undefined}
                   canEdit={canEdit && unlocked && !ownerEntryIsArchived(entry)} canDelete={canDelete && unlocked && (!deleteOwnOnly||own) && !ownerEntryIsArchived(entry)}

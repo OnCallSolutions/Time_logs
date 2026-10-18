@@ -11,6 +11,10 @@ it("keeps multiple same-project work units as separate entries",()=>{
   const row={id:"one",contractor:"Person",project:"Project A",date:"2026-10-10",hours:2,description:"Documentation",status:"draft" as const}
   render(<EntriesLog entries={[row,{...row,id:"two",hours:3,description:"Testing"}]} onUpdate={vi.fn()} onStatusChange={vi.fn()} onDelete={vi.fn()} onClear={vi.fn()}/>)
   expect(screen.getByText((_,node)=>node?.tagName==="TH"&&node.textContent==="Project: Project A 2 entries · 5h")).toBeVisible()
+  const projectHeader=screen.getByText((_,node)=>node?.tagName==="TH"&&node.textContent==="Project: Project A 2 entries · 5h")
+  expect(projectHeader.closest("tr")).toHaveClass("bg-emerald-800")
+  expect(projectHeader.closest("tr")).not.toHaveClass("hover:bg-emerald-950")
+  expect(screen.getByLabelText("Entry Documentation")).toHaveClass("hover:!bg-blue-950")
   expect(screen.getAllByRole("button",{name:"Edit entry"})).toHaveLength(2)
   expect(screen.queryByRole("spinbutton",{name:"Hours"})).not.toBeInTheDocument()
   expect(screen.getAllByText("Person")).toHaveLength(2)
@@ -23,6 +27,7 @@ it("keeps multiple same-project work units as separate entries",()=>{
 it("leaves edge scrolling to the browser so wheel momentum is not replaced with jumps",()=>{
   const {container}=render(<section style={{overflowY:"auto"}}><EntriesLog entries={[{id:"scroll",contractor:"Person",project:"Project",date:"2026-10-10",hours:2,description:"Work",status:"draft"}]} onUpdate={vi.fn()} onStatusChange={vi.fn()} onDelete={vi.fn()} onClear={vi.fn()}/></section>)
   const parent=container.querySelector("section")!,tableScroller=screen.getByLabelText("Scrollable time entries")
+  expect(tableScroller).toHaveClass("min-h-0","flex-1","border-2","border-slate-600")
   Object.defineProperties(parent,{scrollHeight:{configurable:true,value:900},clientHeight:{configurable:true,value:400},scrollTop:{configurable:true,writable:true,value:0}})
   Object.defineProperties(tableScroller,{scrollHeight:{configurable:true,value:600},clientHeight:{configurable:true,value:300},scrollTop:{configurable:true,writable:true,value:300}})
   const wheel=new WheelEvent("wheel",{bubbles:true,cancelable:true,deltaY:120})
@@ -50,6 +55,9 @@ it("filters timesheets by text, status, project and date, with selectable sort a
   ]
   render(<EntriesLog entries={rows} onUpdate={vi.fn()} onStatusChange={vi.fn()} onDelete={vi.fn()} onClear={vi.fn()}/> )
 
+  expect(screen.getByRole("textbox",{name:"Search entries"})).toBeVisible()
+  expect(screen.getByLabelText("Entries from date")).not.toBeVisible()
+  await user.click(screen.getByText(/More controls/))
   await user.type(screen.getByRole("textbox",{name:"Search entries"}),"Build release")
   expect(screen.getByText("Build release")).toBeVisible()
   expect(screen.queryByText("Design notes")).not.toBeInTheDocument()
@@ -260,6 +268,7 @@ it("does not merge identical display names belonging to different owners",()=>{
 
 it("selects individual, matching, or all owned eligible entries without selecting others",async()=>{
   setup({canSubmit:true,entries:[entry,{...entry,id:"two",description:"Testing"},{...entry,id:"locked",status:"submitted"},{...entry,id:"other",ownerEmail:"other@example.com"}]})
+  await userEvent.click(screen.getByText(/More controls/))
   await userEvent.click(screen.getByText("Bulk actions"))
   await userEvent.click(screen.getByRole("checkbox",{name:"Select entry one"}))
   expect(screen.getByRole("button",{name:"Submit selected (1)"})).toBeEnabled()
