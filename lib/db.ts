@@ -44,6 +44,7 @@ type TimeEntryRow = {
   reviewed_by: string | null
   reviewed_at: string | Date | null
   review_note: string | null
+  submitted_at?: string | Date | null
 }
 
 export type UserProfile = {
@@ -232,6 +233,7 @@ function toTimeEntry(row: TimeEntryRow): TimeEntry {
     project: row.project,
     description: row.description ?? "",
     status: row.status ?? "draft",
+    submittedAt: row.submitted_at instanceof Date ? row.submitted_at.toISOString() : row.submitted_at ?? null,
     reviewedBy: row.reviewed_by,
     reviewedAt:
       row.reviewed_at instanceof Date
@@ -1276,22 +1278,35 @@ export async function listKnownUsers(): Promise<KnownUserSummary[]> {
  */
 export async function listTimeEntries(ownerEmail: string, includeAll = false) {
   await ensureTimeEntriesTable()
+  await ensureAuditEventsTable()
 
   const rows = includeAll
     ? await sql`
-        SELECT id, owner_email, contractor_number, review_manager_email,
-          payout_eligible_at, contractor, work_date, hours, project, description,
-          status, reviewed_by, reviewed_at, review_note, updated_at::text AS updated_at
-        FROM time_entries
-        ORDER BY work_date DESC, created_at DESC
+        SELECT entry.id, entry.owner_email, entry.contractor_number, entry.review_manager_email,
+          entry.payout_eligible_at, entry.contractor, entry.work_date, entry.hours, entry.project, entry.description,
+          entry.status, entry.reviewed_by, entry.reviewed_at, entry.review_note, entry.updated_at::text AS updated_at,
+          submission.occurred_at::text AS submitted_at
+        FROM time_entries entry
+        LEFT JOIN LATERAL (
+          SELECT occurred_at FROM audit_events
+          WHERE target_type='time_entry' AND target_id=entry.id::text AND action='entry_submitted'
+          ORDER BY occurred_at DESC LIMIT 1
+        ) submission ON true
+        ORDER BY entry.work_date DESC, entry.created_at DESC
       `
     : await sql`
-        SELECT id, owner_email, contractor_number, review_manager_email,
-          payout_eligible_at, contractor, work_date, hours, project, description,
-          status, reviewed_by, reviewed_at, review_note, updated_at::text AS updated_at
-        FROM time_entries
-        WHERE lower(owner_email) = lower(${ownerEmail})
-        ORDER BY work_date DESC, created_at DESC
+        SELECT entry.id, entry.owner_email, entry.contractor_number, entry.review_manager_email,
+          entry.payout_eligible_at, entry.contractor, entry.work_date, entry.hours, entry.project, entry.description,
+          entry.status, entry.reviewed_by, entry.reviewed_at, entry.review_note, entry.updated_at::text AS updated_at,
+          submission.occurred_at::text AS submitted_at
+        FROM time_entries entry
+        LEFT JOIN LATERAL (
+          SELECT occurred_at FROM audit_events
+          WHERE target_type='time_entry' AND target_id=entry.id::text AND action='entry_submitted'
+          ORDER BY occurred_at DESC LIMIT 1
+        ) submission ON true
+        WHERE lower(entry.owner_email) = lower(${ownerEmail})
+        ORDER BY entry.work_date DESC, entry.created_at DESC
       `
 
   return (rows as TimeEntryRow[]).map(toTimeEntry)
@@ -1658,7 +1673,7 @@ export async function submitTimeEntryWithAudit(
     )
     SELECT ${actorEmail.toLowerCase()}, 'entry_submitted', 'time_entry', id::text,
       jsonb_build_object(
-        'fromStatus', ${fromStatus},
+        'fromStatus', ${fromStatus}::text,
         'toStatus', 'submitted',
         'changedFields', ${JSON.stringify(metadata.changedFields ?? [])}::jsonb,
         'hasReviewNote', ${metadata.hasReviewNote === true}

@@ -49,6 +49,8 @@ export type TimeEntry = {
   project: string
   description: string
   status: EntryStatus
+  /** Latest time this entry was submitted, from the durable audit trail. */
+  submittedAt?: string | null
   reviewedBy?: string | null
   reviewedAt?: string | null
   reviewNote?: string | null

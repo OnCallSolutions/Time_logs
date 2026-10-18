@@ -32,6 +32,7 @@ export function TimesheetPeriodLanding({entries,onSelect,onLogTime,onRefresh,can
   const dueLabel=(period:Period)=>new Intl.DateTimeFormat(undefined,{month:"short",day:"numeric",year:"numeric",hour:"numeric",minute:"2-digit"}).format(new Date(period.submissionDeadline))
   const featuredPeriod=active??upcoming[0]??archived[0]
   const featuredEntries=featuredPeriod?periodEntries(featuredPeriod):[]
+  const previewEntries=[...featuredEntries].sort((a,b)=>b.date.localeCompare(a.date)||a.id.localeCompare(b.id)).slice(0,3)
   const featuredHours=featuredEntries.reduce((sum,entry)=>sum+Number(entry.hours||0),0)
   const featuredStatuses={draft:featuredEntries.filter(entry=>entry.status==="draft").length,submitted:featuredEntries.filter(entry=>entry.status==="submitted").length,approved:featuredEntries.filter(entry=>entry.status==="approved").length,rejected:featuredEntries.filter(entry=>entry.status==="rejected").length}
   const featuredPeople=new Set(featuredEntries.map(entry=>entry.contractor).filter(Boolean)).size
@@ -66,6 +67,14 @@ export function TimesheetPeriodLanding({entries,onSelect,onLogTime,onRefresh,can
             <OverviewStat label="Approved" value={featuredStatuses.approved} tone="green"/>
           </div>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-y border-slate-200 py-2 text-xs"><span className="text-orange-900">{featuredStatuses.draft} drafts</span><span className="text-red-800">{featuredStatuses.rejected} returned for correction</span><span className={Date.parse(featuredPeriod.submissionDeadline)<Date.now()&&featuredStatuses.submitted+featuredStatuses.draft>0?"text-red-800":"text-slate-700"}><Clock3 className="mr-1 inline size-3.5"/>Submit by {dueLabel(featuredPeriod)}</span></div>
+          <section aria-label="Current timesheet preview" className="mt-3 min-w-0 border-l-2 border-sky-400 bg-white/80">
+            <header className="flex items-center justify-between gap-2 border-b border-sky-100 px-2.5 py-1.5"><h4 className="text-xs font-semibold text-sky-950">Recent work · preview</h4><span className="text-[10px] uppercase text-slate-500">Display only</span></header>
+            {previewEntries.length?<ul className="divide-y divide-slate-100">{previewEntries.map(entry=><li key={entry.id} className="grid min-w-0 grid-cols-[5.5rem_minmax(0,1fr)_auto] items-center gap-2 px-2.5 py-1.5 text-xs">
+              <time dateTime={entry.date} className="text-[10px] tabular-nums text-slate-600">{entry.date}</time>
+              <span className="min-w-0"><span className="block truncate font-medium text-slate-900" title={entry.project}>{entry.project}</span><span className="block truncate text-[10px] text-slate-600" title={entry.description}>{entry.description||"No description"}</span></span>
+              <span className="flex items-center gap-2"><span className="tabular-nums text-slate-700">{Number(entry.hours).toLocaleString(undefined,{maximumFractionDigits:2})}h</span><span className={`rounded-full px-1.5 py-0.5 text-[10px] capitalize ${entry.status==="approved"?"bg-emerald-100 text-emerald-800":entry.status==="submitted"?"bg-sky-100 text-sky-800":entry.status==="rejected"?"bg-red-100 text-red-800":"bg-orange-100 text-orange-900"}`}>{entry.status}</span></span>
+            </li>)}</ul>:<p className="px-2.5 py-2 text-xs text-slate-600">No time entries in this period yet.</p>}
+          </section>
           <p className="mt-auto pt-3 text-xs text-slate-600"><CheckCircle2 className="mr-1 inline size-3.5 text-emerald-700"/>Choose any period on the left to open its searchable raw timesheets and approval controls. Archived periods remain read-only.</p>
         </>:<div className="flex min-h-40 flex-1 flex-col justify-center"><CalendarClock className="mb-2 size-5 text-emerald-700" aria-hidden="true"/><h3 className="text-sm font-semibold text-emerald-950">No timesheet periods configured</h3><p className="mt-1 max-w-xl text-sm text-slate-700">Open all saved timesheets to review existing records, or ask an account manager to configure the next work period.</p><Button className="mt-3 w-fit" size="sm" variant="outline" onClick={openAll}>Open all saved timesheets<ChevronRight className="size-3.5"/></Button></div>}
       </section>
@@ -83,10 +92,11 @@ function PeriodGroup({title,periods,today,onSelect,dueLabel,periodEntries}:{titl
     const rows=periodEntries(period)
     const hours=rows.reduce((sum,entry)=>sum+Number(entry.hours||0),0)
     const approved=rows.filter(entry=>entry.status==="approved").length
+    const submittedAt=rows.map(entry=>entry.submittedAt).filter((value):value is string=>!!value).sort().at(-1)
     const due=Date.parse(period.submissionDeadline)
     const tone=period.startDate<=today&&period.endDate>=today?"border-emerald-500 bg-emerald-50 hover:bg-emerald-100":period.startDate>today?"border-sky-400 bg-white hover:bg-sky-50":"border-orange-400 bg-white hover:bg-orange-50"
     return <button key={period.id} type="button" onClick={()=>onSelect(period.id)} className={`group flex w-full items-center justify-between gap-3 rounded-md border-l-2 px-2.5 py-2 text-left transition ${tone}`}>
-      <span className="min-w-0 flex-1"><span className="block truncate text-xs font-semibold text-slate-950">{period.name}</span><span className="block text-[10px] text-slate-600">{period.startDate} – {period.endDate}</span><span className={`mt-0.5 block text-[10px] ${due<Date.now()?"text-red-800":"text-slate-600"}`}><Clock3 className="mr-1 inline size-3"/>Submit by {dueLabel(period)}</span></span>
+      <span className="min-w-0 flex-1"><span className="block truncate text-xs font-semibold text-slate-950">{period.name}</span><span className="block text-[10px] text-slate-600">{period.startDate} – {period.endDate}</span><span className={`mt-0.5 block text-[10px] ${period.endDate<today?"text-slate-600":due<Date.now()?"text-red-800":"text-slate-600"}`}><Clock3 className="mr-1 inline size-3"/>{period.endDate<today?submittedAt?`Submitted on ${new Intl.DateTimeFormat(undefined,{month:"short",day:"numeric",year:"numeric"}).format(new Date(submittedAt))}`:"No submission recorded":"Submit by "+dueLabel(period)}</span></span>
       <span className="shrink-0 text-right"><span className="block text-xs font-semibold tabular-nums text-slate-900">{rows.length} {rows.length===1?"entry":"entries"}</span><span className="block text-[10px] tabular-nums text-slate-600">{hours.toLocaleString(undefined,{maximumFractionDigits:2})}h · {approved} approved</span><ChevronRight className="ml-auto mt-1 size-3.5 text-slate-500 transition group-hover:translate-x-0.5"/></span>
     </button>
   })}</div></section>

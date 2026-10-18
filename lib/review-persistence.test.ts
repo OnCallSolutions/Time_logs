@@ -40,6 +40,7 @@ it("types an omitted reviewer parameter in the submission guard",async()=>{
   await submitTimeEntryWithAudit("owner@example.invalid",id,{status:"submitted"},false,undefined,revision,actor,"draft",{changedFields:[]},"contractor",context)
   const submission=queries.find(query=>query.text.includes("'entry_submitted'"))!
   expect(submission.text).toMatch(/status = 'submitted' AND \$\d+::text IS NOT NULL/)
+  expect(submission.text).toMatch(/'fromStatus',\s*\$\d+::text/)
 })
 it("types an omitted reviewer parameter in the audited status-update guard",async()=>{
   await updateTimeEntryWithAudit("owner@example.invalid",id,{status:"approved"},false,undefined,revision,{actorEmail:actor,action:"entry_approved",metadata:{},context})
