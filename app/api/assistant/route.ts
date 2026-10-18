@@ -24,18 +24,21 @@ export async function POST(request: Request): Promise<Response> {
   let input
   try { input = assistantInputSchema.parse(await readAssistantRequest(request)) }
   catch { return Response.json({ error: "Use a same-origin JSON request with a shorter conversation." }, { status: 400 }) }
-  let runId="",actorEmail="";const startedAt=Date.now()
+  let runId="",actorEmail="",stage="authenticate";const startedAt=Date.now()
   try {
     const session = await auth(), email = session?.user?.email, sid = session?.appSessionId
     if (!email || !sid) return Response.json({ error: "Sign in again to use the assistant." }, { status: 401 })
     actorEmail=email
+    stage="permissions"
     const access = await getEffectivePermissions(email)
     if (!access.role) return Response.json({ error: "Forbidden." }, { status: 403 })
     const navigationActions = ["home", "period-index", "log", "personal", "approvals", "report", "my-report", "activity", "admin", "permissions", "accounts", "periods", "messages"] as const
     const availablePages = navigationActions.filter(destination => canOfferAction({ kind: "navigate", destination }, access))
+    stage="rate_limit"
     if (!await allowAssistantRequest(email)) return Response.json({ error: "Please wait a minute before asking again." }, { status: 429 })
     const latest=input.messages.at(-1)
     if(latest?.role!=="user")return Response.json({error:"Send a new user message to continue."},{status:400})
+    stage="conversation"
     const conversation=await getAssistantConversation(email,input.workspaceContext)
     await saveAssistantMessage(conversation.id,email,input.workspaceContext,"user",latest.content)
     const modelName=getAiModel("assistant")
@@ -43,6 +46,7 @@ export async function POST(request: Request): Promise<Response> {
     const needsMessages=input.workspaceContext==="main"||/message/i.test(input.workspaceContext)
     const needsDirectory=input.workspaceContext==="main"||/admin|access|people|directory/i.test(input.workspaceContext)
     const needsReviewers=input.workspaceContext==="main"||/timesheet|approval|review/i.test(input.workspaceContext)
+    stage="workspace_context"
     const timesheetPeriods=access.permissions.create_entries?await listTimesheetPeriods():[]
     const selectedPeriod=timesheetPeriods.find(period=>period.id===input.periodId)
     const needsIssueScrutiny=access.role==="admin"&&/issue|admin|security|report/i.test(input.workspaceContext)
@@ -62,6 +66,7 @@ export async function POST(request: Request): Promise<Response> {
     const roster=rosterActors.map(actor=>({email:actor.email,officialName:rosterIdentities.find(item=>item.email===actor.email.toLowerCase())?.officialName??"Company account",role:actor.role,active:actor.accessStatus==="active"}))
     const reviewers=needsReviewers&&access.permissions.submit_entries?await readSubmissionManagers():null
     const reviewChoice=reviewers?.ok?(await reviewers.json() as {manager:{email:string;displayName:string;assignment:string}|null}).manager:null
+    stage="model_generation"
     const { output } = await generateText({
       model: modelName, output: Output.object({ schema: assistantResponseSchema }),
       abortSignal: AbortSignal.timeout(22_000), maxRetries: 0, maxOutputTokens: 5000,
@@ -89,9 +94,11 @@ export async function POST(request: Request): Promise<Response> {
         adminIssueRecords:needsIssueScrutiny?issueRecords.slice(0,200).map(issue=>({reference:issue.reference,reporterEmail:issue.reporterEmail,operation:issue.operation,route:issue.route,httpStatus:issue.httpStatus,errorMessage:issue.errorMessage,reporterDetails:issue.details,status:issue.status,priority:issue.priority,internalRepairNotes:issue.internalNote,similarReports:issue.similarReports,createdAt:issue.createdAt,updatedAt:issue.updatedAt})):undefined,
         conversation:[...conversation.messages.slice(-10),latest], previousWorkspaceHandoff:input.handoffContext??null, userSharedMessage: input.messageContext ?? null }),
     })
+    stage="permission_recheck"
     const current = await getEffectivePermissions(email)
     if (!current.role || JSON.stringify(current) !== JSON.stringify(access)) return Response.json({ error: "Your permissions changed. Ask again to refresh the context." }, { status: 409 })
     const validated = assistantResponseSchema.parse(output)
+    stage="save_response"
     await saveAssistantMessage(conversation.id,email,input.workspaceContext,"assistant",validated.answer)
     const actions = validated.actions.filter(action => canOfferAction(action, current)).filter(action => {
       if(action.kind==="create_entries")return !!selectedPeriod&&action.periodId===selectedPeriod.id&&action.periodName===selectedPeriod.name&&action.entries.every(entry=>entry.date>=selectedPeriod.startDate&&entry.date<=selectedPeriod.endDate)
@@ -101,12 +108,16 @@ export async function POST(request: Request): Promise<Response> {
       if(action.kind==="update_rights")return roster.some(actor=>actor.email.toLowerCase()===action.email.toLowerCase()&&actor.active&&(access.role==="admin"||["employee","contractor"].includes(actor.role)))
       return true
     })
+    stage="finish_run"
     await finishAssistantRun(runId,email,{status:"succeeded",durationMs:Date.now()-startedAt,responseChars:validated.answer.length,proposals:actions.length})
     runId=""
     return Response.json({ answer: validated.answer, proposals: actions.map(action => ({ action, token: signAssistantAction(email, sid, action) })), included: context.length, totalVisible: workspaceEntries.length }, { headers: { "Cache-Control": "no-store" } })
-  } catch {
+  } catch (cause) {
     if(runId&&actorEmail)await finishAssistantRun(runId,actorEmail,{status:"failed",durationMs:Date.now()-startedAt,errorCode:"assistant_request_failed"}).catch(()=>undefined)
-    console.error("[assistant] request failed")
+    const diagnostic=cause&&typeof cause==="object"?cause as Record<string,unknown>:{}
+    const safeText=(value:unknown)=>typeof value==="string"?value.slice(0,120):undefined
+    const safeNumber=(value:unknown)=>typeof value==="number"&&Number.isFinite(value)?value:undefined
+    console.error("[assistant] request failed",{stage,name:safeText(diagnostic.name),code:safeText(diagnostic.code),status:safeNumber(diagnostic.status),statusCode:safeNumber(diagnostic.statusCode)})
     return Response.json({ error: "The assistant is unavailable. Your workspace controls are still available." }, { status: 503 })
   }
 }

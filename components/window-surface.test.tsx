@@ -26,7 +26,7 @@ function Windows() {
   </>
 }
 
-it("defaults to full screen and restores the previous window and draft with Back", async () => {
+it("keeps windows full screen without size controls and restores parent draft with Back", async () => {
   render(<Windows />)
   const user = userEvent.setup()
   await user.click(screen.getByRole("button", { name: "Open activity" }))
@@ -34,25 +34,9 @@ it("defaults to full screen and restores the previous window and draft with Back
   expect(parent).toHaveFocus()
   expect(parent).toHaveAttribute("data-window-expanded", "true")
   expect(parent).toHaveAttribute("data-window-resizable", "true")
-  await user.click(screen.getByRole("button", { name: "Restore size" }))
-  expect(parent).toHaveAttribute("data-window-expanded", "false")
-  expect(parent).toHaveAttribute("data-window-size", "compact")
-  expect(screen.getByRole("button", { name: "Expand" })).toHaveAttribute("aria-pressed", "false")
-  expect(parent.querySelector(".window-content")?.parentElement).toHaveClass("w-[min(92vw,58rem)]")
-  const resizeEdge = parent.querySelector<HTMLElement>("[data-resize-edge='se']")
-  expect(resizeEdge).not.toBeNull()
-  fireEvent.pointerDown(resizeEdge!, { pointerId: 1, clientX: 100, clientY: 100 })
-  fireEvent.pointerMove(resizeEdge!, { pointerId: 1, clientX: 140, clientY: 130 })
-  expect(parent.querySelector(".window-content")?.parentElement).toHaveStyle({ width: "280px", height: "240px" })
-  expect(parent.querySelector(".window-content")?.parentElement).toHaveStyle({ minWidth: "280px", minHeight: "240px" })
-  fireEvent.pointerUp(resizeEdge!, { pointerId: 1 })
-  await user.click(screen.getByRole("button", { name: "Expand" }))
-  expect(parent).toHaveAttribute("data-window-expanded", "true")
-  expect(parent).toHaveAttribute("data-window-size", "full")
+  expect(screen.queryByRole("button", { name: "Restore size" })).not.toBeInTheDocument()
+  expect(screen.queryByRole("button", { name: "Expand" })).not.toBeInTheDocument()
   expect(parent.querySelector(".window-content")?.parentElement).toHaveClass("h-full", "w-full")
-  await user.click(screen.getByRole("button", { name: "Restore size" }))
-  expect(parent).toHaveAttribute("data-window-expanded", "false")
-  expect(parent.querySelector(".window-content")?.parentElement).toHaveStyle({ width: "280px", height: "240px" })
   await user.click(screen.getByRole("button", { name: "Open security" }))
   expect(parent).not.toBeVisible()
   expect(parent.inert).toBe(true)
@@ -61,10 +45,22 @@ it("defaults to full screen and restores the previous window and draft with Back
   expect(parent).toBeVisible()
   expect(parent.inert).toBe(false)
   expect(screen.getByLabelText("Draft")).toHaveValue("Retained draft")
-  expect(parent).toHaveAttribute("data-window-expanded", "false")
+  expect(parent).toHaveAttribute("data-window-expanded", "true")
   await user.click(screen.getByRole("button", { name: "Back" }))
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
   expect(screen.getByRole("button", { name: "Open activity" })).toBeVisible()
+})
+
+it("supports dragging compact task dialogs without a resize/restore button",async()=>{
+  render(<WindowSurface title="Period editor" onBack={()=>{}} initialExpanded={false} movable assistant={false}><section>Form</section></WindowSurface>)
+  const dialog=screen.getByRole("dialog",{name:"Period editor"})
+  expect(screen.queryByRole("button",{name:"Restore size"})).not.toBeInTheDocument()
+  const titlebar=dialog.querySelector<HTMLElement>("h1")?.parentElement
+  expect(titlebar).not.toBeNull()
+  fireEvent.pointerDown(titlebar!,{pointerId:1,clientX:100,clientY:100})
+  fireEvent.pointerMove(titlebar!,{pointerId:1,clientX:140,clientY:130})
+  fireEvent.pointerUp(titlebar!,{pointerId:1,clientX:140,clientY:130})
+  expect(dialog.querySelector(":scope > div")).toHaveStyle({left:"40px",top:"30px"})
 })
 
 it("Escape returns from the nested window without dismissing its parent", async () => {

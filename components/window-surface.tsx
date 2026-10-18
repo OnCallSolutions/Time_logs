@@ -6,7 +6,7 @@
 "use client"
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
 import { createPortal } from "react-dom"
-import { ArrowLeft, Maximize2, Minimize2, Sparkles } from "lucide-react"
+import { ArrowLeft, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useDialogFocus } from "@/components/use-dialog-focus"
 import { useWindowAssistantRenderer } from "@/components/window-assistant-context"
@@ -39,10 +39,10 @@ function reconcileWindows(): void {
  * @param props.sessionGuard - Marks the privileged privacy shield during session verification.
  * @returns React portal containing the active application window.
  */
-export function WindowSurface({ title, onBack, disabled = false, children,sessionGuard=false,compact=true,resizable=true,assistant=true,showSizeToggle=true }: {
-  title: string; onBack: () => void; disabled?: boolean; children: ReactNode;sessionGuard?:boolean;compact?:boolean;resizable?:boolean;assistant?:boolean;showSizeToggle?:boolean
+export function WindowSurface({ title, onBack, disabled = false, children,sessionGuard=false,compact=true,resizable=true,assistant=true,initialExpanded=true,movable=false }: {
+  title: string; onBack: () => void; disabled?: boolean; children: ReactNode;sessionGuard?:boolean;compact?:boolean;resizable?:boolean;assistant?:boolean;initialExpanded?:boolean;movable?:boolean
 }) {
-  const [expanded, setExpanded] = useState(true)
+  const [expanded, setExpanded] = useState(initialExpanded)
   const [assistantOpen,setAssistantOpen]=useState(false)
   const [assistantHeight,setAssistantHeight]=useState(360)
   const [assistantPosition,setAssistantPosition]=useState<{left:number;top:number}|null>(null)
@@ -52,6 +52,7 @@ export function WindowSurface({ title, onBack, disabled = false, children,sessio
   const assistantTarget = useRef<HTMLDivElement>(null)
   const resizeStart = useRef<{ pointerId: number; edge: string; x: number; y: number; width: number; height: number; left: number; top: number } | null>(null)
   const assistantDragStart=useRef<{pointerId:number;x:number;y:number;left:number;top:number}|null>(null)
+  const windowDragStart=useRef<{pointerId:number;x:number;y:number;left:number;top:number;width:number;height:number}|null>(null)
   const historyId = useRef<number | null>(null)
   if (historyId.current === null) historyId.current = createWindowHistoryId()
   const onBackRef = useRef(onBack)
@@ -126,6 +127,23 @@ export function WindowSurface({ title, onBack, disabled = false, children,sessio
   function endResize(event: ReactPointerEvent<HTMLDivElement>) {
     if (resizeStart.current?.pointerId === event.pointerId) resizeStart.current = null
   }
+  function beginWindowDrag(event:ReactPointerEvent<HTMLDivElement>) {
+    if(!movable||!compactView||(event.target as HTMLElement).closest("button,a,input,select,textarea"))return
+    const bounds=resizeTarget.current?.getBoundingClientRect()
+    if(!bounds)return
+    windowDragStart.current={pointerId:event.pointerId,x:event.clientX,y:event.clientY,left:bounds.left,top:bounds.top,width:bounds.width,height:bounds.height}
+    setCompactGeometry({left:bounds.left,top:bounds.top,width:bounds.width,height:bounds.height})
+    event.currentTarget.setPointerCapture?.(event.pointerId)
+    event.preventDefault()
+  }
+  function moveWindowDrag(event:ReactPointerEvent<HTMLDivElement>) {
+    const start=windowDragStart.current
+    if(!start||start.pointerId!==event.pointerId)return
+    setCompactGeometry({...start,left:Math.max(8,Math.min(window.innerWidth-start.width-8,start.left+event.clientX-start.x)),top:Math.max(8,Math.min(window.innerHeight-start.height-8,start.top+event.clientY-start.y))})
+  }
+  function endWindowDrag(event:ReactPointerEvent<HTMLDivElement>) {
+    if(windowDragStart.current?.pointerId===event.pointerId)windowDragStart.current=null
+  }
   function beginAssistantDrag(event:ReactPointerEvent<HTMLElement>) {
     if((event.target as HTMLElement).closest("button,a,input,select,textarea"))return
     const bounds=assistantTarget.current?.getBoundingClientRect()
@@ -154,10 +172,6 @@ export function WindowSurface({ title, onBack, disabled = false, children,sessio
     ["ne", "right-0 top-0 size-4 cursor-nesw-resize"], ["nw", "left-0 top-0 size-4 cursor-nwse-resize"],
     ["se", "bottom-0 right-0 size-4 cursor-nwse-resize"], ["sw", "bottom-0 left-0 size-4 cursor-nesw-resize"],
   ] as const
-  /** Switches between the bounded workspace and the full viewport. */
-  function toggleWindowSize() {
-    setExpanded(value => !value)
-  }
   return createPortal(
     <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title}
       data-window-expanded={expanded}
@@ -165,17 +179,10 @@ export function WindowSurface({ title, onBack, disabled = false, children,sessio
       data-window-resizable={compact && resizable ? "true" : undefined}
       data-session-guard={sessionGuard?"true":undefined}
       className={`window-surface tech-surface fixed inset-0 z-[70] flex min-h-0 ${compactView ? "items-center justify-center bg-black/45 p-4" : "flex-col bg-background p-0"}`}>
-      <div ref={resizeTarget} style={compactView&&resizable&&compactGeometry?{left:compactGeometry.left,top:compactGeometry.top,width:compactGeometry.width,height:compactGeometry.height,minWidth:Math.min(280,Math.max(1,window.innerWidth-32)),minHeight:Math.min(240,Math.max(1,window.innerHeight-32)),transform:"none"}:undefined} className={`relative flex min-h-0 flex-col overflow-hidden ${compactView ? resizable ? "absolute left-1/2 top-1/2 h-[min(82dvh,48rem)] w-[min(92vw,58rem)] min-h-[min(20rem,calc(100dvh-2rem))] min-w-[min(20rem,calc(100vw-2rem))] max-h-[calc(100dvh-2rem)] max-w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-background shadow-2xl" : "max-h-[min(80dvh,40rem)] w-full max-w-lg rounded-lg border border-border bg-background shadow-2xl" : "h-full w-full"}`}>
-        <div className="flex shrink-0 items-center justify-between gap-3 border-b-2 border-orange-400 bg-gradient-to-r from-orange-50 via-sky-50 to-emerald-50 px-3 py-2">
+      <div ref={resizeTarget} style={compactView&&resizable&&compactGeometry?{left:compactGeometry.left,top:compactGeometry.top,width:compactGeometry.width,height:compactGeometry.height,minWidth:Math.min(280,Math.max(1,window.innerWidth-32)),minHeight:Math.min(240,Math.max(1,window.innerHeight-32)),transform:"none"}:undefined} className={`relative flex min-h-0 flex-col overflow-hidden ${compactView ? resizable ? `absolute left-1/2 ${movable?"top-[6dvh]":"top-1/2"} h-[min(82dvh,48rem)] w-[min(92vw,58rem)] min-h-[min(20rem,calc(100dvh-2rem))] min-w-[min(20rem,calc(100vw-2rem))] max-h-[calc(100dvh-2rem)] max-w-[calc(100vw-2rem)] -translate-x-1/2 ${movable?"":"-translate-y-1/2"} rounded-lg border border-border bg-background shadow-2xl` : "max-h-[min(80dvh,40rem)] w-full max-w-lg rounded-lg border border-border bg-background shadow-2xl" : "h-full w-full"}`}>
+        <div onPointerDown={beginWindowDrag} onPointerMove={moveWindowDrag} onPointerUp={endWindowDrag} onPointerCancel={endWindowDrag} className={`flex shrink-0 items-center justify-between gap-3 border-b-2 border-orange-400 bg-gradient-to-r from-orange-50 via-sky-50 to-emerald-50 px-3 py-2 ${movable&&compactView?"touch-none select-none cursor-grab active:cursor-grabbing":""}`}>
           <Button variant="outline" size="sm" disabled={disabled} onClick={onBack} className="border-orange-200 bg-white/80 text-slate-800 hover:bg-orange-100"><ArrowLeft className="size-4" />Back</Button>
           <h1 className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-900">{title}</h1>
-          {showSizeToggle&&<div className="flex items-center gap-1">
-            <Button variant="outline" size="sm" title={expanded ? "Restore to a resizable window" : "Expand to full screen"}
-              aria-label={expanded ? "Restore size" : "Expand"} aria-pressed={expanded} onClick={toggleWindowSize} className="border-sky-200 bg-white/80 text-sky-900 hover:bg-sky-100">
-              {expanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
-              {expanded ? "Restore size" : "Expand"}
-            </Button>
-          </div>}
         </div>
         <div className="window-content flex min-h-0 flex-1 justify-center overflow-hidden">{children}</div>
         {assistant&&renderAssistant&&<div className={`pointer-events-none fixed z-[90] ${assistantPosition?"":"bottom-4 right-4"}`} style={assistantPosition?{left:assistantPosition.left,top:assistantPosition.top}:undefined}>
