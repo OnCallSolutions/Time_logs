@@ -16,7 +16,7 @@ it("opens Entra in a small popup and returns to a same-origin completion page",a
   const state="123e4567-e89b-42d3-a456-426614174000"
   expect(openEntraReauthentication(state,onFailure)).toBe(popup)
   await vi.waitFor(()=>expect(popup.location.href).toContain("login.microsoftonline.com"))
-  expect(open).toHaveBeenCalledWith("about:blank","tanovo-microsoft-step-up","popup,width=380,height=500,resizable=yes,scrollbars=yes")
+  expect(open).toHaveBeenCalledWith("about:blank","tanovo-microsoft-step-up",expect.stringMatching(/^popup,width=380,height=500,left=-?\d+,top=-?\d+,resizable=yes,scrollbars=yes$/))
   expect(fetch).toHaveBeenNthCalledWith(1,"/tanovo-time/api/auth/csrf?stepup=1",expect.objectContaining({cache:"no-store"}))
   expect(fetch).toHaveBeenNthCalledWith(2,"/tanovo-time/api/auth/signin/microsoft-entra-id?stepup=1&max_age=0&prompt=login",expect.objectContaining({
     method:"POST",headers:expect.objectContaining({"X-Auth-Return-Redirect":"1"}),

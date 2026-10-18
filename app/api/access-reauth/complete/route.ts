@@ -20,7 +20,9 @@ export async function POST(request:Request):Promise<Response>{
     if(!await markAppSessionFresh(appSession.appSessionId,email))return Response.json({error:"The app session expired. Sign in again before changing access."},{status:401,headers})
     const secure=process.env.NODE_ENV==="production"?"; Secure":""
     return Response.json({ok:true},{headers:{...headers,"Set-Cookie":`${stepUpSessionCookieName}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax${secure}`}})
-  }catch{
+  }catch(error){
+    const errorType=error instanceof Error?error.name.slice(0,80):"unknown"
+    console.error("[access-reauth] completion failed",errorType)
     return Response.json({error:"Microsoft verification could not be confirmed."},{status:503,headers})
   }
 }

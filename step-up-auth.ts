@@ -12,6 +12,12 @@ export const {handlers:stepUpHandlers,auth:stepUpAuth}=NextAuth({
   trustHost:true,
   basePath:apiPath("/api/auth"),
   secret:process.env.AUTH_SECRET,
+  logger:{
+    error(error){
+      const errorType=typeof error?.name==="string"?error.name.slice(0,80):"unknown"
+      console.error("[step-up-auth] Microsoft verification failed",errorType)
+    },
+  },
   session:{strategy:"jwt",maxAge:5*60},
   jwt:{maxAge:5*60},
   cookies:{
