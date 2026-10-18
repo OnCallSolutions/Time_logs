@@ -5,7 +5,7 @@
  */
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
-import { changeMessage,editableMessage,actorRoster,hideMessageFor,listMessages,readMessages,sendMessage,getMessagePreferences,setReadReceiptsEnabled } from "@/lib/collaboration"
+import { changeMessage,editableMessage,actorRoster,hideMessageFor,listMessages,readMessages,sendMessage,getMessagePreferences,setReadReceiptsEnabled,setOwnMessageAlignment } from "@/lib/collaboration"
 import { audienceEmails,messageAudiences } from "@/lib/message-audience"
 import { encryptedMessageSchema,validateEnvelope } from "@/lib/message-envelope"
 import { MESSAGE_EDIT_MINUTES } from "@/lib/message-policy"
@@ -32,7 +32,7 @@ export async function GET(request?:Request): Promise<Response> {
     const identities=await listAccountIdentities(messages.flatMap(message=>[message.sender_email,message.recipient_email,message.encrypted_payload?.author].filter((value):value is string=>typeof value==="string")))
     const official=new Map(identities.map(person=>[person.email,person.officialName]))
     const last=messages.at(-1)
-    return Response.json({messages:messages.map(message=>({...message,sender_name:message.sender_email.toLowerCase()===email.toLowerCase()?"You":official.get(String(message.sender_email))??"Unknown sender",recipient_name:official.get(String(message.recipient_email))??(message.recipient_email?"Unknown recipient":"All recipients"),author_name:official.get(String(message.encrypted_payload?.author))??"Unknown sender"})),readReceiptsEnabled:preferences.readReceiptsEnabled,next:messages.length===(before?50:100)&&last?{date:String(last.created_at),id:last.id}:null,email:email.toLowerCase(),role:access.role,editMinutes:MESSAGE_EDIT_MINUTES},{headers:{"Cache-Control":"no-store"}})
+    return Response.json({messages:messages.map(message=>({...message,sender_name:message.sender_email.toLowerCase()===email.toLowerCase()?"You":official.get(String(message.sender_email))??"Unknown sender",recipient_name:official.get(String(message.recipient_email))??(message.recipient_email?"Unknown recipient":"All recipients"),author_name:official.get(String(message.encrypted_payload?.author))??"Unknown sender"})),readReceiptsEnabled:preferences.readReceiptsEnabled,ownMessageAlignment:preferences.ownMessageAlignment,next:messages.length===(before?50:100)&&last?{date:String(last.created_at),id:last.id}:null,email:email.toLowerCase(),role:access.role,editMinutes:MESSAGE_EDIT_MINUTES},{headers:{"Cache-Control":"no-store"}})
   } catch (error) { console.error("[messages] inbox load failed",persistenceFailureDetails(error));return Response.json({error:"Inbox unavailable."},{status:500}) }
 }
 
@@ -49,6 +49,7 @@ export async function PATCH(req: Request): Promise<Response> {
     const input = z.discriminatedUnion("action", [
       z.object({action:z.literal("read"),ids:z.array(z.string().uuid()).min(1).max(100)}),
       z.object({action:z.literal("read_receipts"),enabled:z.boolean()}),
+      z.object({action:z.literal("own_message_alignment"),alignment:z.enum(["left","right"])}),
       z.object({action:z.literal("delete_for_me"),id:z.string().uuid()}),
       z.object({action:z.literal("edit"),id:z.string().uuid(),body:z.string().trim().min(1).max(4000).optional(),encrypted:encryptedMessageSchema.optional()}),
     ]).parse(await req.json())
@@ -60,6 +61,11 @@ export async function PATCH(req: Request): Promise<Response> {
       await setReadReceiptsEnabled(email,input.enabled)
       await recordAuditEvent({actorEmail:email,action:"message_read_receipts_updated",targetType:"account",targetId:email.toLowerCase(),metadata:{enabled:input.enabled},...getAuditContext(req)})
       return Response.json({ok:true,readReceiptsEnabled:input.enabled})
+    }
+    if(input.action==="own_message_alignment"){
+      await setOwnMessageAlignment(email,input.alignment)
+      await recordAuditEvent({actorEmail:email,action:"message_alignment_updated",targetType:"account",targetId:email.toLowerCase(),metadata:{alignment:input.alignment},...getAuditContext(req)})
+      return Response.json({ok:true,ownMessageAlignment:input.alignment})
     }
     if(input.action==="delete_for_me"){
       const hidden=await hideMessageFor(email,access.role==="employee"||access.role==="contractor",input.id)

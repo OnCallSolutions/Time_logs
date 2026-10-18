@@ -97,6 +97,8 @@ export function MessagesPanel({canSend,canBroadcast=false,inbox,encryption:share
   const [messageBackground,setMessageBackground]=useState<MessageBackground>("sky")
   const [readReceiptsEnabled,setReadReceiptsEnabled]=useState(state.readReceiptsEnabled!==false)
   const [savingReceiptPreference,setSavingReceiptPreference]=useState(false)
+  const [ownMessageAlignment,setOwnMessageAlignment]=useState<"left"|"right">(state.ownMessageAlignment??"right")
+  const [savingAlignment,setSavingAlignment]=useState(false)
   const [query,setQuery]=useState("")
   const [senderFilter,setSenderFilter]=useState("")
   const [actionMenuId,setActionMenuId]=useState<string|null>(null)
@@ -174,6 +176,7 @@ export function MessagesPanel({canSend,canBroadcast=false,inbox,encryption:share
     }catch{/* Keep the default when browser storage is unavailable. */}
   },[state.email])
   useEffect(()=>setReadReceiptsEnabled(state.readReceiptsEnabled!==false),[state.readReceiptsEnabled])
+  useEffect(()=>setOwnMessageAlignment(state.ownMessageAlignment??"right"),[state.ownMessageAlignment])
   /** Persists this user's chosen conversation canvas on the current device. */
   function chooseMessageBackground(background:MessageBackground):void{
     setMessageBackground(background)
@@ -190,6 +193,17 @@ export function MessagesPanel({canSend,canBroadcast=false,inbox,encryption:share
       state.refresh()
     }catch(error){setError(error instanceof Error?error.message:"Could not save read receipt preference.")}
     finally{setSavingReceiptPreference(false)}
+  }
+  async function chooseOwnMessageAlignment(alignment:"left"|"right"):Promise<void>{
+    if(savingAlignment||alignment===ownMessageAlignment)return
+    setSavingAlignment(true);setError(null)
+    try{
+      const response=await fetch(apiPath("/api/messages"),{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"own_message_alignment",alignment})})
+      const data=await response.json()
+      if(!response.ok)throw new Error(data.error||"Could not save message alignment.")
+      setOwnMessageAlignment(data.ownMessageAlignment==="left"?"left":"right");state.refresh()
+    }catch(error){setError(error instanceof Error?error.message:"Could not save message alignment.")}
+    finally{setSavingAlignment(false)}
   }
   const messageCanvasClass=messageBackgrounds[messageBackground].canvas
   const previousSend=useRef<{key:string;encrypted:Awaited<ReturnType<typeof encryption.encrypt>>}|null>(null)
@@ -375,6 +389,7 @@ export function MessagesPanel({canSend,canBroadcast=false,inbox,encryption:share
     {securityOpen&&<WindowSurface title="Message settings" onBack={()=>setSecurityOpen(false)} disabled={encryption.busy}><div className="w-full max-w-xl overflow-auto p-4">
       <section className="mb-4 flex items-start justify-between gap-4 border-b pb-4"><div><h2 className="font-semibold">Read receipts</h2><p className="mt-1 max-w-md text-xs text-muted-foreground">When off, people who message you will not see when you have read their messages. Your own unread counts still work.</p></div><label className="flex shrink-0 items-center gap-2 text-sm font-medium"><input aria-label="Send read receipts" type="checkbox" checked={readReceiptsEnabled} disabled={savingReceiptPreference} onChange={event=>void chooseReadReceipts(event.target.checked)} className="size-4 accent-blue-600"/>{readReceiptsEnabled?"On":"Off"}</label></section>
       <section className="mb-4 border-b pb-4"><h2 className="font-semibold">Message appearance</h2><p className="my-2 text-xs text-muted-foreground">Choose a conversation background for this account on this device.</p><div role="group" aria-label="Message background" className="flex flex-wrap gap-2">{(Object.entries(messageBackgrounds) as [MessageBackground,typeof messageBackgrounds[MessageBackground]][]).map(([key,theme])=><Button key={key} type="button" variant="outline" size="sm" aria-label={`${theme.label} message background`} aria-pressed={messageBackground===key} onClick={()=>chooseMessageBackground(key)} className={messageBackground===key?"border-orange-500 ring-2 ring-orange-200":""}><span aria-hidden="true" className={`size-4 rounded-full border border-black/10 ${theme.color}`}/>{theme.label}</Button>)}</div></section>
+      <section className="mb-4 border-b pb-4"><h2 className="font-semibold">Your message alignment</h2><p className="my-2 text-xs text-muted-foreground">Your sent messages use about half the conversation width. Choose which side they appear on.</p><div role="group" aria-label="Your message alignment" className="flex gap-2"><Button type="button" variant="outline" size="sm" aria-pressed={ownMessageAlignment==="left"} disabled={savingAlignment} onClick={()=>void chooseOwnMessageAlignment("left")} className={ownMessageAlignment==="left"?"border-orange-500 ring-2 ring-orange-200":""}>Left</Button><Button type="button" variant="outline" size="sm" aria-pressed={ownMessageAlignment==="right"} disabled={savingAlignment} onClick={()=>void chooseOwnMessageAlignment("right")} className={ownMessageAlignment==="right"?"border-orange-500 ring-2 ring-orange-200":""}>Right</Button></div></section>
       {state.admin?<div className="flex flex-wrap items-center justify-between gap-2"><p className="flex items-center gap-2 text-sm font-medium"><LockKeyhole className="size-4 text-primary"/>{encryption.unlocked?"End-to-end encryption connected":"Secure messaging is connecting"}</p></div>:<p className="text-sm">{encryption.unlocked?"Messages connected":"Messages connecting"}</p>}
       {encryption.error&&<p role="alert" className="mt-2 text-sm text-destructive">{state.admin?encryption.error:"Message connection unavailable. Retry or contact an administrator."}</p>}
       {state.admin&&<><p className="mt-3 text-xs text-muted-foreground">Device identities connect automatically. History sync requires an existing trusted device or configured organization recovery.</p><Button variant="ghost" size="sm" className="mt-2" onClick={()=>setIdentitiesOpen(true)}><LockKeyhole className="size-3"/>Device identities</Button></>}
@@ -423,9 +438,11 @@ export function MessagesPanel({canSend,canBroadcast=false,inbox,encryption:share
           const peer=messagePeer(message)
           const label=messageLabel(message)
           const dayHeading=messageDayHeading(message.created_at),previousHeading=index?messageDayHeading(threadMessages[index-1].created_at):null
-          return <Fragment key={message.id}>{dayHeading!==previousHeading&&<div role="separator" aria-label={dayHeading} className="sticky top-1 z-[1] mx-auto w-fit rounded-full border border-orange-200 bg-white/95 px-3 py-1 text-xs font-medium text-neutral-700 shadow-sm">{dayHeading}</div>}<article id={`message-${message.id}`} className={`flex w-full items-end gap-2 ${own?"justify-end":"justify-start"}`}>
+          const previous=threadMessages[index-1]
+          const senderChanged=!!previous&&previous.sender_email.toLowerCase()!==message.sender_email.toLowerCase()
+          return <Fragment key={message.id}>{dayHeading!==previousHeading&&<div role="separator" aria-label={dayHeading} className="sticky top-1 z-[1] mx-auto w-fit rounded-full border border-orange-200 bg-white/95 px-3 py-1 text-xs font-medium text-neutral-700 shadow-sm">{dayHeading}</div>}<article id={`message-${message.id}`} className={`flex w-full items-end gap-2 ${senderChanged?"mt-5":""} ${own?(ownMessageAlignment==="right"?"justify-end":"justify-start"):"justify-start"}`}>
             {!own&&peer&&<ParticipantAvatar email={peer} name={label}/>}
-            <div className={`w-fit min-w-0 max-w-[25vw] rounded-lg border px-3 py-2 shadow-sm ${own?"border-green-300 bg-green-100":"border-orange-300 bg-orange-100"}`}>
+            <div className={`w-[85%] min-w-0 rounded-lg border px-3 py-2 shadow-sm sm:w-[min(50%,42rem)] ${own?"border-green-300 bg-green-100":"border-orange-300 bg-orange-100"}`}>
               <button type="button" className="block w-full text-left [overflow-wrap:anywhere]" onClick={()=>{setSelectedId(message.id);void read(message)}}>
                 <span className="block text-xs font-semibold text-neutral-700">{label}</span>
                 {message.priority==="high"&&<span className="mt-1 block text-xs font-bold text-red-700">High priority</span>}
@@ -453,6 +470,7 @@ export function MessagesPanel({canSend,canBroadcast=false,inbox,encryption:share
       {encryption.error&&<p role="alert" className="text-sm text-destructive">{state.admin?encryption.error:"Message connection unavailable. Retry or contact an administrator."}</p>}
       {rosterLoading&&<p role="status" className="text-sm text-muted-foreground">Loading recipients...</p>}
       {missingRecipients.length>0&&<p role="status" className="text-sm text-muted-foreground">These recipients need to sign in once so their devices connect automatically: {missingRecipients.join(", ")}.</p>}
+      {canBroadcast&&<p className="text-xs text-muted-foreground">Managers and administrators can send announcements. Individual messages also require messaging access.</p>}
       {canBroadcast?<label className="text-sm">Audience<select value={audience} disabled={busy} onChange={event=>{setAudience(event.target.value as MessageAudience);setRecipient("")}} className="mt-1 block w-full rounded-md border border-border bg-background p-2"><option value="workforce">Employees and contractors announcement</option><option value="everyone">Everyone announcement</option><option value="contractor">All contractors announcement</option><option value="employee">All employees announcement</option><option value="manager">All managers announcement</option><option value="admin">All admins announcement</option><option value="individual">Individual message</option></select></label>:<p className="text-sm font-medium text-slate-800">Individual message</p>}
       {audience==="individual"&&<label className="text-sm">Recipient<select value={recipient} disabled={busy} onChange={event=>setRecipient(event.target.value)} className="mt-1 block w-full rounded-md border border-border bg-background p-2"><option value="">Choose a person</option>{users.map(user=><option key={user.email} value={user.email}>{user.displayName||"Unknown sender"}</option>)}</select></label>}
       <label className="text-sm">Message<textarea ref={replyInput} value={body} disabled={busy} maxLength={4000} onChange={event=>setBody(event.target.value)} className="mt-1 min-h-28 w-full rounded-md border border-border bg-background p-2"/></label>

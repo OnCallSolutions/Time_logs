@@ -29,6 +29,14 @@ it("lets a user turn off read receipts from message settings",async()=>{
   expect(toggle).not.toBeChecked()
   expect(screen.getByText(/Your own unread counts still work/)).toBeVisible()
 })
+it("lets patrons choose which side their sent messages use",async()=>{
+  const fetchMock=requests();render(<MessagesPanel canSend inbox={inbox()}/>);const user=userEvent.setup()
+  await user.click(screen.getByRole("button",{name:"Message settings"}))
+  const left=screen.getByRole("button",{name:"Left"}),right=screen.getByRole("button",{name:"Right"})
+  expect(right).toHaveAttribute("aria-pressed","true")
+  await user.click(left)
+  await waitFor(()=>expect(fetchMock).toHaveBeenCalledWith("/tanovo-time/api/messages",expect.objectContaining({method:"PATCH",body:JSON.stringify({action:"own_message_alignment",alignment:"left"})})))
+})
 it("shows sender-first inbox cards and opens a chronological thread with navigation",async()=>{
   requests();render(<MessagesPanel canSend inbox={inbox()}/>);const user=userEvent.setup()
   expect(screen.getByRole("button",{name:/Taylor/})).toBeVisible()

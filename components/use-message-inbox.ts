@@ -19,6 +19,7 @@ export function useMessageInbox(enabled = true) {
   const [email, setEmail] = useState("")
   const [admin, setAdmin] = useState(false)
   const [readReceiptsEnabled,setReadReceiptsEnabled]=useState(true)
+  const [ownMessageAlignment,setOwnMessageAlignment]=useState<"left"|"right">("right")
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [revision, setRevision] = useState(0)
@@ -34,7 +35,7 @@ export function useMessageInbox(enabled = true) {
   const newest = useRef(0)
   const refresh = useCallback(() => setRevision(value => value + 1), [])
   useEffect(() => {
-    if (!enabled) { setMessages([]);setOlder([]);setBefore(null);account.current="";hasOlder.current=false;setEmail("");setAdmin(false);setReadReceiptsEnabled(true);setError(null);setNotification(null);setLoading(false);seen.current=null;newest.current=0;return }
+    if (!enabled) { setMessages([]);setOlder([]);setBefore(null);account.current="";hasOlder.current=false;setEmail("");setAdmin(false);setReadReceiptsEnabled(true);setOwnMessageAlignment("right");setError(null);setNotification(null);setLoading(false);seen.current=null;newest.current=0;return }
     const controller = new AbortController()
     let fetching = false
     /**
@@ -70,7 +71,7 @@ export function useMessageInbox(enabled = true) {
         setNotification(previous=>previous&&next.some(message=>message.id===previous.id&&!message.read_at&&!message.deleted_at)?previous:null)
         seen.current = new Set([...(seen.current ?? []),...next.map(message => message.id)])
         newest.current=Math.max(newest.current,...next.map(message=>Date.parse(message.created_at)))
-        setEmail(identity);setAdmin(data.role === "admin");setReadReceiptsEnabled(data.readReceiptsEnabled!==false);setMessages(previous=>JSON.stringify(previous)===JSON.stringify(next)?previous:next);setError(null)
+        setEmail(identity);setAdmin(data.role === "admin");setReadReceiptsEnabled(data.readReceiptsEnabled!==false);setOwnMessageAlignment(data.ownMessageAlignment==="left"?"left":"right");setMessages(previous=>JSON.stringify(previous)===JSON.stringify(next)?previous:next);setError(null)
       } catch (error) { if (!controller.signal.aborted) setError(error instanceof Error ? error.message : "Inbox unavailable.") }
       finally { if (!controller.signal.aborted) setLoading(false);fetching=false }
     }
@@ -94,6 +95,6 @@ export function useMessageInbox(enabled = true) {
   }
   const combined=useMemo(()=>[...new Map([...older,...messages].map(message=>[message.id,message])).values()].sort((a,b)=>Date.parse(b.created_at)-Date.parse(a.created_at)),[older,messages])
   const unread = messages.filter(message => !message.deleted_at && message.sender_email.toLowerCase() !== email && !message.read_at).length
-  return {messages:enabled?combined:EMPTY_MESSAGES,email,admin,readReceiptsEnabled,error,loading,unread,notification,dismissNotification:()=>setNotification(null),refresh,loadOlder,hasMore:!!before,loadingOlder}
+  return {messages:enabled?combined:EMPTY_MESSAGES,email,admin,readReceiptsEnabled,ownMessageAlignment,error,loading,unread,notification,dismissNotification:()=>setNotification(null),refresh,loadOlder,hasMore:!!before,loadingOlder}
 }
-export type MessageInbox = Omit<ReturnType<typeof useMessageInbox>,"loadOlder"|"hasMore"|"loadingOlder"|"readReceiptsEnabled"> & Partial<Pick<ReturnType<typeof useMessageInbox>,"loadOlder"|"hasMore"|"loadingOlder"|"readReceiptsEnabled">>
+export type MessageInbox = Omit<ReturnType<typeof useMessageInbox>,"loadOlder"|"hasMore"|"loadingOlder"|"readReceiptsEnabled"|"ownMessageAlignment"> & Partial<Pick<ReturnType<typeof useMessageInbox>,"loadOlder"|"hasMore"|"loadingOlder"|"readReceiptsEnabled"|"ownMessageAlignment">>

@@ -139,6 +139,7 @@ export type AuditAction =
   | "message_deleted_for_me"
   | "message_unsent_for_everyone"
   | "message_read_receipts_updated"
+  | "message_alignment_updated"
   | "message_encryption_initialized"
   | "entry_created"
   | "project_created"

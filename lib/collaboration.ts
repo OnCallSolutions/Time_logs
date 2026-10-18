@@ -61,6 +61,7 @@ async function initializeMessages(): Promise<void> {
     account_email TEXT PRIMARY KEY, read_receipts_enabled BOOLEAN NOT NULL DEFAULT TRUE,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )`
+  await sql`ALTER TABLE app_message_preferences ADD COLUMN IF NOT EXISTS own_message_alignment TEXT NOT NULL DEFAULT 'right' CHECK(own_message_alignment IN ('left','right'))`
   await sql`CREATE TABLE IF NOT EXISTS app_message_hidden_for (
     message_id UUID NOT NULL REFERENCES app_messages(id) ON DELETE CASCADE,
     account_email TEXT NOT NULL, hidden_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -112,10 +113,10 @@ export async function listMessages(email:string,receivesBroadcast:boolean) {
 }
 
 /** @param email - Authenticated account identity. @returns Its persistent messaging privacy preference. */
-export async function getMessagePreferences(email:string):Promise<{readReceiptsEnabled:boolean}>{
+export async function getMessagePreferences(email:string):Promise<{readReceiptsEnabled:boolean;ownMessageAlignment:"left"|"right"}>{
   await ensureMessages()
-  const rows=await sql`SELECT read_receipts_enabled FROM app_message_preferences WHERE account_email=${email.toLowerCase()} LIMIT 1`
-  return {readReceiptsEnabled:rows[0]?.read_receipts_enabled!==false}
+  const rows=await sql`SELECT read_receipts_enabled,own_message_alignment FROM app_message_preferences WHERE account_email=${email.toLowerCase()} LIMIT 1`
+  return {readReceiptsEnabled:rows[0]?.read_receipts_enabled!==false,ownMessageAlignment:rows[0]?.own_message_alignment==="left"?"left":"right"}
 }
 
 /** @param email - Authenticated account identity. @param enabled - Whether opened messages disclose read receipts. @returns Promise<void> after preference persistence. */
@@ -123,6 +124,13 @@ export async function setReadReceiptsEnabled(email:string,enabled:boolean):Promi
   await ensureMessages()
   await sql`INSERT INTO app_message_preferences(account_email,read_receipts_enabled) VALUES(${email.toLowerCase()},${enabled})
     ON CONFLICT(account_email) DO UPDATE SET read_receipts_enabled=EXCLUDED.read_receipts_enabled,updated_at=NOW()`
+}
+
+/** @param email - Authenticated account identity. @param alignment - Preferred side for the account's sent messages. @returns Promise<void> after preference persistence. */
+export async function setOwnMessageAlignment(email:string,alignment:"left"|"right"):Promise<void>{
+  await ensureMessages()
+  await sql`INSERT INTO app_message_preferences(account_email,own_message_alignment) VALUES(${email.toLowerCase()},${alignment})
+    ON CONFLICT(account_email) DO UPDATE SET own_message_alignment=EXCLUDED.own_message_alignment,updated_at=NOW()`
 }
 
 /**

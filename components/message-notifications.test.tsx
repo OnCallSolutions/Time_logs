@@ -17,24 +17,27 @@ const inbox={
   messages:[
     {id:"1",sender_email:"manager@example.com",sender_name:"Morgan Manager",recipient_email:"admin@example.com",body:"private body",created_at:"2026-10-16T13:00:00.000Z",read_at:null,deleted_at:null,priority:"high" as const},
     {id:"2",sender_email:"employee@example.com",sender_name:"Avery Employee",recipient_email:"admin@example.com",body:"another private body",created_at:"2026-10-16T12:00:00.000Z",read_at:null,deleted_at:null},
+    {id:"3",sender_email:"manager@example.com",sender_name:"Morgan Manager",recipient_email:null,body:"[Encrypted message]",created_at:"2026-10-16T11:00:00.000Z",read_at:null,deleted_at:null},
   ],
 }
 
 beforeEach(()=>{vi.clearAllMocks();vi.stubGlobal("fetch",vi.fn().mockImplementation(async(_input:string,init?:RequestInit)=>({ok:true,json:async()=>init?.method==="PATCH"?{ok:true}:{reminders:[{id:"deadline-1",title:"Timesheet deadline approaching",body:"October 2026 is due soon.",sender_label:"Business Accounts",created_at:"2026-10-16T13:00:00.000Z",read_at:null}]}})))})
 
-it("keeps deadline notifications separate from casual messages and marks only reminders read",async()=>{
+it("combines unread messages, announcements and deadlines without revealing message content",async()=>{
   const user=userEvent.setup()
   render(<MessageNotifications inbox={inbox} onOpen={onOpen}/> )
-  await user.click(await screen.findByRole("button",{name:"Notifications, 1 unread"}))
+  await user.click(await screen.findByRole("button",{name:"Notifications, 4 unread"}))
   const center=screen.getByRole("dialog",{name:"Notification center"})
   expect(within(center).getByText(/October 2026 is due soon/)).toBeVisible()
-  expect(within(center).queryByText(/Morgan Manager|Avery Employee/)).not.toBeInTheDocument()
+  expect(within(center).getAllByText("from Morgan Manager")).toHaveLength(2)
+  expect(within(center).getByText("from Avery Employee")).toBeVisible()
+  expect(within(center).getByText("Organization-wide update")).toBeVisible()
   expect(center).not.toHaveTextContent("private body")
   await user.click(within(center).getByRole("button",{name:"Mark all as read"}))
   expect(fetch).toHaveBeenCalledWith("/tanovo-time/api/timesheet-period-reminders",expect.objectContaining({method:"PATCH",body:JSON.stringify({ids:["deadline-1"]})}))
-  expect(fetch).not.toHaveBeenCalledWith("/tanovo-time/api/messages",expect.anything())
-  expect(dismissNotification).not.toHaveBeenCalled()
-  expect(refresh).not.toHaveBeenCalled()
+  expect(fetch).toHaveBeenCalledWith("/tanovo-time/api/messages",expect.objectContaining({method:"PATCH",body:JSON.stringify({action:"read",ids:["1","2","3"]})}))
+  expect(dismissNotification).toHaveBeenCalledOnce()
+  expect(refresh).toHaveBeenCalledOnce()
 })
 
 it("activates sound only after the preference click and plays a tone for a new alert",async()=>{
@@ -57,7 +60,7 @@ it("activates sound only after the preference click and plays a tone for a new a
   localStorage.removeItem("message-alerts:admin@example.com")
   const view=render(<MessageNotifications inbox={inbox} onOpen={onOpen}/> )
 
-  await user.click(await screen.findByRole("button",{name:"Notifications, 1 unread"}))
+  await user.click(await screen.findByRole("button",{name:"Notifications, 4 unread"}))
   const center=screen.getByRole("dialog",{name:"Notification center"})
   await user.click(within(center).getByRole("button",{name:"Test sound"}))
   await waitFor(()=>expect(oscillator.start).toHaveBeenCalledOnce())
