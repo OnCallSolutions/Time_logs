@@ -18,7 +18,9 @@ it("gives admins the full timesheet controls while preserving payout authorizati
 })
 it("allows account managers to control periods by default but not managers",()=>{
   expect(resolvePermissions("account_manager").manage_timesheet_periods).toBe(true)
+  expect(resolvePermissions("account_manager").manage_projects).toBe(true)
   expect(resolvePermissions("account_manager",{manage_timesheet_periods:false}).manage_timesheet_periods).toBe(false)
+  expect(resolvePermissions("account_manager",{manage_projects:false}).manage_projects).toBe(false)
   expect(resolvePermissions("manager").manage_timesheet_periods).toBe(false)
 })
 it("gives account managers read-only access to all timesheets by default and allows admin revocation",()=>{
@@ -31,6 +33,10 @@ it("enables account-manager operational review by default and lets admins revoke
   expect(resolvePermissions("account_manager").review_entries).toBe(true)
   expect(resolvePermissions("account_manager",{review_entries:false}).review_entries).toBe(false)
   expect(resolvePermissions("account_manager")).toMatchObject({create_entries:false,edit_entries:false,delete_entries:false,submit_entries:false})
+})
+it("gives account managers final-approval access but keeps AI and payout rights separate",()=>{
+  expect(resolvePermissions("account_manager")).toMatchObject({view_accounts:true,review_accounts:true,ai_accounts:false,authorize_payouts:false})
+  expect(resolvePermissions("account_manager",{view_accounts:false,review_accounts:false})).toMatchObject({view_accounts:false,review_accounts:false})
 })
 it("keeps project management with managers while making contractor project creation explicitly delegable",()=>{
   expect(resolvePermissions("manager")).toMatchObject({manage_projects:true,create_projects:true})

@@ -60,7 +60,7 @@ it("does not hand off approved time for an account without a registered company 
   expect(createHandoffs).not.toHaveBeenCalled()
 })
 it("requires separate account triage rights even when queue visibility exists",async()=>{
-  vi.mocked(getEffectivePermissions).mockResolvedValue({role:"account_manager",permissions:resolvePermissions("account_manager",{view_accounts:true})})
+  vi.mocked(getEffectivePermissions).mockResolvedValue({role:"account_manager",permissions:resolvePermissions("account_manager",{view_accounts:true,review_accounts:false})})
   expect((await PATCH(new Request("http://localhost/api/accounts",{method:"PATCH",body:JSON.stringify({id,state:"needs_information",note:"Check evidence",version:0})}))).status).toBe(403)
   expect(reviewHandoff).not.toHaveBeenCalled()
 })

@@ -393,3 +393,28 @@ body[data-session-checking='true'] > [data-session-guard='true'] {
   visibility: visible !important;
   z-index: 200;
 }
+
+.approved-timesheets-print { display: none; }
+@media print {
+  body * { visibility: hidden !important; }
+  .approved-timesheets-print,
+  .approved-timesheets-print * { visibility: visible !important; }
+  .approved-timesheets-print {
+    display: block !important;
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    padding: 0.5in;
+    color: #111827;
+    background: white;
+    font: 10pt/1.35 Arial, sans-serif;
+  }
+  .approved-timesheets-print h1 { margin: 0 0 0.15in; font-size: 18pt; }
+  .approved-timesheets-print p { margin: 0.05in 0; }
+  .approved-timesheets-print table { width: 100%; margin-top: 0.2in; border-collapse: collapse; }
+  .approved-timesheets-print th,
+  .approved-timesheets-print td { padding: 0.07in; border: 1px solid #cbd5e1; text-align: left; vertical-align: top; }
+  .approved-timesheets-print th { background: #e0f2fe !important; print-color-adjust: exact; }
+  .approved-timesheets-print tr { break-inside: avoid; }
+  .approved-timesheets-print .print-generated { margin-top: 0.2in; color: #475569; font-size: 8pt; }
+}

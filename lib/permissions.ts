@@ -48,9 +48,9 @@ export const delegablePermissions: readonly Permission[] = ["create_entries","cr
 export function resolvePermissions(role: UserRole | null, overrides: PermissionOverrides = {}): Permissions {
   const elevated = role === "admin" || role === "manager"
   const personal = role === "employee" || role === "contractor"
-  const defaults: Permissions = {create_entries:!!role,create_projects:elevated,manage_projects:elevated,edit_entries:!!role,delete_entries:!!role,
+  const defaults: Permissions = {create_entries:!!role,create_projects:elevated,manage_projects:elevated||role==="account_manager",edit_entries:!!role,delete_entries:!!role,
     submit_entries:personal||role==="manager"||role==="admin",review_entries:elevated||role==="account_manager",view_team:elevated,view_all_timesheets:role==="admin"||role==="account_manager",view_reports:elevated,export_entries:elevated||role==="account_manager",ai_review:elevated,
-    delegate_permissions:elevated,send_messages:elevated,send_to_accounts:elevated,view_accounts:role==="admin",review_accounts:role==="admin",ai_accounts:role==="admin",review_manager_entries:false,view_manager_entries:role==="account_manager",view_other_manager_entries:false,review_other_manager_entries:false,request_review_help:elevated,accept_review_requests:role==="manager",authorize_payouts:false,manage_timesheet_periods:role==="admin"||role==="account_manager",view_personal_reports:!!role}
+    delegate_permissions:elevated,send_messages:elevated,send_to_accounts:elevated,view_accounts:role==="admin"||role==="account_manager",review_accounts:role==="admin"||role==="account_manager",ai_accounts:role==="admin",review_manager_entries:false,view_manager_entries:role==="account_manager",view_other_manager_entries:false,review_other_manager_entries:false,request_review_help:elevated,accept_review_requests:role==="manager",authorize_payouts:false,manage_timesheet_periods:role==="admin"||role==="account_manager",view_personal_reports:!!role}
   for (const key of Object.keys(permissionLabels) as Permission[]) {
     if (role && typeof overrides[key] === "boolean") defaults[key] = overrides[key]!
   }

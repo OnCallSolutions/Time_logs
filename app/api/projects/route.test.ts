@@ -26,6 +26,23 @@ it("lets managers create catalog projects",async()=>{
   expect(createTimeProject).toHaveBeenCalled()
 })
 
+it("lets account managers manage projects by default",async()=>{
+  vi.mocked(auth).mockResolvedValue({user:{email:"accounts@example.com"}} as never)
+  vi.mocked(getEffectivePermissions).mockResolvedValue({role:"account_manager",permissions:resolvePermissions("account_manager")} as never)
+  vi.mocked(createTimeProject).mockResolvedValue({id:"10000000-0000-4000-8000-000000000001",name:"Period Project",description:"",active:true,createdBy:"accounts@example.com",createdAt:"2026-01-01T00:00:00.000Z",updatedAt:"2026-01-01T00:00:00.000Z"})
+  const response=await POST(new Request("http://localhost/api/projects",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({name:"Period Project"})}))
+  expect(response.status).toBe(201)
+  expect(createTimeProject).toHaveBeenCalled()
+})
+
+it("respects admin revocation of account-manager project management",async()=>{
+  vi.mocked(auth).mockResolvedValue({user:{email:"accounts@example.com"}} as never)
+  vi.mocked(getEffectivePermissions).mockResolvedValue({role:"account_manager",permissions:resolvePermissions("account_manager",{manage_projects:false})} as never)
+  const response=await POST(new Request("http://localhost/api/projects",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({name:"Denied Project"})}))
+  expect(response.status).toBe(403)
+  expect(createTimeProject).not.toHaveBeenCalled()
+})
+
 it("denies contractor project creation until a manager grants the dedicated right",async()=>{
   vi.mocked(auth).mockResolvedValue({user:{email:"contractor@example.com"}} as never)
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"contractor",permissions:resolvePermissions("contractor")} as never)

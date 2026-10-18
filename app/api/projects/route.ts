@@ -18,7 +18,7 @@ export async function GET(){
   try{
     const access=await currentAccess()
     if(!access)return Response.json({error:"Unauthorized."},{status:401})
-    const manager=(access.role==="admin"||access.role==="manager")&&access.permissions.manage_projects
+    const manager=(access.role==="admin"||access.role==="manager"||access.role==="account_manager")&&access.permissions.manage_projects
     const projects=await listTimeProjects(manager,manager?undefined:access.email)
     const assignments=manager?await listTimeProjectAssignments():[]
     const patrons=manager?(await actorRoster()).filter(user=>user.accessStatus==="active"&&(user.role==="employee"||user.role==="contractor")).map(user=>({email:user.email,displayName:user.displayName,role:user.role})):[]
@@ -32,7 +32,7 @@ export async function POST(req:Request){
   try{
     const access=await currentAccess()
     if(!access)return Response.json({error:"Unauthorized."},{status:401})
-    const mayCreate=(access.role==="admin"||access.role==="manager")&&access.permissions.manage_projects||((access.role==="contractor"||access.role==="employee")&&access.permissions.create_projects)
+    const mayCreate=(access.role==="admin"||access.role==="manager"||access.role==="account_manager")&&access.permissions.manage_projects||((access.role==="contractor"||access.role==="employee")&&access.permissions.create_projects)
     if(!mayCreate)return Response.json({error:"A manager must grant you project-creation permission first."},{status:403})
     const body=z.object({name:z.string().trim().min(1).max(120),description:z.string().trim().max(500).default("")}).strict().parse(await req.json())
     const project=await createTimeProject(body,access.email,getAuditContext(req))
@@ -48,7 +48,7 @@ export async function PATCH(req:Request){
   try{
     const access=await currentAccess()
     if(!access)return Response.json({error:"Unauthorized."},{status:401})
-    if(!access.permissions.manage_projects)return Response.json({error:"Only a manager or administrator can assign or archive projects."},{status:403})
+    if(!["admin","manager","account_manager"].includes(access.role)||!access.permissions.manage_projects)return Response.json({error:"Project management rights are required to assign or archive projects."},{status:403})
     const body=z.discriminatedUnion("action",[
       z.object({action:z.literal("assignment"),projectId:z.string().uuid(),email:z.string().email(),assigned:z.boolean()}),
       z.object({action:z.literal("status"),projectId:z.string().uuid(),active:z.boolean()}),
