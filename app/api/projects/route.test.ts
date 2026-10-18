@@ -57,7 +57,16 @@ it("allows project creation after manager-granted create_projects permission",as
   vi.mocked(createTimeProject).mockResolvedValue({id:"10000000-0000-4000-8000-000000000001",name:"New Project",description:"",active:true,createdBy:"contractor@example.com",createdAt:"2026-01-01T00:00:00.000Z",updatedAt:"2026-01-01T00:00:00.000Z"})
   const response=await POST(new Request("http://localhost/api/projects",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({name:"New Project"})}))
   expect(response.status).toBe(201)
-  expect(createTimeProject).toHaveBeenCalled()
+  expect(createTimeProject).toHaveBeenCalledWith({name:"New Project",description:""},"contractor@example.com",expect.anything(),true)
+})
+
+it("allows an authorized employee to create a project assigned to them",async()=>{
+  vi.mocked(auth).mockResolvedValue({user:{email:"employee@example.com"}} as never)
+  vi.mocked(getEffectivePermissions).mockResolvedValue({role:"employee",permissions:resolvePermissions("employee",{create_projects:true})} as never)
+  vi.mocked(createTimeProject).mockResolvedValue({id:"10000000-0000-4000-8000-000000000001",name:"New Project",description:"",active:true,createdBy:"employee@example.com",createdAt:"2026-01-01T00:00:00.000Z",updatedAt:"2026-01-01T00:00:00.000Z"})
+  const response=await POST(new Request("http://localhost/api/projects",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({name:"New Project"})}))
+  expect(response.status).toBe(201)
+  expect(createTimeProject).toHaveBeenCalledWith({name:"New Project",description:""},"employee@example.com",expect.anything(),true)
 })
 
 it("allows managers to assign projects only to active employees or contractors",async()=>{

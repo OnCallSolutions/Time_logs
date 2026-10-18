@@ -20,10 +20,11 @@ beforeEach(() => {
 it("keeps company identifiers off the header and organizes copyable details in the profile menu", async () => {
   render(<AccountProfile email="maurice@example.com" fallbackName="Maurice Baraza" role="Administrator" />)
 
-  await screen.findByRole("button", { name: "Edit profile" })
+  await screen.findByRole("button", { name: "Open profile" })
+  expect(screen.queryByRole("button", { name: "Edit profile" })).not.toBeInTheDocument()
   expect(screen.queryByText("TN-000009")).not.toBeInTheDocument()
 
-  fireEvent.click(screen.getByRole("button", { name: "Edit profile" }))
+  fireEvent.click(screen.getByRole("button", { name: "Open profile" }))
   expect(await screen.findByText("TN-000009")).toBeVisible()
   expect(screen.getByText("000009")).toBeVisible()
 

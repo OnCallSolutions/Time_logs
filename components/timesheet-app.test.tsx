@@ -301,6 +301,8 @@ describe("TimesheetApp admin directory", () => {
     const roster = screen.getByRole("region", { name: "People and access" })
     expect(within(roster).getByRole("heading", { name: "People and access" })).toBeVisible()
     expect(roster).toHaveTextContent("Resolve identity, access, and account health issues")
+    expect(within(roster).getByRole("table")).not.toBeVisible()
+    await user.click(within(roster).getByText("Patron directory"))
     expect(within(roster).getAllByRole("row")).toHaveLength(4)
     await user.selectOptions(within(roster).getByLabelText("Filter patrons by role"), "manager")
     expect(within(roster).getAllByRole("row")).toHaveLength(2)

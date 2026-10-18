@@ -33,6 +33,24 @@ it("denies employee broadcast sending",async()=>{
   expect((await POST(new Request("http://localhost/tanovo-time/api/messages",{method:"POST",body:JSON.stringify({recipient:null,body:"Announcement"})}))).status).toBe(403)
   expect(sendMessage).not.toHaveBeenCalled()
 })
+it("allows a contractor with messaging rights to send an encrypted individual message",async()=>{
+  vi.mocked(getEffectivePermissions).mockResolvedValue({role:"contractor",permissions:resolvePermissions("contractor")})
+  vi.mocked(actorRoster).mockResolvedValue([{email:"recipient@example.com",role:"employee",accessStatus:"active",displayName:"Recipient"}] as never)
+  vi.mocked(sendMessage).mockResolvedValue(messageId)
+  const validate=vi.spyOn(envelopes,"validateEnvelope").mockResolvedValue(true)
+  const encrypted={version:1,nonce:"AAAAAAAAAAAAAAAA",ciphertext:"A".repeat(24),sender:"employee@example.com",author:"employee@example.com",recipient:"recipient@example.com",token:messageId,signature:"AAAA",keys:{}}
+  try {
+    const response=await POST(request("POST",{recipient:"recipient@example.com",audience:"individual",encrypted}))
+    expect(response.status).toBe(201)
+    expect(sendMessage).toHaveBeenCalledWith("employee@example.com","recipient@example.com","[Encrypted message]",encrypted)
+  } finally {validate.mockRestore()}
+})
+it("does not allow a contractor to send a group announcement even with direct-message rights",async()=>{
+  vi.mocked(getEffectivePermissions).mockResolvedValue({role:"contractor",permissions:resolvePermissions("contractor")})
+  const encrypted={version:1,nonce:"AAAAAAAAAAAAAAAA",ciphertext:"A".repeat(24),sender:"employee@example.com",author:"employee@example.com",recipient:null,token:messageId,signature:"AAAA",keys:{}}
+  expect((await POST(request("POST",{recipient:null,audience:"everyone",encrypted}))).status).toBe(403)
+  expect(sendMessage).not.toHaveBeenCalled()
+})
 it("rejects a private message to an ineligible recipient",async()=>{
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"manager",permissions:resolvePermissions("manager")})
   vi.mocked(actorRoster).mockResolvedValue([])
