@@ -460,7 +460,7 @@ describe("TimesheetApp admin directory", () => {
     await user.click(within(periodWindow).getByRole("button",{name:"Add period"}))
     const periodEditor=await screen.findByRole("dialog",{name:"Add submission window"})
     expect(within(periodEditor).getByRole("button",{name:"Cancel"})).toBeVisible()
-    expect(within(periodEditor).getByRole("button",{name:"Create period"})).toBeVisible()
+    expect(within(periodEditor).getByRole("button",{name:"Save"})).toBeVisible()
     await user.click(within(periodEditor).getByRole("button",{name:"Cancel"}))
     await user.click(within(periodWindow).getByRole("button", { name: "Back" }))
     await user.click(within(periodIndex).getByRole("button", { name: /October 2026/ }))
@@ -521,8 +521,10 @@ describe("TimesheetApp admin directory", () => {
       expect(within(projects).getByText(`Period project ${index}`)).toBeInTheDocument()
       expect(within(managers).getByText(`Review manager ${index}`)).toBeInTheDocument()
     }
-    expect(projects.querySelector("ul")).toHaveClass("overflow-y-auto")
-    expect(managers.querySelector("ul")).toHaveClass("overflow-y-auto")
+    expect(period.querySelector("div.max-h-72")).toHaveClass("overflow-y-auto","overscroll-contain")
+    expect(within(period).getByRole("heading",{name:"Latest entries"}).parentElement).toHaveClass("sticky","top-0")
+    expect(projects.querySelector("ul")).toHaveClass("overflow-y-auto","overscroll-contain")
+    expect(managers.querySelector("ul")).toHaveClass("overflow-y-auto","overscroll-contain")
     expect(period.querySelector("div.overflow-auto")).toBeInTheDocument()
   })
 

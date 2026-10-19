@@ -4,12 +4,12 @@ vi.mock("@/lib/effective-permissions",()=>({getEffectivePermissions:vi.fn()}))
 vi.mock("@/lib/access",()=>({getEffectiveUserRole:vi.fn()}))
 vi.mock("@/lib/collaboration",()=>({actorRoster:vi.fn(async()=>[]),employeeRoster:vi.fn()}))
 vi.mock("@/lib/audit",()=>({getAuditContext:vi.fn(()=>({ipAddress:null,userAgent:"test",requestMethod:"POST",requestPath:"/api/projects",requestId:"test"}))}))
-vi.mock("@/lib/db",()=>({createTimeProject:vi.fn(),listTimeProjectAssignments:vi.fn().mockResolvedValue([]),listTimeProjects:vi.fn(),setTimeProjectActive:vi.fn(),setTimeProjectAssignment:vi.fn()}))
+vi.mock("@/lib/db",()=>({createTimeProject:vi.fn(),listTimeProjectAssignmentHistory:vi.fn().mockResolvedValue([]),listTimeProjectAssignments:vi.fn().mockResolvedValue([]),listTimeProjects:vi.fn(),setTimeProjectActive:vi.fn(),setTimeProjectAssignment:vi.fn()}))
 vi.mock("@/lib/submission-reviewer",()=>({resolvePatronManager:vi.fn(async()=>null)}))
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { actorRoster,employeeRoster } from "@/lib/collaboration"
-import { createTimeProject,listTimeProjectAssignments,listTimeProjects,setTimeProjectActive,setTimeProjectAssignment } from "@/lib/db"
+import { createTimeProject,listTimeProjectAssignmentHistory,listTimeProjectAssignments,listTimeProjects,setTimeProjectActive,setTimeProjectAssignment } from "@/lib/db"
 import { resolvePatronManager } from "@/lib/submission-reviewer"
 import { resolvePermissions } from "@/lib/permissions"
 import { GET,PATCH,POST } from "./route"
@@ -17,6 +17,7 @@ import { GET,PATCH,POST } from "./route"
 beforeEach(()=>{
   vi.resetAllMocks()
   vi.mocked(resolvePatronManager).mockResolvedValue(null)
+  vi.mocked(listTimeProjectAssignmentHistory).mockResolvedValue([])
   vi.mocked(auth).mockResolvedValue({user:{email:"manager@example.com"}} as never)
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"manager",permissions:resolvePermissions("manager")} as never)
   vi.mocked(listTimeProjects).mockResolvedValue([{id:"10000000-0000-4000-8000-000000000001",name:"Project A",description:"",active:true,createdBy:"manager@example.com",createdAt:"2026-01-01T00:00:00.000Z",updatedAt:"2026-01-01T00:00:00.000Z"}])
@@ -113,4 +114,23 @@ it("includes only project-assigned managers in the manager assignment directory"
     {email:"contractor@example.com",displayName:"Taylor",role:"contractor"},
     {email:"manager@example.com",displayName:"Morgan Manager",role:"manager"},
   ])
+})
+
+it("returns assignment history to project managers",async()=>{
+  const history=[{id:"event-1",projectId:"project-1",projectName:"Project A",email:"worker@example.com",action:"assigned",actorEmail:"manager@example.com",occurredAt:"2026-10-18T15:00:00.000Z"}]
+  vi.mocked(listTimeProjectAssignments).mockResolvedValue([])
+  vi.mocked(listTimeProjectAssignmentHistory).mockResolvedValue(history as never)
+  const response=await GET()
+  expect(response.status).toBe(200)
+  expect((await response.json()).assignmentHistory).toEqual(history)
+  expect(listTimeProjectAssignmentHistory).toHaveBeenCalledOnce()
+})
+
+it("does not expose project assignment history to contractors",async()=>{
+  vi.mocked(auth).mockResolvedValue({user:{email:"contractor@example.com"}} as never)
+  vi.mocked(getEffectivePermissions).mockResolvedValue({role:"contractor",permissions:resolvePermissions("contractor")} as never)
+  const response=await GET()
+  expect(response.status).toBe(200)
+  expect((await response.json()).assignmentHistory).toEqual([])
+  expect(listTimeProjectAssignmentHistory).not.toHaveBeenCalled()
 })

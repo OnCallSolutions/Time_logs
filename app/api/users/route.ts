@@ -19,7 +19,7 @@ import {
   upsertManagedAccessUserWithAudit,
 } from "@/lib/db"
 import type { AccessStatus, UserRole } from "@/lib/types"
-import { permissionLabels, type PermissionOverrides } from "@/lib/permissions"
+import { permissionLabels, resolvePermissions, type PermissionOverrides } from "@/lib/permissions"
 import { LastAdministratorError } from "@/lib/admin-policy"
 import { accessChangeRequiresStepUp } from "@/lib/admin-policy"
 import { isAppSessionFresh } from "@/lib/app-sessions"
@@ -290,6 +290,11 @@ async function saveManagedAccess(req: Request) {
     if(!existing&&(body.role==="employee"||body.role==="contractor")&&!await getEffectiveUserRole(email))return Response.json({error:"Create the official identity using Add contractor/employee before changing account rights."},{status:400})
     const currentRole = existing?.role ?? await getEffectiveUserRole(email)
     const nextPermissions = body.permissions ?? existing?.permissions ?? {}
+    const previousRights = resolvePermissions(currentRole && (existing?.accessStatus ?? "active") === "active" ? currentRole : null, existing?.permissions ?? {})
+    const nextRights = resolvePermissions(body.accessStatus === "active" ? body.role : null, nextPermissions)
+    if (Object.keys(permissionLabels).some(permission => previousRights[permission as keyof typeof permissionLabels] !== nextRights[permission as keyof typeof permissionLabels]) && !body.note) {
+      return Response.json({ error: "Add an administrator note explaining this access-right change." }, { status: 400 })
+    }
     if (accessChangeRequiresStepUp(
       currentRole ? { role: currentRole, accessStatus: existing?.accessStatus ?? "active", permissions: existing?.permissions } : null,
       { role: body.role, accessStatus: body.accessStatus, permissions: nextPermissions },

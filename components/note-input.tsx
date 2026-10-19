@@ -1,11 +1,11 @@
 "use client"
 
 /**
- * Provides the note input surface that submits free-form text for AI parsing.
+ * Provides the note input surface for manually entering time or preparing an
+ * editable AI extraction before the user saves it.
  *
- * The input lets users paste informal notes, keyboard-submit them, or load a
- * sample. It owns transient parsing state and delegates persisted entry handling
- * to its parent through the onParsed callback.
+ * The input owns transient parsing and preview state. Persisted entries are
+ * delegated to the parent only after an explicit save.
  */
 import { useEffect, useState, type FormEvent } from "react"
 import { Loader2, Plus, Sparkles, Trash2, WandSparkles } from "lucide-react"
@@ -19,12 +19,11 @@ type EntryProject={id:string;name:string;description:string}
 /**
  * Captures messy time notes and sends them to the parser API.
  *
- * This component does not save entries directly. It only asks the parser API to
- * turn free-form text into structured entries, then hands those entries to the
- * parent so the main workspace can persist them.
+ * Parsing is preview-only; projects and entries are persisted only after the
+ * user confirms the preview.
  *
  * @param props - Component props.
- * @param props.onParsed - Callback invoked with parsed entries after extraction.
+ * @param props.onParsed - Callback invoked with entries after the user saves.
  * @returns The note entry form and parse controls.
  */
 export function NoteInput({
@@ -40,6 +39,7 @@ export function NoteInput({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [sampleCount, setSampleCount] = useState("random")
+  const [sampleLoaded,setSampleLoaded]=useState(false)
   const [sampleIsPreview, setSampleIsPreview] = useState(false)
   const [mode,setMode]=useState<"manual"|"notes">("manual")
   const [workDate,setWorkDate]=useState(()=>{const today=new Date();return `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}-${String(today.getDate()).padStart(2,"0")}`})
@@ -51,6 +51,9 @@ export function NoteInput({
   const [hours,setHours]=useState("")
   const [description,setDescription]=useState("")
   const [manualEntries,setManualEntries]=useState<ParsedEntry[]>([])
+  const [parsedEntries,setParsedEntries]=useState<ParsedEntry[]>([])
+  const [projectNamesFromNotes,setProjectNamesFromNotes]=useState<string[]>([])
+  const [aiProjectChoice,setAiProjectChoice]=useState("__notes__")
   const [periods,setPeriods]=useState<EntryPeriod[]>([])
   const [periodId,setPeriodId]=useState("")
   const [periodsLoading,setPeriodsLoading]=useState(!previewOnly)
@@ -87,17 +90,15 @@ export function NoteInput({
    * @returns Promise<void> after replacing notes or displaying a safe error.
    */
   async function loadSample(){
-    setMode("notes");setLoading(true);setError(null)
-    try{const response=await fetch(apiPath(`/api/samples?count=${sampleCount}`),{cache:"no-store"});const data=await response.json();if(!response.ok)throw new Error(data.error);setNotes(data.notes);setSampleIsPreview(!!data.previewOnly)}
+    setMode("notes");setLoading(true);setError(null);setProjectNamesFromNotes([])
+    try{const response=await fetch(apiPath(`/api/samples?count=${sampleCount}`),{cache:"no-store"});const data=await response.json();if(!response.ok)throw new Error(data.error);setNotes(data.notes);setSampleLoaded(true);setSampleIsPreview(!!data.previewOnly);setParsedEntries([])}
     catch(error){setError(error instanceof Error?error.message:"Samples unavailable.")}finally{setLoading(false)}
   }
 
   /**
-   * Parses the current notes and forwards any extracted entries to the parent.
+   * Parses the current notes into a reviewable preview without saving it.
    *
-   * The handler blocks duplicate submissions while loading, displays parser errors
-   * inline, and clears the text area only after the parent callback accepts the
-   * extracted entries.
+   * The handler blocks duplicate requests and displays parser errors inline.
    *
    * @returns A promise that resolves after parsing, saving, or error handling.
    */
@@ -118,29 +119,50 @@ export function NoteInput({
       if (entries.length === 0) {
         setError("No time entries were found in those notes.")
       } else {
-        const known=new Set(projects.map(item=>item.name.trim().toLocaleLowerCase()))
-        const missing=[...new Set(entries.map(entry=>entry.project.trim()).filter(name=>name&&!known.has(name.toLocaleLowerCase())))]
-        if(missing.length&&!canCreateProjects)throw new Error(`The AI found project${missing.length===1?"":"s"} not assigned to your account: ${missing.join(", ")}. Ask your manager to assign them.`)
-        for(const projectName of missing){
-          const createResponse=await fetch(apiPath("/api/projects"),{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({name:projectName})})
-          const createData=await createResponse.json()
-          if(!createResponse.ok)throw new Error(createResponse.status===409?`“${projectName}” already exists but is not assigned to you. Ask your manager to assign it.`:(createData.error??`Unable to create project “${projectName}”.`))
-          if(createData.project)known.add(String(createData.project.name).toLocaleLowerCase())
-        }
-        if(missing.length){
-          const refreshed=await fetch(apiPath("/api/projects"),{cache:"no-store"}),refreshedData=await refreshed.json()
-          if(!refreshed.ok)throw new Error(refreshedData.error??"The project was created, but the assigned project list could not be refreshed.")
-          const available:EntryProject[]=Array.isArray(refreshedData.projects)?refreshedData.projects:[]
-          setProjects(available);setProject(current=>available.some(item=>item.name===current)?current:available[0]?.name??"")
-        }
-        await onParsed(entries,selectedPeriod.id)
-        setNotes("")
+        setProjectNamesFromNotes(entries.map(entry=>entry.project))
+        setParsedEntries(entries.map(entry=>({...entry,project:aiProjectChoice==="__notes__"?entry.project:aiProjectChoice})))
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to parse notes.")
     } finally {
       setLoading(false)
     }
+  }
+
+  async function saveParsedEntries(){
+    if(!parsedEntries.length||loading||previewOnly||!selectedPeriod)return
+    setLoading(true);setError(null)
+    try{
+      if(parsedEntries.some(entry=>!entry.project.trim()||/^(general|unassigned|unknown)$/i.test(entry.project.trim())))throw new Error("Choose a project for every preview row before saving.")
+      const assignedNames=new Map(projects.map(item=>[item.name.trim().toLocaleLowerCase(),item.name.trim()]))
+      const entriesToSave=parsedEntries.map(entry=>{const name=entry.project.trim();return {...entry,project:assignedNames.get(name.toLocaleLowerCase())??name}})
+      const known=new Set(assignedNames.keys())
+      const projectNames=[...new Map(entriesToSave.map(entry=>[entry.project.toLocaleLowerCase(),entry.project])).values()]
+      const missing=projectNames.filter(name=>!known.has(name.toLocaleLowerCase()))
+      if(missing.length&&!canCreateProjects)throw new Error(`These projects are not assigned to your account: ${missing.join(", ")}. Ask your manager to assign them.`)
+      for(const projectName of missing){
+        const response=await fetch(apiPath("/api/projects"),{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({name:projectName})})
+        const data=await response.json()
+        if(!response.ok){
+          if(response.status===409){
+            const current=await fetch(apiPath("/api/projects"),{cache:"no-store"}),currentData=await current.json()
+            const assigned:EntryProject[]=Array.isArray(currentData.projects)?currentData.projects:[]
+            if(current.ok&&assigned.some(item=>item.name.trim().toLocaleLowerCase()===projectName.toLocaleLowerCase()))continue
+            throw new Error("“"+projectName+"” already exists but is not assigned to you. Ask your manager to assign it.")
+          }
+          throw new Error(data.error??("Unable to create project “"+projectName+"”."))
+        }
+      }
+      if(missing.length){
+        const response=await fetch(apiPath("/api/projects"),{cache:"no-store"}),data=await response.json()
+        if(!response.ok)throw new Error(data.error??"The project was created, but the assigned project list could not be refreshed.")
+        const available:EntryProject[]=Array.isArray(data.projects)?data.projects:[]
+        setProjects(available);setProject(current=>available.some(item=>item.name===current)?current:available[0]?.name??"")
+      }
+      await onParsed(entriesToSave,selectedPeriod.id)
+      setParsedEntries([]);setProjectNamesFromNotes([]);setNotes("");setSampleLoaded(false);setSampleIsPreview(false)
+    }catch(err){setError(err instanceof Error?err.message:"Failed to save extracted entries.")}
+    finally{setLoading(false)}
   }
 
   function addManualEntry(event:FormEvent<HTMLFormElement>){
@@ -241,11 +263,17 @@ export function NoteInput({
       <label htmlFor="notes" className="sr-only">
         Time worked notes
       </label>
+      {!previewOnly&&<label className="mb-2 grid max-w-xl gap-1 text-xs font-medium text-slate-700">Project assignment
+        <select aria-label="Project assignment for extracted entries" value={aiProjectChoice} onChange={event=>{const choice=event.target.value;setAiProjectChoice(choice);setParsedEntries(previous=>previous.map((entry,index)=>({...entry,project:choice==="__notes__"?(projectNamesFromNotes[index]??entry.project):choice})))}} disabled={loading} className="h-9 rounded-md border border-slate-300 bg-white px-2 text-sm font-normal">
+          <option value="__notes__">Use projects from notes</option>
+          {projects.map(item=><option key={item.id} value={item.name}>{item.name}</option>)}
+        </select>
+      </label>}
       <textarea
         id="notes"
         value={notes}
         readOnly={sampleIsPreview}
-        onChange={(e) => setNotes(e.target.value)}
+        onChange={(e) => {setNotes(e.target.value);setParsedEntries([]);setProjectNamesFromNotes([]);setError(null)}}
         onKeyDown={(e) => {
           if (
             (e.metaKey || e.ctrlKey) &&
@@ -278,8 +306,8 @@ export function NoteInput({
             </>
           )}
         </p>
-        {sampleIsPreview&&<Button variant="outline" disabled={loading} onClick={()=>{setNotes("");setSampleIsPreview(false)}}>Clear sample</Button>}
-        {!previewOnly&&!sampleIsPreview&&<Button onClick={handleParse} disabled={loading || !notes.trim()||!selectedPeriod||periodsLoading||!!periodsError} size="lg">
+        {sampleLoaded&&<Button variant="outline" disabled={loading} onClick={()=>{setNotes("");setSampleLoaded(false);setSampleIsPreview(false);setParsedEntries([]);setProjectNamesFromNotes([]);setError(null)}}>Clear sample</Button>}
+        {!previewOnly&&<Button onClick={handleParse} disabled={loading || !notes.trim()||!selectedPeriod||periodsLoading||!!periodsError||sampleIsPreview} size="lg">
           {loading ? (
             <>
               <Loader2 className="size-4 animate-spin" aria-hidden="true" />
@@ -293,6 +321,14 @@ export function NoteInput({
           )}
         </Button>}
       </div>
+      {parsedEntries.length>0&&<section aria-label="Extracted timesheet preview" className="mt-4 overflow-hidden rounded-md border border-sky-200 bg-white">
+        <header className="flex flex-wrap items-center justify-between gap-2 border-b border-sky-100 bg-sky-50 px-3 py-2"><h3 className="text-sm font-semibold">Extracted preview <span className="font-normal text-slate-600">({parsedEntries.length})</span></h3><Button type="button" disabled={loading} onClick={()=>void saveParsedEntries()}>{loading?<Loader2 className="size-4 animate-spin"/>:<Plus className="size-4"/>}{loading?"Saving…":"Save entries"}</Button></header>
+        <ul className="max-h-72 divide-y divide-slate-100 overflow-y-auto overscroll-contain">{parsedEntries.map((entry,index)=><li key={entry.date+":"+index} className="grid gap-2 px-3 py-2 sm:grid-cols-[7rem_minmax(12rem,1fr)_auto] sm:items-center">
+          <span className="text-xs tabular-nums text-slate-600">{entry.date} · {entry.hours}h</span>
+          <label className="grid min-w-0 gap-1 text-[11px] font-medium text-slate-600">Project<input aria-label={"Project for entry "+(index+1)} maxLength={120} value={entry.project} onChange={event=>setParsedEntries(previous=>previous.map((item,row)=>row===index?{...item,project:event.target.value}:item))} className="h-8 min-w-0 rounded border border-slate-300 px-2 text-sm font-normal text-slate-950"/></label>
+          <span className="min-w-0 break-words text-xs text-slate-700">{entry.description||"No description"}</span>
+        </li>)}</ul>
+      </section>}
       </>}
     </section>
   )

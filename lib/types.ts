@@ -51,6 +51,11 @@ export type TimeEntry = {
   status: EntryStatus
   /** Latest time this entry was submitted, from the durable audit trail. */
   submittedAt?: string | null
+  /** Distinguishes a first submission from evidence returned for correction. */
+  workflowOrigin?: "new" | "returned"
+  /** Return recipient and correction cutoff for the current correction cycle. */
+  correctionOwnerEmail?: string | null
+  correctionDueAt?: string | null
   reviewedBy?: string | null
   reviewedAt?: string | null
   reviewNote?: string | null
@@ -64,7 +69,7 @@ export type TimeEntry = {
  */
 export type ParsedEntry = Omit<
   TimeEntry,
-  "id" | "contractorNumber" | "shortReference" | "companyCode" | "employeeId" | "revision" | "reviewEligible" | "approvalEligible" | "ownerEmail" | "reviewManagerEmail" | "payoutEligible" | "status" | "reviewedBy" | "reviewedAt" | "reviewNote"
+  "id" | "contractorNumber" | "shortReference" | "companyCode" | "employeeId" | "revision" | "reviewEligible" | "approvalEligible" | "ownerEmail" | "reviewManagerEmail" | "payoutEligible" | "status" | "reviewedBy" | "reviewedAt" | "reviewNote" | "workflowOrigin" | "correctionOwnerEmail" | "correctionDueAt"
 >
 
 /**

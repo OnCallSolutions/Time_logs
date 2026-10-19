@@ -26,7 +26,8 @@ export function getRoleActions(role: "employee" | "contractor" | "manager" | "ac
   if (permissions.create_entries) actions.push({ id: "log_time", label: role === "contractor" ? "Log project time" : "Log time" })
 
   if (role === "account_manager") {
-    if (permissions.view_accounts) actions.push({ id: "final_approvals", label: "Final approvals" })
+    if (permissions.review_entries) actions.push({ id: "approvals", label: "Timesheet approvals" })
+    if (permissions.view_accounts) actions.push({ id: "final_approvals", label: "Final approved timesheets" })
     if (permissions.view_all_timesheets) actions.push({ id: "timesheets", label: "Timesheet archive" })
     if (permissions.manage_timesheet_periods) actions.push({ id: "period_settings", label: "Period settings" })
     if (permissions.manage_projects) actions.push({ id: "projects", label: "Projects and assignments" })

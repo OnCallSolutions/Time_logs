@@ -1,7 +1,4 @@
-/**
- * Verifies the notification center's unread list and explicit bulk-read action.
- * API and window boundaries are mocked; no live messages or browser sound are used.
- */
+/** Verifies separated announcement/timesheet-alert views and alert read behavior. */
 import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactNode } from "react"
@@ -21,23 +18,39 @@ const inbox={
   ],
 }
 
-beforeEach(()=>{vi.clearAllMocks();vi.stubGlobal("fetch",vi.fn().mockImplementation(async(_input:string,init?:RequestInit)=>({ok:true,json:async()=>init?.method==="PATCH"?{ok:true}:{reminders:[{id:"deadline-1",title:"Timesheet deadline approaching",body:"October 2026 is due soon.",sender_label:"Business Accounts",created_at:"2026-10-16T13:00:00.000Z",read_at:null}]}})))})
+beforeEach(()=>{
+  vi.clearAllMocks()
+  const policy={mode:"automatic",timezone:"America/New_York",workerInitialTime:"08:00",workerHardTime:"08:00",managerInitialTime:"08:00",managerHardTime:"08:00",accountManagerTime:"08:00"}
+  vi.stubGlobal("fetch",vi.fn().mockImplementation(async(_input:string,init?:RequestInit)=>({
+    ok:true,
+    json:async()=>init?.method==="PATCH"?{ok:true,policy}:{
+      reminders:[{id:"deadline-1",title:"Timesheet deadline approaching",body:"October 2026 is due soon.",sender_label:"Business Accounts",created_at:"2026-10-16T13:00:00.000Z",read_at:null}],
+      policy,
+      periods:[{id:"period-1",name:"October 2026",startDate:"2026-10-01",endDate:"2026-10-31",submissionDeadline:"2026-10-27T21:00:00.000Z",managerSubmissionDeadline:"2026-10-28T21:00:00.000Z",accountApprovalDeadline:"2026-10-29T21:00:00.000Z",exceptionResolutionDeadline:"2026-10-30T16:00:00.000Z",timezone:"America/New_York",reminderDays:3}],
+      canViewCompliance:true,canManagePolicy:true,canManagePeriods:true,compliance:[],
+    },
+  })))
+})
 
-it("combines unread messages, announcements and deadlines without revealing message content",async()=>{
+it("separates announcements from timesheet alerts and leaves direct messages in Messages",async()=>{
   const user=userEvent.setup()
   render(<MessageNotifications inbox={inbox} onOpen={onOpen}/> )
-  await user.click(await screen.findByRole("button",{name:"Notifications, 4 unread"}))
+  await user.click(await screen.findByRole("button",{name:"Notifications, 2 unread"}))
   const center=screen.getByRole("dialog",{name:"Notification center"})
   expect(within(center).getByText(/October 2026 is due soon/)).toBeVisible()
-  expect(within(center).getAllByText("from Morgan Manager")).toHaveLength(2)
-  expect(within(center).getByText("from Avery Employee")).toBeVisible()
-  expect(within(center).getByText("Organization-wide update")).toBeVisible()
+  expect(within(center).getByText("Reminder schedule")).toBeVisible()
+  expect(within(center).getAllByText(/Tuesday, Oct 27, 2026/).length).toBeGreaterThan(0)
+  await user.click(within(center).getByRole("button",{name:/Announcements/}))
+  expect(within(center).getByText("Morgan Manager")).toBeVisible()
+  expect(within(center).queryByText("Avery Employee")).not.toBeInTheDocument()
   expect(center).not.toHaveTextContent("private body")
-  await user.click(within(center).getByRole("button",{name:"Mark all as read"}))
+  expect(center).not.toHaveTextContent("another private body")
+  await user.click(within(center).getByRole("button",{name:/^Timesheet alerts/}))
+  await user.click(within(center).getByRole("button",{name:"Mark alerts read"}))
   expect(fetch).toHaveBeenCalledWith("/tanovo-time/api/timesheet-period-reminders",expect.objectContaining({method:"PATCH",body:JSON.stringify({ids:["deadline-1"]})}))
-  expect(fetch).toHaveBeenCalledWith("/tanovo-time/api/messages",expect.objectContaining({method:"PATCH",body:JSON.stringify({action:"read",ids:["1","2","3"]})}))
-  expect(dismissNotification).toHaveBeenCalledOnce()
-  expect(refresh).toHaveBeenCalledOnce()
+  expect(fetch).not.toHaveBeenCalledWith("/tanovo-time/api/messages",expect.anything())
+  expect(dismissNotification).not.toHaveBeenCalled()
+  expect(refresh).not.toHaveBeenCalled()
 })
 
 it("activates sound only after the preference click and plays a tone for a new alert",async()=>{
@@ -60,12 +73,13 @@ it("activates sound only after the preference click and plays a tone for a new a
   localStorage.removeItem("message-alerts:admin@example.com")
   const view=render(<MessageNotifications inbox={inbox} onOpen={onOpen}/> )
 
-  await user.click(await screen.findByRole("button",{name:"Notifications, 4 unread"}))
+  await user.click(await screen.findByRole("button",{name:"Notifications, 2 unread"}))
   const center=screen.getByRole("dialog",{name:"Notification center"})
+  await user.click(within(center).getByRole("button",{name:"Notification settings"}))
   await user.click(within(center).getByRole("button",{name:"Test sound"}))
   await waitFor(()=>expect(oscillator.start).toHaveBeenCalledOnce())
   expect(localStorage.getItem("message-alerts:admin@example.com")).toBeNull()
-  await user.click(within(center).getByLabelText("Message sound"))
+  await user.click(within(center).getByLabelText("Sound"))
   await waitFor(()=>expect(resume).toHaveBeenCalledTimes(2))
   expect(contextConstructor).toHaveBeenCalledOnce()
   expect(JSON.parse(localStorage.getItem("message-alerts:admin@example.com")??"{}").sound).toBe(true)

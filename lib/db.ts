@@ -35,6 +35,9 @@ type TimeEntryRow = {
   owner_email?: string
   review_manager_email?: string | null
   payout_eligible_at?: string | Date | null
+  workflow_origin?: "new" | "returned" | null
+  correction_owner_email?: string | null
+  correction_due_at?: string | Date | null
   contractor: string
   work_date: string | Date
   hours: string | number
@@ -182,6 +185,7 @@ export type AuditEvent = {
 }
 
 export type TimesheetPeriod = { id:string; name:string; startDate:string; endDate:string; submissionDeadline:string; managerSubmissionDeadline?:string; accountApprovalDeadline?:string; exceptionResolutionDeadline?:string; timezone?:string; managerGraceDays:number; reminderDays:number; createdBy:string; createdAt:string }
+export type TimesheetPeriodScheduleIssue = {id:string;issueKey:string;message:string;periodIds:string[];firstSeenAt:string;lastSeenAt:string}
 export type TimeProject = { id:string; name:string; description:string; active:boolean; createdBy:string; createdAt:string; updatedAt:string }
 export type EntryRejectionRecord={id:string;actorEmail:string;entryId:string|null;contractor:string;ownerEmail:string|null;project:string;workDate:string|null;hours:number|null;reason:string;rejectedAt:string}
 
@@ -227,6 +231,9 @@ function toTimeEntry(row: TimeEntryRow): TimeEntry {
     ownerEmail: row.owner_email,
     reviewManagerEmail: row.review_manager_email ?? null,
     payoutEligible: !!row.payout_eligible_at,
+    workflowOrigin: row.workflow_origin ?? "new",
+    correctionOwnerEmail: row.correction_owner_email ?? null,
+    correctionDueAt: row.correction_due_at instanceof Date ? row.correction_due_at.toISOString() : row.correction_due_at ? new Date(String(row.correction_due_at)).toISOString() : null,
     contractor: row.contractor,
     contractorNumber: row.contractor_number??undefined,
     date:
@@ -360,6 +367,10 @@ export function ensureTimeEntriesTable() {
       ALTER TABLE time_entries
       ADD COLUMN IF NOT EXISTS review_note text
     `
+    await sql`ALTER TABLE time_entries
+      ADD COLUMN IF NOT EXISTS workflow_origin text NOT NULL DEFAULT 'new',
+      ADD COLUMN IF NOT EXISTS correction_owner_email text,
+      ADD COLUMN IF NOT EXISTS correction_due_at timestamptz`
     await sql`
       DO $$
       BEGIN
@@ -524,6 +535,10 @@ export function ensureTimesheetPeriodsTable() {
     await sql`ALTER TABLE timesheet_periods ADD COLUMN IF NOT EXISTS timezone text NOT NULL DEFAULT 'America/New_York'`
     await sql`UPDATE timesheet_periods SET manager_submission_deadline=submission_deadline+interval '2 days',account_approval_deadline=submission_deadline+interval '3 days',exception_resolution_deadline=date_trunc('day',submission_deadline+interval '4 days')+interval '12 hours' WHERE manager_submission_deadline IS NULL OR account_approval_deadline IS NULL OR exception_resolution_deadline IS NULL`
     await sql`CREATE INDEX IF NOT EXISTS timesheet_periods_dates_idx ON timesheet_periods(start_date,end_date)`
+    await sql`CREATE TABLE IF NOT EXISTS timesheet_period_schedule_issues(
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),issue_key text NOT NULL UNIQUE,message text NOT NULL,
+      period_ids uuid[] NOT NULL DEFAULT '{}',first_seen_at timestamptz NOT NULL DEFAULT now(),last_seen_at timestamptz NOT NULL DEFAULT now(),resolved_at timestamptz)`
+    await sql`CREATE INDEX IF NOT EXISTS timesheet_period_schedule_issues_open_idx ON timesheet_period_schedule_issues(last_seen_at DESC) WHERE resolved_at IS NULL`
   })
 }
 
@@ -630,6 +645,25 @@ export function ensureProjectsTable(){
       PRIMARY KEY(project_id,patron_email)
     )`
     await sql`CREATE INDEX IF NOT EXISTS time_project_assignments_patron_idx ON time_project_assignments(lower(patron_email))`
+    await sql`CREATE TABLE IF NOT EXISTS time_project_assignment_events (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      project_id uuid NOT NULL,
+      project_name text NOT NULL,
+      patron_email text NOT NULL,
+      action text NOT NULL CHECK(action IN ('assigned','reassigned','removed')),
+      actor_email text NOT NULL,
+      occurred_at timestamptz NOT NULL DEFAULT now()
+    )`
+    await sql`CREATE INDEX IF NOT EXISTS time_project_assignment_events_project_idx ON time_project_assignment_events(project_id,occurred_at DESC)`
+    await sql`CREATE INDEX IF NOT EXISTS time_project_assignment_events_patron_idx ON time_project_assignment_events(lower(patron_email),occurred_at DESC)`
+    await sql`CREATE UNIQUE INDEX IF NOT EXISTS time_project_assignment_events_backfill_idx ON time_project_assignment_events(project_id,lower(patron_email),action,lower(actor_email),occurred_at)`
+    await sql`INSERT INTO time_project_assignment_events(project_id,project_name,patron_email,action,actor_email,occurred_at)
+      SELECT assignment.project_id,project.name,lower(assignment.patron_email),'assigned',lower(assignment.assigned_by),assignment.assigned_at
+      FROM time_project_assignments assignment JOIN time_projects project ON project.id=assignment.project_id
+      WHERE NOT EXISTS(SELECT 1 FROM time_project_assignment_events event
+        WHERE event.project_id=assignment.project_id AND lower(event.patron_email)=lower(assignment.patron_email)
+          AND event.action='assigned' AND lower(event.actor_email)=lower(assignment.assigned_by) AND event.occurred_at=assignment.assigned_at)
+      ON CONFLICT DO NOTHING`
     await sql`INSERT INTO time_projects(name,created_by)
       SELECT DISTINCT left(trim(project),120),'system@tanovo-time.local'
       FROM time_entries WHERE length(trim(project)) BETWEEN 1 AND 120
@@ -658,19 +692,32 @@ export async function setTimeProjectAssignment(projectId:string,patronEmail:stri
     INSERT INTO time_project_assignments(project_id,patron_email,assigned_by)
     SELECT p.id,lower(${patronEmail}),lower(${actor}) FROM time_projects p WHERE p.id=${projectId}::uuid AND p.active
     ON CONFLICT(project_id,patron_email) DO UPDATE SET assigned_by=EXCLUDED.assigned_by,assigned_at=now()
-    RETURNING project_id,patron_email
+      WHERE time_project_assignments.assigned_by IS DISTINCT FROM EXCLUDED.assigned_by
+    RETURNING project_id,patron_email,assigned_by,assigned_at
+  ), history AS (
+    INSERT INTO time_project_assignment_events(project_id,project_name,patron_email,action,actor_email,occurred_at)
+    SELECT changed.project_id,project.name,changed.patron_email,
+      CASE WHEN previous.project_id IS NULL THEN 'assigned' ELSE 'reassigned' END,lower(${actor}),changed.assigned_at
+    FROM changed JOIN time_projects project ON project.id=changed.project_id
+    LEFT JOIN LATERAL (SELECT event.project_id FROM time_project_assignment_events event
+      WHERE event.project_id=changed.project_id AND lower(event.patron_email)=lower(changed.patron_email) ORDER BY event.occurred_at DESC LIMIT 1) previous ON true
+    RETURNING project_id
   ), audited AS (
     INSERT INTO audit_events(actor_email,action,target_type,target_id,metadata,ip_address,user_agent,request_method,request_path,request_id)
     SELECT lower(${actor}),'project_updated','time_project',changed.project_id::text,jsonb_build_object('patronEmail',changed.patron_email,'assigned',true),
       ${context.ipAddress},${context.userAgent},${context.requestMethod},${context.requestPath},${context.requestId} FROM changed RETURNING target_id
-  ) SELECT changed.project_id FROM changed WHERE EXISTS(SELECT 1 FROM audited)`
+  ) SELECT changed.project_id FROM changed WHERE EXISTS(SELECT 1 FROM history) AND EXISTS(SELECT 1 FROM audited)`
   :await sql`WITH removed AS (
-    DELETE FROM time_project_assignments WHERE project_id=${projectId}::uuid AND lower(patron_email)=lower(${patronEmail}) RETURNING project_id,patron_email
+    DELETE FROM time_project_assignments WHERE project_id=${projectId}::uuid AND lower(patron_email)=lower(${patronEmail}) RETURNING project_id,patron_email,assigned_by
+  ), history AS (
+    INSERT INTO time_project_assignment_events(project_id,project_name,patron_email,action,actor_email)
+    SELECT removed.project_id,project.name,removed.patron_email,'removed',lower(${actor})
+    FROM removed JOIN time_projects project ON project.id=removed.project_id RETURNING project_id
   ), audited AS (
     INSERT INTO audit_events(actor_email,action,target_type,target_id,metadata,ip_address,user_agent,request_method,request_path,request_id)
     SELECT lower(${actor}),'project_updated','time_project',removed.project_id::text,jsonb_build_object('patronEmail',removed.patron_email,'assigned',false),
       ${context.ipAddress},${context.userAgent},${context.requestMethod},${context.requestPath},${context.requestId} FROM removed RETURNING target_id
-  ) SELECT removed.project_id FROM removed WHERE EXISTS(SELECT 1 FROM audited)`
+  ) SELECT removed.project_id FROM removed WHERE EXISTS(SELECT 1 FROM history) AND EXISTS(SELECT 1 FROM audited)`
   return rows.length>0
 }
 
@@ -686,6 +733,15 @@ export async function listTimeProjectAssignments():Promise<{projectId:string;ema
   await ensureProjectsTable()
   const rows=await sql`SELECT project_id,lower(patron_email) AS patron_email FROM time_project_assignments ORDER BY lower(patron_email)`
   return rows.map(row=>({projectId:String(row.project_id),email:String(row.patron_email)}))
+}
+
+/** @returns Recent immutable assignment changes for manager and admin project views. */
+export async function listTimeProjectAssignmentHistory(limit=500):Promise<{id:string;projectId:string;projectName:string;email:string;action:"assigned"|"reassigned"|"removed";actorEmail:string;occurredAt:string}[]>{
+  await ensureProjectsTable()
+  const safeLimit=Math.min(Math.max(limit,1),1000)
+  const rows=await sql`SELECT id,project_id,project_name,patron_email,action,actor_email,occurred_at::text AS occurred_at
+    FROM time_project_assignment_events ORDER BY occurred_at DESC,id DESC LIMIT ${safeLimit}`
+  return rows.map(row=>({id:String(row.id),projectId:String(row.project_id),projectName:String(row.project_name),email:String(row.patron_email),action:String(row.action) as "assigned"|"reassigned"|"removed",actorEmail:String(row.actor_email),occurredAt:new Date(String(row.occurred_at)).toISOString()}))
 }
 
 /** @returns Employees and contractors assigned to a manager through an active project or reviewer assignment. */
@@ -724,12 +780,18 @@ export async function createTimeProject(input:{name:string;description:string},a
     SELECT id,lower(created_by),lower(created_by) FROM saved WHERE ${assignCreator}
     UNION ALL
     SELECT id,lower(${assignedManagerEmail??null}),lower(created_by) FROM saved WHERE ${assignCreator} AND ${assignedManagerEmail??null} IS NOT NULL
-    ON CONFLICT DO NOTHING RETURNING project_id
+    ON CONFLICT DO NOTHING RETURNING project_id,patron_email,assigned_by,assigned_at
+  ), history AS (
+    INSERT INTO time_project_assignment_events(project_id,project_name,patron_email,action,actor_email,occurred_at)
+    SELECT assigned.project_id,saved.name,assigned.patron_email,'assigned',assigned.assigned_by,assigned.assigned_at
+    FROM assigned JOIN saved ON saved.id=assigned.project_id
+    RETURNING project_id
   ), audited AS (
     INSERT INTO audit_events(actor_email,action,target_type,target_id,metadata,ip_address,user_agent,request_method,request_path,request_id)
     SELECT created_by,'project_created','time_project',id::text,jsonb_build_object('name',name,'description',description,'assignedToCreator',${assignCreator}),
       ${context.ipAddress},${context.userAgent},${context.requestMethod},${context.requestPath},${context.requestId} FROM saved RETURNING target_id
-  ) SELECT id,name,description,active,created_by,created_at::text AS created_at,updated_at::text AS updated_at FROM saved WHERE EXISTS(SELECT 1 FROM audited)`
+  ) SELECT id,name,description,active,created_by,created_at::text AS created_at,updated_at::text AS updated_at FROM saved
+    WHERE EXISTS(SELECT 1 FROM audited) AND (NOT ${assignCreator} OR EXISTS(SELECT 1 FROM history))`
   const row=rows[0]
   return row?{id:String(row.id),name:String(row.name),description:String(row.description??""),active:Boolean(row.active),createdBy:String(row.created_by),createdAt:new Date(String(row.created_at)).toISOString(),updatedAt:new Date(String(row.updated_at)).toISOString()}:null
 }
@@ -759,6 +821,52 @@ export async function listTimesheetPeriods():Promise<TimesheetPeriod[]> {
     manager_grace_days,reminder_days,created_by,created_at::text AS created_at
     FROM timesheet_periods ORDER BY start_date DESC LIMIT 100`
   return rows.map(row=>({id:String(row.id),name:String(row.name),startDate:String(row.start_date),endDate:String(row.end_date),submissionDeadline:new Date(String(row.submission_deadline)).toISOString(),managerSubmissionDeadline:row.manager_submission_deadline?new Date(String(row.manager_submission_deadline)).toISOString():undefined,accountApprovalDeadline:row.account_approval_deadline?new Date(String(row.account_approval_deadline)).toISOString():undefined,exceptionResolutionDeadline:row.exception_resolution_deadline?new Date(String(row.exception_resolution_deadline)).toISOString():undefined,timezone:String(row.timezone??"America/New_York"),managerGraceDays:Number(row.manager_grace_days),reminderDays:Number(row.reminder_days),createdBy:String(row.created_by),createdAt:new Date(String(row.created_at)).toISOString()}))
+}
+
+/** Lists unresolved schedule conflicts for period settings and reminder operators. */
+export async function listTimesheetPeriodScheduleIssues():Promise<TimesheetPeriodScheduleIssue[]> {
+  await ensureTimesheetPeriodsTable()
+  const rows=await sql`SELECT id,issue_key,message,period_ids::text AS period_ids,first_seen_at::text AS first_seen_at,last_seen_at::text AS last_seen_at
+    FROM timesheet_period_schedule_issues WHERE resolved_at IS NULL ORDER BY last_seen_at DESC`
+  return rows.map(row=>({id:String(row.id),issueKey:String(row.issue_key),message:String(row.message),periodIds:Array.isArray(row.period_ids)?row.period_ids.map(String):String(row.period_ids??"").replace(/[{}]/g,"").split(",").filter(Boolean),firstSeenAt:new Date(String(row.first_seen_at)).toISOString(),lastSeenAt:new Date(String(row.last_seen_at)).toISOString()}))
+}
+
+async function recordTimesheetPeriodScheduleIssue(issueKey:string,message:string,periodIds:string[]=[]):Promise<void>{
+  await ensureTimesheetPeriodsTable()
+  await sql`INSERT INTO timesheet_period_schedule_issues(issue_key,message,period_ids)
+    VALUES(${issueKey},${message},${periodIds}::uuid[]) ON CONFLICT(issue_key) DO UPDATE SET message=EXCLUDED.message,period_ids=EXCLUDED.period_ids,last_seen_at=now(),resolved_at=NULL`
+}
+
+async function resolveTimesheetPeriodScheduleIssue(issueKey:string):Promise<void>{
+  await ensureTimesheetPeriodsTable()
+  await sql`UPDATE timesheet_period_schedule_issues SET resolved_at=now() WHERE issue_key=${issueKey} AND resolved_at IS NULL`
+}
+
+/** Checks period ranges and deadlines, retaining a visible issue until each conflict is corrected. */
+export async function reconcileTimesheetPeriodSchedule(context:AuditContext):Promise<void>{
+  const periods=await listTimesheetPeriods()
+  const activeKeys=new Set<string>()
+  const ordered=[...periods].sort((a,b)=>a.startDate.localeCompare(b.startDate))
+  for(let index=1;index<ordered.length;index++){
+    const previous=ordered[index-1],current=ordered[index]
+    if(current.startDate<=previous.endDate){
+      const ids=[previous.id,current.id].sort(),key=`overlap:${ids.join(":")}`
+      activeKeys.add(key)
+      await recordTimesheetPeriodScheduleIssue(key,`${previous.name} (${previous.startDate}–${previous.endDate}) overlaps ${current.name} (${current.startDate}–${current.endDate}). Work-date periods cannot overlap.`,ids)
+    }
+  }
+  for(const period of periods){
+    const key=`deadline-order:${period.id}`
+    const worker=Date.parse(period.submissionDeadline),manager=Date.parse(period.managerSubmissionDeadline??""),account=Date.parse(period.accountApprovalDeadline??""),exception=Date.parse(period.exceptionResolutionDeadline??"")
+    const valid=Number.isFinite(worker)&&Number.isFinite(manager)&&Number.isFinite(account)&&Number.isFinite(exception)&&worker>=Date.parse(`${period.endDate}T00:00:00Z`)&&worker<manager&&manager<account&&account<=exception
+    if(!valid){
+      activeKeys.add(key)
+      await recordTimesheetPeriodScheduleIssue(key,`${period.name} has an invalid deadline schedule. Worker submission must follow the work-period end, followed by manager submission, account approval, and exception resolution.`,[period.id])
+    }
+  }
+  const open=await sql`SELECT issue_key FROM timesheet_period_schedule_issues WHERE resolved_at IS NULL`
+  for(const row of open)if(!activeKeys.has(String(row.issue_key))&&!String(row.issue_key).startsWith("auto-generation:"))await resolveTimesheetPeriodScheduleIssue(String(row.issue_key))
+  await ensureDefaultUpcomingTimesheetPeriod(context)
 }
 
 /** Checks archive status using the database calendar, so server timezone cannot change edit rights. */
@@ -813,18 +921,16 @@ export async function ensureDefaultUpcomingTimesheetPeriod(context:AuditContext)
   const periods=await listTimesheetPeriods()
   if(!periods.length)return null
   const latest=[...periods].sort((a,b)=>b.endDate.localeCompare(a.endDate))[0]
-  const today=new Date().toISOString().slice(0,10)
-  if(latest.endDate>=today||periods.some(period=>period.startDate>latest.endDate))return null
+  const today=new Intl.DateTimeFormat("en-CA",{timeZone:latest.timezone||"America/New_York",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date())
+  if(latest.endDate>=today)return null
+  if(periods.some(period=>period.startDate>latest.endDate)){
+    await resolveTimesheetPeriodScheduleIssue("auto-generation:collision")
+    return null
+  }
   const periodLengthDays=Math.max(1,Math.round((Date.parse(`${latest.endDate}T00:00:00.000Z`)-Date.parse(`${latest.startDate}T00:00:00.000Z`))/86_400_000)+1)
   const date=new Date(`${latest.endDate}T00:00:00.000Z`)
   date.setUTCDate(date.getUTCDate()+1)
-  const tomorrow=new Date(`${today}T00:00:00.000Z`)
-  const daysSinceExpiration=Math.floor((tomorrow.getTime()-new Date(`${latest.endDate}T00:00:00.000Z`).getTime())/86400000)
-  const candidate=daysSinceExpiration<=7?date:tomorrow
-  if(daysSinceExpiration>7){
-    const targetWeekday=new Date(`${latest.startDate}T00:00:00.000Z`).getUTCDay()
-    candidate.setUTCDate(candidate.getUTCDate()+((targetWeekday-candidate.getUTCDay()+7)%7))
-  }
+  const candidate=date
   const startDate=candidate.toISOString().slice(0,10)
   const end=new Date(candidate);end.setUTCDate(end.getUTCDate()+periodLengthDays-1)
   const endDate=end.toISOString().slice(0,10)
@@ -834,9 +940,13 @@ export async function ensureDefaultUpcomingTimesheetPeriod(context:AuditContext)
   const managerDue=new Date(workerDue);managerDue.setUTCDate(managerDue.getUTCDate()+2)
   const accountsDue=new Date(workerDue);accountsDue.setUTCDate(accountsDue.getUTCDate()+3)
   const issuesDue=new Date(workerDue);issuesDue.setUTCDate(issuesDue.getUTCDate()+4)
-  const format=(value:Date)=>new Intl.DateTimeFormat("en",{month:"short",day:"numeric",timeZone:"UTC"}).format(value)
-  const name=`${format(candidate)} – ${format(end)} ${end.getUTCFullYear()}`
-  return createTimesheetPeriod({name,startDate,endDate,submissionDeadline:deadlineInTimezone(workerDue,17,"America/New_York"),managerSubmissionDeadline:deadlineInTimezone(managerDue,17,"America/New_York"),accountApprovalDeadline:deadlineInTimezone(accountsDue,17,"America/New_York"),exceptionResolutionDeadline:deadlineInTimezone(issuesDue,12,"America/New_York"),timezone:"America/New_York",managerGraceDays:2,reminderDays:3},"system@tanovo-time.local",context)
+  const name=`${startDate} - ${endDate}`
+  const created=await createTimesheetPeriod({name,startDate,endDate,submissionDeadline:deadlineInTimezone(workerDue,17,latest.timezone||"America/New_York"),managerSubmissionDeadline:deadlineInTimezone(managerDue,17,latest.timezone||"America/New_York"),accountApprovalDeadline:deadlineInTimezone(accountsDue,17,latest.timezone||"America/New_York"),exceptionResolutionDeadline:deadlineInTimezone(issuesDue,12,latest.timezone||"America/New_York"),timezone:latest.timezone||"America/New_York",managerGraceDays:latest.managerGraceDays,reminderDays:latest.reminderDays},"system@tanovo-time.local",context)
+  if(created){await resolveTimesheetPeriodScheduleIssue("auto-generation:collision");return created}
+  const concurrent=await listTimesheetPeriods()
+  if(concurrent.some(period=>period.startDate===startDate&&period.endDate===endDate))return null
+  await recordTimesheetPeriodScheduleIssue("auto-generation:collision",`Automatic period ${name} (${startDate}–${endDate}) could not be created because its dates conflict with a configured window. Resolve the conflicting dates in Timesheet periods; automatic generation will retry.`,concurrent.filter(period=>period.startDate<=endDate&&period.endDate>=startDate).map(period=>period.id))
+  return null
 }
 
 /** Updates a submission window and audits the before/after values atomically. */
@@ -1491,7 +1601,8 @@ export async function listTimeEntries(ownerEmail: string, includeAll = false) {
   const rows = includeAll
     ? await sql`
         SELECT entry.id, entry.owner_email, entry.contractor_number, entry.review_manager_email,
-          entry.payout_eligible_at, entry.contractor, entry.work_date, entry.hours, entry.project, entry.description,
+          entry.payout_eligible_at,entry.workflow_origin,entry.correction_owner_email,entry.correction_due_at,
+          entry.contractor, entry.work_date, entry.hours, entry.project, entry.description,
           entry.status, entry.reviewed_by, entry.reviewed_at, entry.review_note, entry.updated_at::text AS updated_at,
           submission.occurred_at::text AS submitted_at
         FROM time_entries entry
@@ -1504,7 +1615,8 @@ export async function listTimeEntries(ownerEmail: string, includeAll = false) {
       `
     : await sql`
         SELECT entry.id, entry.owner_email, entry.contractor_number, entry.review_manager_email,
-          entry.payout_eligible_at, entry.contractor, entry.work_date, entry.hours, entry.project, entry.description,
+          entry.payout_eligible_at,entry.workflow_origin,entry.correction_owner_email,entry.correction_due_at,
+          entry.contractor, entry.work_date, entry.hours, entry.project, entry.description,
           entry.status, entry.reviewed_by, entry.reviewed_at, entry.review_note, entry.updated_at::text AS updated_at,
           submission.occurred_at::text AS submitted_at
         FROM time_entries entry
@@ -1619,6 +1731,9 @@ export async function getTimeEntry(
       contractor_number,
       review_manager_email,
       payout_eligible_at,
+      workflow_origin,
+      correction_owner_email,
+      correction_due_at,
       contractor,
       work_date,
       hours,
@@ -1769,7 +1884,7 @@ export async function updateTimeEntryWithAudit(
       ${audit.context.ipAddress},${audit.context.userAgent},${audit.context.requestMethod},${audit.context.requestPath},${audit.context.requestId}
     FROM changed RETURNING target_id
   )
-  SELECT id,owner_email,contractor_number,review_manager_email,payout_eligible_at,contractor,work_date,hours,project,description,status,reviewed_by,reviewed_at,review_note,updated_at::text AS updated_at
+  SELECT id,owner_email,contractor_number,review_manager_email,payout_eligible_at,workflow_origin,correction_owner_email,correction_due_at,contractor,work_date,hours,project,description,status,reviewed_by,reviewed_at,review_note,updated_at::text AS updated_at
   FROM changed WHERE EXISTS (SELECT 1 FROM audited)`
   return rows.length ? toTimeEntry(rows[0] as TimeEntryRow) : null
 }
@@ -1797,7 +1912,7 @@ export async function rejectSubmittedEntry(id:string,actor:string,revision:strin
     INSERT INTO audit_events(actor_email,action,target_type,target_id,metadata,ip_address,user_agent,request_method,request_path,request_id)
     SELECT ${actor.toLowerCase()},'entry_rejected','time_entry',id::text,jsonb_build_object('fromStatus','submitted','toStatus','rejected'),${context.ipAddress},${context.userAgent},${context.requestMethod},${context.requestPath},${context.requestId}
     FROM changed WHERE EXISTS(SELECT 1 FROM archived WHERE archived.entry_id=changed.id) RETURNING target_id
-  ) SELECT id,owner_email,contractor_number,review_manager_email,payout_eligible_at,contractor,work_date,hours,project,description,status,reviewed_by,reviewed_at,review_note,updated_at::text AS updated_at
+  ) SELECT id,owner_email,contractor_number,review_manager_email,payout_eligible_at,workflow_origin,correction_owner_email,correction_due_at,contractor,work_date,hours,project,description,status,reviewed_by,reviewed_at,review_note,updated_at::text AS updated_at
     FROM changed WHERE EXISTS(SELECT 1 FROM audited)`
   return rows.length?toTimeEntry(rows[0] as TimeEntryRow):null
 }
@@ -1857,6 +1972,8 @@ export async function submitTimeEntryWithAudit(
       description = COALESCE(${patch.description ?? null}, description),
       status = 'submitted',
       review_manager_email = ${patch.reviewManagerEmail}::text,
+      correction_owner_email = NULL,
+      correction_due_at = NULL,
       reviewed_by = NULL,
       reviewed_at = NULL,
       review_note = NULL,
@@ -1870,7 +1987,7 @@ export async function submitTimeEntryWithAudit(
         AND EXISTS (SELECT 1 FROM timesheet_periods p WHERE work_date BETWEEN p.start_date AND p.end_date
           AND (now() <= p.submission_deadline OR (${actorRole}::text = 'manager' AND now() <= p.submission_deadline + make_interval(days => p.manager_grace_days)) OR EXISTS (
             SELECT 1 FROM timesheet_extension_requests x WHERE lower(x.requester_email)=lower(time_entries.owner_email) AND x.period_id=p.id AND x.status='approved' AND x.approved_until>=now()
-          )))
+          ) OR (lower(time_entries.correction_owner_email)=lower(${ownerEmail}) AND time_entries.correction_due_at>=now())))
         OR (NOT EXISTS (SELECT 1 FROM timesheet_periods) AND NOT EXISTS (
           SELECT 1 FROM organization_workflow_settings WHERE id='organization' AND timesheet_submission_deadline <= now()
         ))
@@ -1895,7 +2012,7 @@ export async function submitTimeEntryWithAudit(
     FROM changed
     RETURNING target_id
   )
-  SELECT id, owner_email, contractor_number, review_manager_email, payout_eligible_at,
+  SELECT id, owner_email, contractor_number, review_manager_email, payout_eligible_at,workflow_origin,correction_owner_email,correction_due_at,
     contractor, work_date, hours, project, description, status, reviewed_by,
     reviewed_at, review_note, updated_at::text AS updated_at
   FROM changed WHERE EXISTS (SELECT 1 FROM audited)`

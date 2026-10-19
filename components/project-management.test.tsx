@@ -1,4 +1,5 @@
 import { render, screen, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { afterEach, expect, it, vi } from "vitest"
 import { ProjectManagement } from "./project-management"
 
@@ -29,4 +30,21 @@ it("shows the creator's assigned manager checked on a contractor-created project
   expect(managerCheck).toBeChecked()
   expect(managerCheck).toBeDisabled()
   expect(within(project).getByRole("checkbox",{name:"Taylor Contractor"})).toBeChecked()
+})
+
+it("shows an immutable assignment and removal timeline to project managers",async()=>{
+  vi.stubGlobal("fetch",vi.fn(async()=>new Response(JSON.stringify({
+    projects:[{id:"project-1",name:"Site repair",description:"",active:true,createdBy:"taylor@example.com"}],
+    assignments:[],
+    assignmentHistory:[
+      {id:"event-2",projectId:"project-1",projectName:"Site repair",email:"taylor@example.com",action:"removed",actorEmail:"morgan@example.com",occurredAt:"2026-10-18T15:00:00.000Z"},
+      {id:"event-1",projectId:"project-1",projectName:"Site repair",email:"taylor@example.com",action:"assigned",actorEmail:"morgan@example.com",occurredAt:"2026-10-17T15:00:00.000Z"},
+    ],
+    patrons:[{email:"taylor@example.com",displayName:"Taylor Contractor",role:"contractor"}],
+  }))))
+  render(<ProjectManagement canManage fullWidth/>)
+  await userEvent.click(await screen.findByText("Assignment history (2)"))
+  const history=screen.getAllByRole("listitem")
+  expect(history[0].textContent).toContain("taylor@example.com removed by morgan@example.com")
+  expect(history[1].textContent).toContain("taylor@example.com assigned by morgan@example.com")
 })

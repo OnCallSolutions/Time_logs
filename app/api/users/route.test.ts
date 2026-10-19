@@ -38,10 +38,10 @@ beforeEach(() => {
  * @param permissions - Untrusted permission payload under test.
  * @returns Request containing an otherwise valid employee access assignment.
  */
-function request(permissions?: unknown, accessStatus = "active"): Request {
+function request(permissions?: unknown, accessStatus = "active", note = "Access update requested for role responsibilities."): Request {
   return new Request("http://localhost/tanovo-time/api/users", {
     method: "PATCH", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email: "employee@example.com", role: "employee", accessStatus, permissions }),
+    body: JSON.stringify({ email: "employee@example.com", role: "employee", accessStatus, permissions, note }),
   })
 }
 
@@ -49,6 +49,13 @@ it("saves a single permission override", async () => {
   const response = await PATCH(request({ review_entries: true }))
   expect(response.status).toBe(200)
   expect(upsertManagedAccessUserWithAudit).toHaveBeenCalledWith(expect.objectContaining({ permissions: { review_entries: true } }))
+})
+
+it("requires an audit note when an administrator changes effective rights", async () => {
+  const response = await PATCH(request({ review_entries: true }, "active", ""))
+  expect(response.status).toBe(400)
+  expect(await response.json()).toMatchObject({ error: "Add an administrator note explaining this access-right change." })
+  expect(upsertManagedAccessUserWithAudit).not.toHaveBeenCalled()
 })
 
 it.each(["suspended", "retired", "blocked", "denied"])("persists the %s lifecycle state", async status => {

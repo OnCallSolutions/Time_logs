@@ -4,7 +4,7 @@ import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { getAuditContext } from "@/lib/audit"
 import { persistenceFailureDetails } from "@/lib/persistence-diagnostics"
-import { createTimesheetPeriod, ensureDefaultUpcomingTimesheetPeriod, listTimesheetPeriods, updateTimesheetPeriod } from "@/lib/db"
+import { createTimesheetPeriod, listTimesheetPeriodScheduleIssues, listTimesheetPeriods, reconcileTimesheetPeriodSchedule, updateTimesheetPeriod } from "@/lib/db"
 
 export const runtime = "nodejs"
 
@@ -34,8 +34,8 @@ export async function GET(request:Request) {
     const email = (await auth())?.user?.email
     const access = await getEffectivePermissions(email)
     if (!email || !access.role) return Response.json({ error: "Unauthorized." }, { status: 401 })
-    if(access.permissions.manage_timesheet_periods)await ensureDefaultUpcomingTimesheetPeriod(getAuditContext(request))
-    return Response.json({ periods: await listTimesheetPeriods() }, { headers: { "Cache-Control": "no-store" } })
+    if(access.permissions.manage_timesheet_periods)await reconcileTimesheetPeriodSchedule(getAuditContext(request))
+    return Response.json({ periods: await listTimesheetPeriods(), scheduleIssues: await listTimesheetPeriodScheduleIssues() }, { headers: { "Cache-Control": "no-store" } })
   } catch {
     return Response.json({ error: "Timesheet periods unavailable." }, { status: 503 })
   }

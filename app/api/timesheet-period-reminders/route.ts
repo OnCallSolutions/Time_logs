@@ -4,6 +4,7 @@ import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { getCurrentSubmissionCompliance, getTimesheetReminderPolicy, listTimesheetReminders, markTimesheetRemindersRead, sendDueTimesheetReminders, updateTimesheetReminderPolicy } from "@/lib/timesheet-period-reminders"
 import { getAuditContext } from "@/lib/audit"
+import { listTimesheetPeriodScheduleIssues, listTimesheetPeriods, reconcileTimesheetPeriodSchedule } from "@/lib/db"
 
 export const runtime="nodejs"
 const readSchema=z.object({ids:z.array(z.string().uuid()).min(1).max(100)}).strict()
@@ -12,11 +13,23 @@ export async function GET(req:Request){
   try{
     if(new URL(req.url).searchParams.get("scheduled")==="1"){
       if(!process.env.CRON_SECRET||req.headers.get("authorization")!==`Bearer ${process.env.CRON_SECRET}`)return Response.json({error:"Unauthorized."},{status:401})
+      await reconcileTimesheetPeriodSchedule(getAuditContext(req))
       return Response.json({sent:await sendDueTimesheetReminders()})
     }
     const email=(await auth())?.user?.email;const access=await getEffectivePermissions(email)
     if(!email||!access.role)return Response.json({error:"Unauthorized."},{status:401})
-    return Response.json({reminders:await listTimesheetReminders(email),policy:access.permissions.manage_timesheet_reminders?await getTimesheetReminderPolicy():undefined,canViewCompliance:access.permissions.view_submission_compliance,compliance:access.permissions.view_submission_compliance?await getCurrentSubmissionCompliance():undefined},{headers:{"Cache-Control":"no-store"}})
+    const policy=await getTimesheetReminderPolicy()
+    const periods=await listTimesheetPeriods()
+    return Response.json({
+      reminders:await listTimesheetReminders(email),
+      policy:{mode:policy.mode,timezone:policy.timezone,workerInitialTime:policy.workerInitialTime,workerHardTime:policy.workerHardTime,managerInitialTime:policy.managerInitialTime,managerHardTime:policy.managerHardTime,accountManagerTime:policy.accountManagerTime},
+      canManagePolicy:access.permissions.manage_timesheet_reminders,
+      canManagePeriods:access.permissions.manage_timesheet_periods,
+      canViewCompliance:access.permissions.view_submission_compliance,
+      scheduleIssues:await listTimesheetPeriodScheduleIssues(),
+      periods:periods.map(({id,name,startDate,endDate,submissionDeadline,managerSubmissionDeadline,accountApprovalDeadline,exceptionResolutionDeadline,timezone,reminderDays})=>({id,name,startDate,endDate,submissionDeadline,managerSubmissionDeadline,accountApprovalDeadline,exceptionResolutionDeadline,timezone,reminderDays})),
+      compliance:access.permissions.view_submission_compliance?await getCurrentSubmissionCompliance():undefined,
+    },{headers:{"Cache-Control":"no-store"}})
   }catch{return Response.json({error:"Timesheet reminders unavailable."},{status:503})}
 }
 

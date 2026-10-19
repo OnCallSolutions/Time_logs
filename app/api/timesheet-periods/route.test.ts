@@ -3,10 +3,10 @@ import { beforeEach,expect,it,vi } from "vitest"
 vi.mock("@/auth",()=>({auth:vi.fn()}))
 vi.mock("@/lib/effective-permissions",()=>({getEffectivePermissions:vi.fn()}))
 vi.mock("@/lib/audit",()=>({getAuditContext:vi.fn(()=>({ipAddress:null,userAgent:null,requestMethod:"POST",requestPath:"/api/timesheet-periods",requestId:null}))}))
-vi.mock("@/lib/db",()=>({createTimesheetPeriod:vi.fn(),ensureDefaultUpcomingTimesheetPeriod:vi.fn(),listTimesheetPeriods:vi.fn(),updateTimesheetPeriod:vi.fn()}))
+vi.mock("@/lib/db",()=>({createTimesheetPeriod:vi.fn(),reconcileTimesheetPeriodSchedule:vi.fn(),listTimesheetPeriodScheduleIssues:vi.fn(),listTimesheetPeriods:vi.fn(),updateTimesheetPeriod:vi.fn()}))
 import {auth} from "@/auth"
 import {getEffectivePermissions} from "@/lib/effective-permissions"
-import {createTimesheetPeriod,ensureDefaultUpcomingTimesheetPeriod,listTimesheetPeriods,updateTimesheetPeriod} from "@/lib/db"
+import {createTimesheetPeriod,reconcileTimesheetPeriodSchedule,listTimesheetPeriodScheduleIssues,listTimesheetPeriods,updateTimesheetPeriod} from "@/lib/db"
 import {GET,PATCH,POST} from "./route"
 
 const payload={name:"October 2026",startDate:"2026-10-01",endDate:"2026-10-31",submissionDeadline:"2099-11-05T17:00:00.000Z",managerGraceDays:3,reminderDays:3}
@@ -15,18 +15,19 @@ beforeEach(()=>{
   vi.mocked(auth).mockResolvedValue({user:{email:"admin@example.com"}} as never)
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"admin",permissions:{manage_timesheet_periods:true}} as never)
   vi.mocked(listTimesheetPeriods).mockResolvedValue([])
+  vi.mocked(listTimesheetPeriodScheduleIssues).mockResolvedValue([])
   vi.mocked(createTimesheetPeriod).mockResolvedValue({id:"period",...payload,submissionDeadline:payload.submissionDeadline,createdBy:"admin@example.com",createdAt:"2026-10-17T00:00:00.000Z"})
   vi.mocked(updateTimesheetPeriod).mockResolvedValue({id:"period",...payload,submissionDeadline:payload.submissionDeadline,createdBy:"admin@example.com",createdAt:"2026-10-17T00:00:00.000Z"})
 })
 it("lets signed-in actors view configured periods without scheduling for patrons",async()=>{
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"contractor",permissions:{}} as never)
   expect((await GET(new Request("http://localhost/api/timesheet-periods"))).status).toBe(200)
-  expect(ensureDefaultUpcomingTimesheetPeriod).not.toHaveBeenCalled()
+  expect(reconcileTimesheetPeriodSchedule).not.toHaveBeenCalled()
 })
 it("checks for an expired period and audits a default successor for authorized period managers",async()=>{
   const response=await GET(new Request("http://localhost/api/timesheet-periods"))
   expect(response.status).toBe(200)
-  expect(ensureDefaultUpcomingTimesheetPeriod).toHaveBeenCalledWith(expect.objectContaining({requestPath:"/api/timesheet-periods"}))
+  expect(reconcileTimesheetPeriodSchedule).toHaveBeenCalledWith(expect.objectContaining({requestPath:"/api/timesheet-periods"}))
 })
 it("requires explicit period-management rights to create a period",async()=>{
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"manager",permissions:{}} as never)

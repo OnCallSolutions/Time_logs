@@ -53,7 +53,7 @@ const entrySchema = z.object({
     ),
   project: z
     .string()
-    .describe("Project, client, or task name. Use 'General' if none is mentioned."),
+    .describe("Project or workstream name from the notes. If no formal project is named, infer a concise workstream label only when supported by the described activity; otherwise use 'Unassigned'. Never invent a client name."),
   description: z
     .string()
     .describe("A short summary of the work described, or an empty string if none."),
@@ -105,6 +105,7 @@ export async function POST(req: Request) {
       system:
         "You are a meticulous timesheet assistant. Extract every distinct unit of work logged in the notes into structured time entries. " +
         "Notes may be messy, informal, list multiple contractors, span multiple dates, or mix projects. " +
+        "When no formal project is named, infer a concise workstream name from the described activity only when the notes support it; never invent a client or project fact. Use 'Unassigned' when the context is not enough to infer one. " +
         "Split a single note into multiple entries whenever the contractor, date, or project differs. " +
         "Keep separately listed tasks or time blocks as separate entries even when the person, date, and project match. Never merge, deduplicate, sum, or truncate those entries. " +
         `The selected timesheet period is ${period.name}, from ${period.startDate} through ${period.endDate}. Every extracted work date must fall within this period; do not move or invent dates to force a match. ` +

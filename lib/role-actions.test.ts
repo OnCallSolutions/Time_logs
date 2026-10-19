@@ -19,8 +19,8 @@ describe("getRoleActions", () => {
   })
 
   it("provides account managers with final approval and period controls independently", () => {
-    expect(getRoleActions("account_manager", { view_accounts: true, manage_timesheet_periods: true }).map(action => action.id))
-      .toEqual(["final_approvals", "period_settings"])
+    expect(getRoleActions("account_manager", { review_entries:true,view_accounts: true, manage_timesheet_periods: true }).map(action => action.id))
+      .toEqual(["approvals", "final_approvals", "period_settings"])
   })
 
   it("offers employees a personal report without granting team reports", () => {

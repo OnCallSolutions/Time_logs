@@ -3,7 +3,7 @@ import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { getEffectiveUserRole } from "@/lib/access"
 import { actorRoster,employeeRoster } from "@/lib/collaboration"
-import { createTimeProject, listTimeProjectAssignments, listTimeProjects, setTimeProjectActive, setTimeProjectAssignment } from "@/lib/db"
+import { createTimeProject, listTimeProjectAssignmentHistory, listTimeProjectAssignments, listTimeProjects, setTimeProjectActive, setTimeProjectAssignment } from "@/lib/db"
 import { getAuditContext } from "@/lib/audit"
 import { resolvePatronManager } from "@/lib/submission-reviewer"
 
@@ -22,9 +22,10 @@ export async function GET(){
     const manager=(access.role==="admin"||access.role==="manager"||access.role==="account_manager")&&access.permissions.manage_projects
     const projects=await listTimeProjects(manager,manager?undefined:access.email)
     const assignments=manager?await listTimeProjectAssignments():[]
+    const assignmentHistory=manager?await listTimeProjectAssignmentHistory():[]
     const assignedManagers=new Set(assignments.map(item=>item.email.toLowerCase()))
     const patrons=manager?(await actorRoster()).filter(user=>user.accessStatus==="active"&&((user.role==="employee"||user.role==="contractor")||((user.role==="manager"||user.role==="account_manager")&&assignedManagers.has(user.email.toLowerCase())))).map(user=>({email:user.email,displayName:user.displayName,role:user.role})):[]
-    return Response.json({projects,assignments,patrons},{headers:{"Cache-Control":"no-store"}})
+    return Response.json({projects,assignments,assignmentHistory,patrons},{headers:{"Cache-Control":"no-store"}})
   }catch{
     return Response.json({error:"Unable to load assigned projects."},{status:500})
   }

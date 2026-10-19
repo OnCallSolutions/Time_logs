@@ -23,7 +23,7 @@ export async function GET(request: Request) {
     const search = (query.get("search") ?? "").trim().toLowerCase()
     const state = query.get("state") ?? "all"
     const sort = query.get("sort") ?? "newest"
-    if (!(["all","employee","contractor"].includes(workerCategory)) || !(["all","pending","needs_information","ready_for_finance","returned_to_manager","returned_to_submitter","payout_eligible","archived","stale"].includes(state)) || !(["newest","oldest","hours"].includes(sort))) {
+    if (!(["all","employee","contractor"].includes(workerCategory)) || !(["all","pending","needs_information","ready_for_finance","account_approved","returned_to_manager","returned_to_submitter","payout_eligible","archived","stale"].includes(state)) || !(["newest","oldest","hours"].includes(sort))) {
       return Response.json({ error: "One or more export filters are invalid." }, { status: 400 })
     }
     const [periods, handoffs] = await Promise.all([listTimesheetPeriods(), listHandoffs(email, access.role === "admin")])

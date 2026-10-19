@@ -46,6 +46,7 @@ const patchSchema = z
     description: z.string().optional(),
     status: z.enum(["draft", "submitted", "approved", "rejected"]).optional(),
     reviewNote: z.string().trim().max(500).optional(),
+    correctionDueAt: z.string().datetime({offset:true}).optional(),
     expectedRevision: z.string().min(1).max(100).optional(),
     reviewManagerEmail: z.string().email().nullable().optional(),
     batchEntries:z.array(z.object({id:z.string().uuid(),revision:z.string().min(1).max(100)}).strict()).min(1).max(100).optional(),
@@ -204,7 +205,10 @@ export async function PATCH(
     if (!current) {
       return Response.json({ error: "Entry not found." }, { status: 404 })
     }
-    if((access.role==="contractor"||access.role==="employee")&&await isTimesheetDateArchived(current.date)){
+    if(current.correctionOwnerEmail&&access.role!=="admin"&&current.correctionOwnerEmail.toLowerCase()!==access.email.toLowerCase())return Response.json({error:"Only the designated correction owner may edit or resubmit this returned timesheet."},{status:403})
+    if(current.correctionDueAt&&Date.now()>Date.parse(current.correctionDueAt)&&access.role!=="admin")return Response.json({error:`The correction window closed on ${new Date(current.correctionDueAt).toLocaleString()}. Contact an administrator if further changes are required.`},{status:409})
+    const correctionWindowOpen=!!current.correctionOwnerEmail&&current.correctionOwnerEmail.toLowerCase()===access.email.toLowerCase()&&!!current.correctionDueAt&&Date.now()<=Date.parse(current.correctionDueAt)
+    if((access.role==="contractor"||access.role==="employee")&&!correctionWindowOpen&&await isTimesheetDateArchived(current.date)){
       const extensionSubmission=patch.status==="submitted"&&!hasEntryFieldPatch(patch)&&await hasActiveTimesheetExtension(current.ownerEmail??access.email,current.date)
       if(!extensionSubmission)return Response.json({error:"Past timesheet periods are archived and read-only. An approved extension only permits submitting existing draft entries."},{status:409})
     }
@@ -291,9 +295,17 @@ export async function PATCH(
         if(supplied.size!==selection.length||selection.some(item=>supplied.get(item.id)!==item.revision))return Response.json({error:"The timesheet changed. Refresh the complete timesheet before deciding."},{status:409})
       }
       if(patch.status==="rejected"&&!patch.reviewNote?.trim())return Response.json({error:"A rejection reason is required."},{status:400})
+      let correctionDueAt:string|undefined
+      if(patch.status==="rejected"){
+        if(!patch.correctionDueAt)return Response.json({error:"Choose a correction deadline before returning this timesheet."},{status:400})
+        const periodDeadline=period?.exceptionResolutionDeadline??period?.accountApprovalDeadline??period?.submissionDeadline
+        const due=Date.parse(patch.correctionDueAt)
+        if(!periodDeadline||!Number.isFinite(due)||due<=Date.now()||due>Date.parse(periodDeadline))return Response.json({error:"Correction deadlines must be in the future and no later than the configured period resolution deadline."},{status:422})
+        correctionDueAt=new Date(due).toISOString()
+      }
       if(patch.status==="approved"&&!selfAccountManagerApproval&&!((await listAccountIdentities([current.ownerEmail]))[0]))return Response.json({error:"Only a registered account can be approved into the business-accounts workflow."},{status:409})
       const ownerRole=await getEffectiveUserRole(current.ownerEmail)
-      const updated=await decideTimesheetBatch({ownerEmail:current.ownerEmail,startDate,endDate,selection,rejectedEntryId:patch.status==="rejected"?id:undefined},access.email,patch.status,ownerRole??"contractor",access.role==="account_manager",patch.reviewNote?.trim()??"",getAuditContext(req))
+      const updated=await decideTimesheetBatch({ownerEmail:current.ownerEmail,startDate,endDate,selection,rejectedEntryId:patch.status==="rejected"?id:undefined,correctionDueAt},access.email,patch.status,ownerRole??"contractor",access.role==="account_manager",patch.reviewNote?.trim()??"",getAuditContext(req))
       if(updated.length!==selection.length)return Response.json({error:"The timesheet changed while it was being reviewed. Refresh before deciding."},{status:409})
       return Response.json({entry:updated.find(entry=>entry.id===id),entries:updated})
     }
@@ -414,7 +426,10 @@ export async function DELETE(
     if (!current) {
       return Response.json({ error: "Entry not found." }, { status: 404 })
     }
-    if((access.role==="contractor"||access.role==="employee")&&await isTimesheetDateArchived(current.date))return Response.json({error:"Past timesheet periods are archived and read-only. Contact your manager if a correction is required."},{status:409})
+    if(current.correctionOwnerEmail&&access.role!=="admin"&&current.correctionOwnerEmail.toLowerCase()!==access.email.toLowerCase())return Response.json({error:"Only the designated correction owner may delete this returned timesheet."},{status:403})
+    if(current.correctionDueAt&&Date.now()>Date.parse(current.correctionDueAt)&&access.role!=="admin")return Response.json({error:`The correction window closed on ${new Date(current.correctionDueAt).toLocaleString()}. Contact an administrator if further changes are required.`},{status:409})
+    const correctionWindowOpen=!!current.correctionOwnerEmail&&current.correctionOwnerEmail.toLowerCase()===access.email.toLowerCase()&&!!current.correctionDueAt&&Date.now()<=Date.parse(current.correctionDueAt)
+    if((access.role==="contractor"||access.role==="employee")&&!correctionWindowOpen&&await isTimesheetDateArchived(current.date))return Response.json({error:"Past timesheet periods are archived and read-only. Contact your manager if a correction is required."},{status:409})
 
     const scope = await createReviewAccess(access.email, access)(current)
     if(!scope.visible)return Response.json({error:"Entry not found."},{status:404})

@@ -45,10 +45,12 @@ it("persists the assigned manager and explicitly types reviewer parameters in su
   expect(submission.text).toMatch(/'fromStatus',\s*\$\d+::text/)
   expect(submission.text).toMatch(/\$\d+::text = 'manager'/)
   expect(submission.text).toMatch(/'hasReviewNote',\s*\$\d+::boolean/)
-  expect(submission.text).toMatch(/\$18::text,\s*\$19::text,\s*\$20::text,\s*\$21::text,\s*\$22::text/)
+  expect(submission.text).toMatch(/\$19::text,\s*\$20::text,\s*\$21::text,\s*\$22::text,\s*\$23::text/)
   expect(submission.text).toContain("timesheet_extension_requests")
   expect(submission.text).toContain("x.approved_until>=now()")
   expect(submission.text).toContain("lower(x.requester_email)=lower(time_entries.owner_email)")
+  expect(submission.text).toContain("lower(time_entries.correction_owner_email)=lower(")
+  expect(submission.text).toContain("time_entries.correction_due_at>=now()")
 })
 it("types an omitted reviewer parameter in the audited status-update guard",async()=>{
   await updateTimeEntryWithAudit("owner@example.invalid",id,{status:"approved"},false,undefined,revision,{actorEmail:actor,action:"entry_approved",metadata:{},context})
