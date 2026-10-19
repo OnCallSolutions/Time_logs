@@ -351,6 +351,8 @@ describe("TimesheetApp admin directory", () => {
     await user.click(within(activity).getByText("View options"))
     expect(within(activity).getByRole("combobox",{name:"Group audit logs by"})).toBeVisible()
     expect(within(activity).getByRole("combobox",{name:"Audit timesheet period filter"})).toBeVisible()
+    const filterPanel=within(activity).getByRole("combobox",{name:"Audit timesheet period filter"}).parentElement?.parentElement
+    expect(filterPanel).toHaveClass("absolute","right-0","overflow-y-auto","grid-cols-1","sm:grid-cols-2")
     expect(within(activity).getByText("Distinct actors")).toBeVisible()
     expect(within(activity).getByText("entry approved")).toHaveClass("bg-emerald-50")
     expect(within(activity).getAllByText("time entry").at(-1)).toHaveClass("bg-blue-50")
@@ -401,7 +403,8 @@ describe("TimesheetApp admin directory", () => {
     Object.defineProperty(URL,"createObjectURL",{configurable:true,value:createObjectUrl})
     const clickLink=vi.spyOn(HTMLAnchorElement.prototype,"click").mockImplementation(()=>{})
     await user.click(exportButton)
-    await user.click(within(report).getByRole("menuitem",{name:"CSV"}))
+    expect(within(report).getByText(/Download current filtered view ·/)).toBeVisible()
+    await user.click(within(report).getByRole("menuitem",{name:"Download CSV (.csv)"}))
     expect(createObjectUrl).toHaveBeenCalledOnce()
     expect(clickLink).toHaveBeenCalledOnce()
     clickLink.mockRestore()

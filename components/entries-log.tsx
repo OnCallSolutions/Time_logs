@@ -8,7 +8,7 @@
  * workflow controls are available, and whether elevated bulk clearing controls
  * should be available.
  */
-import { AlertTriangle, ChevronRight, Download, Eye, FileText, FilterX, Search, ClipboardList, Trash2 } from "lucide-react"
+import { AlertTriangle, ChevronRight, Download, Eye, FileJson2, FileSpreadsheet, FileText, FilterX, Search, ClipboardList, Trash2 } from "lucide-react"
 import { Fragment,useEffect,useState,type ReactNode } from "react"
 import { EntryLogRow, type EntryMutation, type EntryTransition } from "@/components/entry-log-row"
 import { EntryReviewDialog } from "@/components/manager-workspace"
@@ -16,7 +16,6 @@ import { SubmissionActions } from "@/components/submission-actions"
 import { Button } from "@/components/ui/button"
 import { WindowSurface } from "@/components/window-surface"
 import { apiPath } from "@/lib/paths"
-import { downloadTimesheetPdf } from "@/lib/timesheet-pdf"
 import { downloadTimesheetExport,type TimesheetExportFormat } from "@/lib/timesheet-export"
 import { useRetainedViewState } from "@/components/use-retained-view-state"
 import type { EntryStatus, TimeEntry } from "@/lib/types"
@@ -69,28 +68,6 @@ function compareEntries(a:TimeEntry,b:TimeEntry,sortBy:string,groupBy:string):nu
     status:()=>["draft","submitted","approved","rejected"].indexOf(a.status)-["draft","submitted","approved","rejected"].indexOf(b.status),
   }[sortBy]??dateNewest
   return compare()||a.project.localeCompare(b.project)||a.contractor.localeCompare(b.contractor)||a.id.localeCompare(b.id)
-}
-
-/**
- * Downloads only currently visible rows as spreadsheet-safe CSV.
- * @param entries - Already permission-scoped and filtered timesheet rows.
- * @returns void after initiating a local download.
- */
-function downloadTimesheetCsv(entries:TimeEntry[]):void {
-  const fields=["Contractor","Date","Project","Description","Hours","Status"] as const
-  const rows=entries.map(entry=>[entry.contractor,entry.date,entry.project,entry.description,entry.hours,entry.status])
-  const cell=(value:unknown)=>{
-    const text=String(value??"")
-    const safe=/^[\u0000-\u0020]*[=+\-@]/.test(text)?`'${text}`:text
-    return `"${safe.replaceAll('"','""')}"`
-  }
-  const csv=[fields.map(cell).join(","),...rows.map(row=>row.map(cell).join(","))].join("\r\n")
-  const url=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}))
-  const link=document.createElement("a")
-  link.href=url
-  link.download=`timesheets-${new Date().toISOString().slice(0,10)}.csv`
-  link.click()
-  URL.revokeObjectURL(url)
 }
 
 /**
@@ -316,6 +293,14 @@ export function EntriesLog({
     `Group: ${groupBy}`,
   ].filter(Boolean).join(" · ")||"All entries"
   const exportPreviewRows=visibleEntries.slice(0,20)
+  const downloadFormat=(format:TimesheetExportFormat)=>{
+    setExportMenuOpen(false)
+    setExportError("")
+    setExportBusy(true)
+    void downloadTimesheetExport(visibleEntries,format,exportView)
+      .catch(()=>setExportError("The file could not be generated. Try again or use the preview."))
+      .finally(()=>setExportBusy(false))
+  }
 
   return (
     <div className="timesheet-workspace-frame flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden bg-gradient-to-b from-white to-sky-50/30 shadow-sm">
@@ -374,11 +359,16 @@ export function EntriesLog({
           {canClear&&<Button variant="destructive" size="sm" className="h-7 px-2 text-xs" onClick={() => setClearConfirmationOpen(true)}><Trash2 className="size-3.5" aria-hidden="true" />Clear all</Button>}
           {canExport&&<div className="relative">
             <Button variant="outline" size="sm" className="h-7 border-emerald-300 bg-emerald-50 px-2 text-xs text-emerald-900 hover:bg-emerald-100" disabled={!visibleEntries.length} aria-haspopup="menu" aria-expanded={exportMenuOpen} onClick={()=>setExportMenuOpen(open=>!open)}><Download className="size-3.5" aria-hidden="true"/>Export ({visibleEntries.length})</Button>
-            {exportMenuOpen&&<div role="menu" aria-label="Timesheet export formats" className="absolute right-0 top-full z-30 mt-1 min-w-40 rounded-md border border-slate-200 bg-white p-1 shadow-lg">
-              <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-600" onClick={()=>{downloadTimesheetCsv(visibleEntries);setExportMenuOpen(false)}}><Download className="size-3.5" aria-hidden="true"/>Download CSV</button>
-              <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-600" onClick={()=>{setExportPreviewError("");setExportFormat("xlsx");setExportMenuOpen(false);setExportPreviewOpen(true)}}><Eye className="size-3.5" aria-hidden="true"/>Preview &amp; download…</button>
-              <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-600" onClick={()=>{setExportError("");setExportMenuOpen(false);void downloadTimesheetPdf(visibleEntries,{...exportView,colorMode:"color"}).catch(()=>setExportError("PDF could not be generated. Try again."))}}><FileText className="size-3.5" aria-hidden="true"/>Color PDF</button>
-              <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-600" onClick={()=>{setExportError("");setExportMenuOpen(false);void downloadTimesheetPdf(visibleEntries,{...exportView,colorMode:"grayscale"}).catch(()=>setExportError("PDF could not be generated. Try again."))}}><FileText className="size-3.5" aria-hidden="true"/>Black & white PDF</button>
+            {exportMenuOpen&&<div role="menu" aria-label="Timesheet export formats" className="absolute right-0 top-full z-30 mt-1 grid max-h-[min(70vh,24rem)] min-w-56 gap-0.5 overflow-y-auto rounded-md border border-slate-200 bg-white p-1.5 shadow-lg">
+              <p className="px-2 py-1 text-[11px] font-medium text-slate-600">Download current view · {visibleEntries.length} {visibleEntries.length===1?"entry":"entries"}</p>
+              <button type="button" role="menuitem" disabled={exportBusy} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-600 disabled:opacity-50" onClick={()=>downloadFormat("xlsx")}><FileSpreadsheet className="size-3.5" aria-hidden="true"/>Download Excel (.xlsx)</button>
+              <button type="button" role="menuitem" disabled={exportBusy} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-600 disabled:opacity-50" onClick={()=>downloadFormat("ods")}><FileSpreadsheet className="size-3.5" aria-hidden="true"/>Download OpenDocument (.ods)</button>
+              <button type="button" role="menuitem" disabled={exportBusy} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-600 disabled:opacity-50" onClick={()=>downloadFormat("csv")}><FileSpreadsheet className="size-3.5" aria-hidden="true"/>Download CSV (.csv)</button>
+              <button type="button" role="menuitem" disabled={exportBusy} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-600 disabled:opacity-50" onClick={()=>downloadFormat("json")}><FileJson2 className="size-3.5" aria-hidden="true"/>Download JSON (.json)</button>
+              <button type="button" role="menuitem" disabled={exportBusy} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-600 disabled:opacity-50" onClick={()=>downloadFormat("pdf-color")}><FileText className="size-3.5" aria-hidden="true"/>Download color PDF (.pdf)</button>
+              <button type="button" role="menuitem" disabled={exportBusy} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-600 disabled:opacity-50" onClick={()=>downloadFormat("pdf-grayscale")}><FileText className="size-3.5" aria-hidden="true"/>Download black & white PDF (.pdf)</button>
+              <div className="my-1 border-t border-slate-200" />
+              <button type="button" role="menuitem" disabled={exportBusy} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-600 disabled:opacity-50" onClick={()=>{setExportPreviewError("");setExportFormat("xlsx");setExportMenuOpen(false);setExportPreviewOpen(true)}}><Eye className="size-3.5" aria-hidden="true"/>Preview and choose format…</button>
             </div>}
             {exportError&&<p role="alert" className="absolute right-0 top-full z-30 mt-1 w-56 rounded border border-red-200 bg-white p-2 text-xs text-red-800 shadow">{exportError}</p>}
           </div>}

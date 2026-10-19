@@ -71,18 +71,19 @@ it("keeps export discoverable on headerless and empty timesheet pages",()=>{
   expect(screen.getByRole("button",{name:"Export timesheets"})).toBeDisabled()
 })
 
-it("offers direct Excel/CSV and PDF downloads only to authorized patrons",async()=>{
+it("presents every supported export format to authorized patrons",async()=>{
   const user=userEvent.setup()
   const {rerender}=render(<EntriesLog entries={[entry]} onUpdate={vi.fn()} onStatusChange={vi.fn()} onDelete={vi.fn()} onClear={vi.fn()}/> )
   expect(screen.queryByRole("button",{name:"Export (1)"})).not.toBeInTheDocument()
   rerender(<EntriesLog entries={[{...entry,description:"<script>alert(1)</script>"}]} canExport onUpdate={vi.fn()} onStatusChange={vi.fn()} onDelete={vi.fn()} onClear={vi.fn()}/> )
   await user.click(screen.getByRole("button",{name:"Export (1)"}))
-  expect(screen.getByRole("menuitem",{name:"Download CSV"})).toBeVisible()
-  expect(screen.getByRole("menuitem",{name:"Color PDF"})).toBeVisible()
-  expect(screen.getByRole("menuitem",{name:"Black & white PDF"})).toBeVisible()
-  vi.mocked(downloadTimesheetPdf).mockResolvedValue()
-  await user.click(screen.getByRole("menuitem",{name:"Color PDF"}))
-  expect(downloadTimesheetPdf).toHaveBeenCalledWith([{...entry,description:"<script>alert(1)</script>"}],expect.objectContaining({groupBy:"project",sortBy:"date_newest",colorMode:"color"}))
+  expect(screen.getByText(/Download current view · 1 entry/)).toBeVisible()
+  for(const name of ["Download Excel (.xlsx)","Download OpenDocument (.ods)","Download CSV (.csv)","Download JSON (.json)","Download color PDF (.pdf)","Download black & white PDF (.pdf)","Preview and choose format…"]){
+    expect(screen.getByRole("menuitem",{name})).toBeVisible()
+  }
+  vi.mocked(downloadTimesheetExport).mockResolvedValue()
+  await user.click(screen.getByRole("menuitem",{name:"Download color PDF (.pdf)"}))
+  await waitFor(()=>expect(downloadTimesheetExport).toHaveBeenCalledWith([{...entry,description:"<script>alert(1)</script>"}],"pdf-color",expect.objectContaining({groupBy:"project",sortBy:"date_newest"})))
   expect(screen.queryByRole("menu")).not.toBeInTheDocument()
 })
 
@@ -91,7 +92,7 @@ it("previews the current rows and downloads the chosen format from that preview"
   const rows=[entry,{...entry,id:"two",description:"Second visible row",hours:3}]
   render(<EntriesLog entries={rows} canExport onUpdate={vi.fn()} onStatusChange={vi.fn()} onDelete={vi.fn()} onClear={vi.fn()}/> )
   await user.click(screen.getByRole("button",{name:"Export (2)"}))
-  await user.click(screen.getByRole("menuitem",{name:/Preview & download/}))
+  await user.click(screen.getByRole("menuitem",{name:/Preview and choose format/}))
   expect(await screen.findByRole("dialog",{name:"Timesheet export preview"})).toBeVisible()
   const preview=screen.getByRole("dialog",{name:"Timesheet export preview"})
   expect(within(preview).getByText("Documentation")).toBeVisible()
@@ -119,10 +120,10 @@ it("passes the active filters, period, sort and grouping to the PDF export",asyn
   await user.selectOptions(screen.getByRole("combobox",{name:"Sort entries"}),"hours_high")
   await user.selectOptions(screen.getByRole("combobox",{name:"Group entries"}),"person")
   await user.click(screen.getByRole("button",{name:"Export (1)"}))
-  vi.mocked(downloadTimesheetPdf).mockResolvedValue()
-  await user.click(screen.getByRole("menuitem",{name:"Black & white PDF"}))
-  expect(downloadTimesheetPdf).toHaveBeenCalledWith([rows[0]],expect.objectContaining({
-    period:"All saved periods",search:"Patron",status:"approved",project:"Alpha",sortBy:"hours_high",groupBy:"person",colorMode:"grayscale",
+  vi.mocked(downloadTimesheetExport).mockResolvedValue()
+  await user.click(screen.getByRole("menuitem",{name:"Download black & white PDF (.pdf)"}))
+  expect(downloadTimesheetExport).toHaveBeenCalledWith([rows[0]],"pdf-grayscale",expect.objectContaining({
+    period:"All saved periods",search:"Patron",status:"approved",project:"Alpha",sortBy:"hours_high",groupBy:"person",
   }))
 })
 
