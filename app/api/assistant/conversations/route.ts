@@ -3,11 +3,12 @@ import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { getAssistantConversation, readAssistantRequest } from "@/lib/assistant-security"
 import { z } from "zod"
+import { withOperationalCapture } from "@/lib/api-outcome-capture"
 
 const inputSchema=z.object({workspaceContext:z.string().trim().min(1).max(100).regex(/^[a-zA-Z0-9][a-zA-Z0-9 _.-]*$/)}).strict()
 
 /** @param request - Same-origin JSON request naming the visible workspace. @returns Recent private assistant conversation or a safe error. */
-export async function POST(request:Request):Promise<Response>{
+async function loadAssistantConversation(request:Request):Promise<Response>{
   let input
   try{input=inputSchema.parse(await readAssistantRequest(request,2000))}catch{return Response.json({error:"Invalid assistant workspace."},{status:400})}
   try{
@@ -22,3 +23,5 @@ export async function POST(request:Request):Promise<Response>{
     return Response.json({error:"Assistant memory is temporarily unavailable."},{status:503,headers:{"Cache-Control":"no-store"}})
   }
 }
+
+export const POST=withOperationalCapture("/api/assistant/conversations","POST",loadAssistantConversation)

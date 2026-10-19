@@ -120,14 +120,15 @@ export async function finishAssistantRun(id:string,actor:string,result:{status:"
 }
 
 /** @param limit - Bounded page size. @param before - Optional keyset cursor. @returns Sanitized company run metadata for an admin report. */
-export async function listAssistantRuns(limit:number,before?:{startedAt:string;id:string}):Promise<Array<Record<string,unknown>>>{
+export async function listAssistantRuns(limit:number,before?:{startedAt:string;id:string},filters:{search?:string;status?:string;from?:string;through?:string}={}):Promise<Array<Record<string,unknown>>>{
   await ensureAssistantStorage();const sql=neon(process.env.DATABASE_URL!),pageSize=Math.max(1,Math.min(100,Math.floor(limit)))
-  if(before)return await sql`SELECT run.id,run.actor_email,run.workspace_key,run.model_id,run.status,run.request_chars,run.response_chars,run.proposals,run.duration_ms,run.error_code,run.started_at,run.completed_at
-    FROM assistant_runs run JOIN licensed_company company ON company.company_id=run.company_id AND company.singleton=true
-    WHERE (run.started_at,run.id)<(${before.startedAt}::timestamptz,${before.id}::uuid)
-    ORDER BY run.started_at DESC,run.id DESC LIMIT ${pageSize}`
   return await sql`SELECT run.id,run.actor_email,run.workspace_key,run.model_id,run.status,run.request_chars,run.response_chars,run.proposals,run.duration_ms,run.error_code,run.started_at,run.completed_at
     FROM assistant_runs run JOIN licensed_company company ON company.company_id=run.company_id AND company.singleton=true
+    WHERE (${before?.startedAt??null}::timestamptz IS NULL OR (run.started_at,run.id)<(${before?.startedAt??null}::timestamptz,${before?.id??null}::uuid))
+      AND (${filters.status??null}::text IS NULL OR run.status=${filters.status??null})
+      AND (${filters.from??null}::date IS NULL OR run.started_at>=${filters.from??null}::date)
+      AND (${filters.through??null}::date IS NULL OR run.started_at<(${filters.through??null}::date+interval '1 day'))
+      AND (${filters.search??null}::text IS NULL OR concat_ws(' ',run.actor_email,run.workspace_key,run.model_id,run.error_code,run.status) ILIKE ${filters.search?`%${filters.search}%`:null})
     ORDER BY run.started_at DESC,run.id DESC LIMIT ${pageSize}`
 }
 

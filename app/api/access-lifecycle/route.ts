@@ -11,6 +11,7 @@ import { getAuditContext } from "@/lib/audit"
 import { temporaryPermissions } from "@/lib/access-lifecycle-policy"
 import { getAccountLifecycle,listAccessLifecycle,saveAccountLifecycle,createTemporaryAssignment,revokeTemporaryAssignment,getTemporaryAssignment,extendTemporaryAssignment } from "@/lib/access-lifecycle-store"
 import { z } from "zod"
+import { withOperationalCapture } from "@/lib/api-outcome-capture"
 const reason=z.string().trim().min(1).max(500)
 const email=z.string().email().transform(value=>value.toLowerCase())
 const timestamp=z.string().datetime({offset:true})
@@ -25,7 +26,7 @@ const schema=z.discriminatedUnion("action",[
 ])
 
 /** @returns Promise<Response> containing bounded operator-authorized lifecycle records. */
-export async function GET(){
+async function getAccessLifecycle(){
   try{
     const email=(await auth())?.user?.email;const access=await getEffectivePermissions(email)
     if(!email||!(access.role==="admin"||(access.role==="manager"&&access.permissions.delegate_permissions)))return Response.json({error:"Forbidden."},{status:403})
@@ -34,7 +35,7 @@ export async function GET(){
 }
 
 /** @param req - Explicit action, time boundaries, and required operator reason. @returns Confirmed lifecycle mutation or safe authorization failure. */
-export async function POST(req:Request){
+async function updateAccessLifecycle(req:Request){
   try{
     const actor=(await auth())?.user?.email;const access=await getEffectivePermissions(actor)
     if(!actor||!(access.role==="admin"||(access.role==="manager"&&access.permissions.delegate_permissions)))return Response.json({error:"Forbidden."},{status:403})
@@ -82,3 +83,5 @@ export async function POST(req:Request){
     return Response.json({ok:true})
   }catch(error){return Response.json({error:error instanceof z.ZodError||error instanceof SyntaxError?"Invalid lifecycle settings.":"Lifecycle update unavailable."},{status:error instanceof z.ZodError||error instanceof SyntaxError?400:500})}
 }
+export const GET=withOperationalCapture("/api/access-lifecycle","GET",getAccessLifecycle)
+export const POST=withOperationalCapture("/api/access-lifecycle","POST",updateAccessLifecycle)

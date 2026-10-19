@@ -9,6 +9,7 @@ import { RefreshCw, ShieldCheck, AlertTriangle, Search, ChevronDown, SlidersHori
 import { apiPath } from "@/lib/paths"
 import { WindowSurface } from "@/components/window-surface"
 import { Button } from "@/components/ui/button"
+import { DataExportMenu } from "@/components/data-export-menu"
 
 type Report = { run_day: string; status: string; event_count: number; possibly_truncated: boolean;
   completed_at: string | null; assessment: { severity: string; summary: string;
@@ -75,6 +76,7 @@ export function SecurityRiskWindow({ onClose }: { onClose: () => void }) {
               <label className="text-xs">Sort<select aria-label="Sort security reports" value={sortOrder} onChange={event=>setSortOrder(event.target.value as typeof sortOrder)} className="mt-1 block h-9 rounded-md border border-slate-300 bg-white px-2"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></label>
             </div>
           </details>
+          <DataExportMenu title="Security risk report" filename="security-risk-report" rows={orderedReports.map(report=>({date:String(report.run_day).slice(0,10),status:report.status,severity:report.assessment?.severity??"unavailable",eventsReviewed:report.event_count,coverageTruncated:report.possibly_truncated,summary:report.assessment?.summary??"",findings:(report.assessment?.findings??[]).map((item,index)=>`${index+1}. ${item.explanation} Recommendation: ${item.recommendation} Evidence: ${item.eventIds.join(", ")}`).join(" | ")}))} summary={{reports:orderedReports.length,severity,from:dateFrom||"Any",through:dateThrough||"Any",search:search||"None",sort:sortOrder}}/>
           <Button variant="outline" size="icon-sm" aria-label="Refresh security reports" title="Refresh security reports" disabled={loading} onClick={() => setRefresh(value => value + 1)}><RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} /></Button>
         </div>
       </header>

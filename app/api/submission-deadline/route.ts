@@ -1,5 +1,6 @@
 /** Provides the organization-wide hard deadline for submitting timesheets. */
 import { z } from "zod"
+import { withOperationalCapture } from "@/lib/api-outcome-capture"
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { getAuditContext } from "@/lib/audit"
@@ -13,7 +14,7 @@ const updateSchema = z.object({
 }).strict()
 
 /** Returns the submission boundary to signed-in organization patrons. */
-export async function GET() {
+async function getSubmissionDeadline() {
   try {
     const email = (await auth())?.user?.email
     const access = await getEffectivePermissions(email)
@@ -26,7 +27,7 @@ export async function GET() {
 }
 
 /** Allows only administrators to set a future hard deadline; the database audits it atomically. */
-export async function PATCH(req: Request) {
+async function updateSubmissionDeadline(req: Request) {
   try {
     const email = (await auth())?.user?.email
     const access = await getEffectivePermissions(email)
@@ -39,3 +40,6 @@ export async function PATCH(req: Request) {
     return Response.json({ error: error instanceof z.ZodError || error instanceof SyntaxError ? "Enter a valid future deadline and a short reason." : "Submission deadline could not be saved." }, { status: error instanceof z.ZodError || error instanceof SyntaxError ? 400 : 503 })
   }
 }
+
+export const GET=withOperationalCapture("/api/submission-deadline","GET",getSubmissionDeadline)
+export const PATCH=withOperationalCapture("/api/submission-deadline","PATCH",updateSubmissionDeadline)

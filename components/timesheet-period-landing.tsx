@@ -15,6 +15,8 @@ export function TimesheetPeriodLanding({entries,onSelect,onLogTime,onRefresh,onR
   const [error,setError]=useState("")
   const [periodSearch,setPeriodSearch]=useState("")
   const [periodFilter,setPeriodFilter]=useState("all")
+  const [periodDateFrom,setPeriodDateFrom]=useState("")
+  const [periodDateThrough,setPeriodDateThrough]=useState("")
   const [projectSearch,setProjectSearch]=useState("")
   const [managerSearch,setManagerSearch]=useState("")
   const now=new Date()
@@ -53,11 +55,13 @@ export function TimesheetPeriodLanding({entries,onSelect,onLogTime,onRefresh,onR
     managers.set(name,(managers.get(name)??0)+1);return managers
   },new Map<string,number>())].sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]))
   const normalizedPeriodSearch=periodSearch.trim().toLowerCase()
+  const periodDatesInvalid=!!periodDateFrom&&!!periodDateThrough&&periodDateFrom>periodDateThrough
   const matchingPeriods=ordered.filter(period=>{
     const isCurrent=period.startDate<=today&&period.endDate>=today
     const isUpcoming=period.startDate>today
     const matchesState=periodFilter==="all"||periodFilter==="current"&&isCurrent||periodFilter==="upcoming"&&isUpcoming||periodFilter==="archived"&&period.endDate<today
-    return matchesState&&(!normalizedPeriodSearch||`${period.name} ${period.startDate} ${period.endDate}`.toLowerCase().includes(normalizedPeriodSearch))
+    const overlapsDateWindow=(!periodDateFrom||period.endDate>=periodDateFrom)&&(!periodDateThrough||period.startDate<=periodDateThrough)
+    return matchesState&&overlapsDateWindow&&!periodDatesInvalid&&(!normalizedPeriodSearch||`${period.name} ${period.startDate} ${period.endDate}`.toLowerCase().includes(normalizedPeriodSearch))
   })
   const matchingCurrent=matchingPeriods.filter(period=>period.startDate<=today&&period.endDate>=today)
   const matchingUpcoming=matchingPeriods.filter(period=>period.startDate>today)
@@ -74,7 +78,7 @@ export function TimesheetPeriodLanding({entries,onSelect,onLogTime,onRefresh,onR
     {error&&<p role="alert" className="border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>}
     {loading?<p role="status" className="px-2 py-4 text-sm text-slate-600">Loading period archive…</p>:<div className="grid min-h-0 flex-1 grid-rows-[minmax(8rem,0.4fr)_minmax(0,1fr)] gap-2 lg:grid-cols-[minmax(15rem,0.72fr)_minmax(0,1.28fr)] lg:grid-rows-1">
       <nav aria-label="Available timesheet periods" className="min-h-0 max-h-[calc(100dvh-14rem)] overflow-auto border border-sky-200 bg-sky-50/30 p-2 lg:max-h-none">
-        <div className="mb-2 grid gap-1.5"><label className="relative"><Search className="pointer-events-none absolute left-2 top-2 size-3.5 text-slate-500"/><input type="search" aria-label="Search timesheet periods" value={periodSearch} onChange={event=>setPeriodSearch(event.target.value)} placeholder="Search periods" className="h-8 w-full border border-slate-300 bg-white pl-7 pr-2 text-xs"/></label><select aria-label="Filter timesheet periods" value={periodFilter} onChange={event=>setPeriodFilter(event.target.value)} className="h-8 border border-slate-300 bg-white px-2 text-xs"><option value="all">All periods</option><option value="current">Current</option><option value="upcoming">Upcoming</option><option value="archived">Archived</option></select></div>
+        <div className="mb-2 grid gap-1.5"><label className="relative"><Search className="pointer-events-none absolute left-2 top-2 size-3.5 text-slate-500"/><input type="search" aria-label="Search timesheet periods" value={periodSearch} onChange={event=>setPeriodSearch(event.target.value)} placeholder="Search periods" className="h-8 w-full border border-slate-300 bg-white pl-7 pr-2 text-xs"/></label><select aria-label="Filter timesheet periods" value={periodFilter} onChange={event=>setPeriodFilter(event.target.value)} className="h-8 border border-slate-300 bg-white px-2 text-xs"><option value="all">All periods</option><option value="current">Current</option><option value="upcoming">Upcoming</option><option value="archived">Archived</option></select><div className="grid grid-cols-2 gap-1.5"><label className="min-w-0 text-[10px] text-slate-600">From date<input aria-label="Periods from date" type="date" value={periodDateFrom} onChange={event=>setPeriodDateFrom(event.target.value)} className="mt-0.5 h-8 w-full min-w-0 border border-slate-300 bg-white px-1.5 text-[11px]"/></label><label className="min-w-0 text-[10px] text-slate-600">Through date<input aria-label="Periods through date" type="date" value={periodDateThrough} onChange={event=>setPeriodDateThrough(event.target.value)} className="mt-0.5 h-8 w-full min-w-0 border border-slate-300 bg-white px-1.5 text-[11px]"/></label></div>{(periodDateFrom||periodDateThrough)&&<button type="button" className="justify-self-start text-[10px] text-blue-800 underline underline-offset-2" onClick={()=>{setPeriodDateFrom("");setPeriodDateThrough("")}}>Clear date range</button>}{periodDatesInvalid&&<p role="alert" className="text-[10px] text-red-800">The start date must be on or before the end date.</p>}</div>
         <button type="button" onClick={openAll} className="mb-2 flex w-full items-center justify-between rounded-md border-l-2 border-blue-500 bg-blue-50 px-2.5 py-2 text-left transition hover:bg-blue-100"><span><span className="block text-xs font-semibold text-blue-950">All saved periods</span><span className="block text-[10px] text-blue-800">Combined view · all matching entries</span></span><span className="text-xs tabular-nums text-blue-950">{entries.length}</span></button>
         {!periods.length?<p className="px-2 py-3 text-xs text-slate-600">No time periods are configured. Open all saved timesheets to view existing entries.</p>:<>
           {matchingCurrent.length>0&&<PeriodGroup title="Current period" periods={matchingCurrent} today={today} onSelect={onSelect} dueLabel={dueLabel} periodEntries={periodEntries}/>}

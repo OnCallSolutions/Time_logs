@@ -169,6 +169,11 @@ export function MessagesPanel({canSend,canBroadcast=false,inbox,encryption:share
   const operation=useRef(false)
   const confirmedAssistantDraft=useRef<string|null>(null)
   useEffect(()=>{
+    if(canSend)return
+    setBody("");setComposing(false);setFailed(null);setError(null)
+    confirmedAssistantDraft.current=null
+  },[canSend])
+  useEffect(()=>{
     if(!state.email)return
     try{
       const saved=localStorage.getItem(`tanovo-message-background:${state.email.toLowerCase()}`)
@@ -241,10 +246,11 @@ export function MessagesPanel({canSend,canBroadcast=false,inbox,encryption:share
   },[dateToJump,selectedContact,showAnnouncements,threadMessages,state.messages.length,state.hasMore,state.loadingOlder])
   useEffect(()=>{
     if(!initialDraft)return
+    if(!canSend){onDraftConsumed?.();return}
     setRecipient(initialDraft.recipient.toLowerCase());setBody(initialDraft.body);setAudience("individual");setComposing(true)
     confirmedAssistantDraft.current=initialDraft.confirmed?initialDraft.body:null
     onDraftConsumed?.()
-  },[initialDraft,onDraftConsumed])
+  },[canSend,initialDraft,onDraftConsumed])
   useEffect(() => {
     if(!canSend||!state.email)return
     setRosterLoading(true)
@@ -343,7 +349,7 @@ export function MessagesPanel({canSend,canBroadcast=false,inbox,encryption:share
   /** @returns Promise<void> after encrypting and sending the composed message. */
   async function send():Promise<void>{
     if(operation.current)return
-    if(!canSend){setError("Your current rights do not allow sending messages.");return}
+    if(!canSend)return
     if(rosterLoading){setError("Recipients are still loading. Please try again shortly.");return}
     if(!encryption.unlocked){setError("Secure messaging is connecting automatically. Wait a moment or use Retry connection.");return}
     if(!body.trim())return

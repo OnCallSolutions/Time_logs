@@ -4,10 +4,11 @@ import { useCallback,useEffect,useMemo,useState } from "react"
 import { RefreshCw,Search,Users } from "lucide-react"
 import { apiPath } from "@/lib/paths"
 import { Button } from "@/components/ui/button"
+import { DataExportMenu } from "@/components/data-export-menu"
 
 type TeamMember={email:string;displayName:string;role:"employee"|"contractor";contractorNumber:string|null}
 
-export function ManagerTeamDirectory(){
+export function ManagerTeamDirectory({canExport=false}:{canExport?:boolean}){
   const [people,setPeople]=useState<TeamMember[]>([])
   const [query,setQuery]=useState("")
   const [role,setRole]=useState<"all"|"employee"|"contractor">("all")
@@ -38,7 +39,7 @@ export function ManagerTeamDirectory(){
     </header>
     <div className="flex flex-wrap gap-1.5 border-b border-slate-200 p-2">
       <label className="relative min-w-0 flex-1 basis-52"><span className="sr-only">Search team directory</span><Search className="absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-slate-500"/><input type="search" value={query} onChange={event=>setQuery(event.target.value)} placeholder="Search name, email, or ID" className="h-8 w-full rounded-md border border-slate-300 bg-white pl-7 pr-2 text-xs"/></label>
-      <label className="sr-only" htmlFor="manager-team-role-filter">Filter team by role</label><select id="manager-team-role-filter" aria-label="Filter team by role" value={role} onChange={event=>setRole(event.target.value as typeof role)} className="h-8 rounded-md border border-slate-300 bg-white px-2 text-xs"><option value="all">All roles ({people.length})</option><option value="employee">Employees ({employees})</option><option value="contractor">Contractors ({contractors})</option></select>
+      <label className="sr-only" htmlFor="manager-team-role-filter">Filter team by role</label><select id="manager-team-role-filter" aria-label="Filter team by role" value={role} onChange={event=>setRole(event.target.value as typeof role)} className="h-8 rounded-md border border-slate-300 bg-white px-2 text-xs"><option value="all">All roles ({people.length})</option><option value="employee">Employees ({employees})</option><option value="contractor">Contractors ({contractors})</option></select>{canExport&&<DataExportMenu title="Team directory" filename="manager-team-directory" rows={filtered.map(person=>({name:person.displayName||"Name not set",role:person.role,email:person.email,workerId:person.contractorNumber??""}))} summary={{people:filtered.length,role,search:query||"None"}}/>}
     </div>
     <div className="max-h-56 overflow-auto">
       {loading?<p role="status" className="px-3 py-4 text-xs text-slate-600">Loading assigned team…</p>:error?<p role="alert" className="px-3 py-3 text-xs text-red-800">{error}</p>:filtered.length?<table className="w-full min-w-[34rem] text-left text-xs"><thead className="sticky top-0 bg-sky-50 text-[10px] uppercase text-sky-950"><tr><th className="px-2.5 py-1.5 font-medium">Name</th><th className="px-2.5 py-1.5 font-medium">Role</th><th className="px-2.5 py-1.5 font-medium">Email</th><th className="px-2.5 py-1.5 font-medium">Employee / contractor ID</th></tr></thead><tbody>{filtered.map(person=><tr key={person.email} className="border-t border-slate-200 odd:bg-white even:bg-sky-50/30 hover:bg-sky-100"><td className="max-w-52 truncate px-2.5 py-2 font-medium" title={person.displayName||person.email}>{person.displayName||"Name not set"}</td><td className="px-2.5 py-2 capitalize">{person.role}</td><td className="px-2.5 py-2">{person.email}</td><td className="px-2.5 py-2 font-mono text-[11px]">{person.contractorNumber||"—"}</td></tr>)}</tbody></table>:<p className="px-3 py-4 text-xs text-slate-600">{people.length?"No team members match this search.":"No employees or contractors are currently assigned to you. Assign someone to one of your projects or to your review lane to add them here."}</p>}

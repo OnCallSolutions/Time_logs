@@ -7,6 +7,7 @@
  */
 import { generateText, Output } from "ai"
 import { z } from "zod"
+import { withOperationalCapture } from "@/lib/api-outcome-capture"
 import { listAccountIdentities } from "@/lib/account-identities"
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
@@ -76,7 +77,7 @@ const schema = z.object({
  * @param req - Request containing the free-form notes in the JSON body.
  * @returns JSON response containing parsed entries or an error.
  */
-export async function POST(req: Request) {
+async function parseTimesheetNotes(req: Request) {
   try {
     if(Number(req.headers.get("content-length")??0)>MAX_REQUEST_BYTES)return Response.json({error:"Extraction request is too large."},{status:413})
     const session=await auth()
@@ -136,3 +137,4 @@ export async function POST(req: Request) {
     )
   }
 }
+export const POST=withOperationalCapture("/api/parse","POST",parseTimesheetNotes)

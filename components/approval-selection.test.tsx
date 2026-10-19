@@ -31,6 +31,21 @@ it("approves every submitted entry in the selected timesheet",async()=>{
   expect(JSON.parse(decision?.[1]?.body as string)).toMatchObject({status:"approved",batchEntries:[{id:first.id,revision:"first-revision"},{id:second.id,revision:"second-revision"}]})
 })
 
+it("requires and sends a reason for exceptional admin approval",async()=>{
+  const request=vi.fn(async(url:unknown,_init?:RequestInit)=>String(url).includes("timesheet-periods")?Response.json({periods:[]}):Response.json({entries:[{...first,status:"approved"}]}))
+  vi.stubGlobal("fetch",request)
+  render(<ApprovalSelection entries={[first]} {...props} adminOverride/> )
+  const user=userEvent.setup()
+  await user.click(screen.getByRole("checkbox",{name:/Select timesheet Supplier/}))
+  await user.click(screen.getByRole("button",{name:"Review 1 timesheet"}))
+  expect(screen.getByRole("button",{name:"Record admin approval"})).toBeDisabled()
+  await user.type(screen.getByRole("textbox",{name:"Admin intervention reason"}),"Coverage while manager is unavailable")
+  await user.click(screen.getByRole("button",{name:"Record admin approval"}))
+  await waitFor(()=>expect(request).toHaveBeenCalledTimes(2))
+  const decision=request.mock.calls.find(([url])=>!String(url).includes("timesheet-periods"))
+  expect(JSON.parse(decision?.[1]?.body as string)).toMatchObject({status:"approved",reviewNote:"Coverage while manager is unavailable"})
+})
+
 it("returns the whole timesheet but marks only the selected entry rejected",async()=>{
   const updated=vi.fn()
   const correctionDeadline="2099-11-06T12:00:00.000Z"

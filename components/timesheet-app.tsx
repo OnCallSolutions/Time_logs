@@ -12,6 +12,7 @@ import { Fragment,useEffect, useRef, useState, type PointerEvent as ReactPointer
 import { getSession } from "next-auth/react"
 import { AssistantPanel } from "@/components/assistant-panel"
 import { AssistantRunReport } from "@/components/assistant-run-report"
+import { DataExportMenu } from "@/components/data-export-menu"
 import { ReviewerHelpDialog } from "@/components/reviewer-help-dialog"
 import { ManagerRejectionArchive } from "@/components/manager-rejection-archive"
 import { Brand } from "@/components/brand"
@@ -41,6 +42,7 @@ import { WindowSurface } from "@/components/window-surface"
 import { WindowAssistantProvider } from "@/components/window-assistant-context"
 import { WorkspaceUtilities } from "@/components/workspace-utilities"
 import {
+  ArrowRight,
   Activity,
   CalendarClock,
   ChevronDown,
@@ -49,7 +51,6 @@ import {
   BarChart3,
   CheckCircle2,
   Clock3,
-  Download,
   FolderKanban,
   ListChecks,
   MessageSquare,
@@ -227,6 +228,9 @@ type AdminAuditEvent = {
 }
 
 type AdminAuditReport = "access" | "periods" | "projects" | "api-errors"
+type OperationalFilters={search:string;from:string;through:string;category:string;status:string}
+type OperationalEventWire={id:string;correlationId:string;actorEmail:string;category:string;operation:string;route:string;method:string|null;httpStatus:number|null;errorCode:string|null;message:string;requestId:string|null;occurredAt:string}
+function mapOperationalEvents(events:OperationalEventWire[]):AdminAuditEvent[]{return events.map(event=>({id:event.id,actorEmail:event.actorEmail,action:event.category==="client_error"?"client_error_reported":"operational_failure",targetType:event.category,targetId:event.correlationId,metadata:{category:event.category,operation:event.operation,route:event.route,httpMethod:event.method,httpStatus:event.httpStatus,errorCode:event.errorCode,message:event.message},ipAddress:null,userAgent:null,requestMethod:event.method,requestPath:event.route,requestId:event.requestId,occurredAt:event.occurredAt}))}
 
 /**
  * Coordinates the signed-in user's role-aware timesheet workspace.
@@ -845,16 +849,18 @@ export function TimesheetApp({
 
       {!accessDenied && <nav aria-label="Workspaces" className="flex flex-wrap gap-2 border-b pb-3">
           {role==="admin" ? <>
+          {view==="admin"&&adminStartSection==="landing"&&permissions.create_entries&&<Button className="border border-orange-800 bg-orange-700 font-semibold text-white shadow-sm hover:bg-orange-800" onClick={()=>setWorkspaceWindow("notes")}><Sparkles className="size-4"/>Extract timesheet with AI<ArrowRight className="size-4"/></Button>}
           <Button variant="outline" onClick={()=>openWorkspacePage("admin","admin")}><ShieldCheck className="size-4"/>Admin</Button>
           <Button variant="outline" onClick={()=>openWorkspacePage("admin","reports")}><BarChart3 className="size-4"/>Reports</Button>
           <Button variant="outline" onClick={()=>openWorkspacePage("admin","timesheets")}><Layers3 className="size-4"/>Timesheets</Button>
           {permissions.manage_projects&&<Button variant="outline" onClick={()=>setWorkspaceWindow("projects")}><FolderKanban className="size-4"/>Projects</Button>}
         </> : <>
           {role!=="account_manager"&&<Button variant="outline" onClick={()=>openWorkspacePage("period-index")}><Layers3 className="size-4"/>Timesheets</Button>}
+          {role==="manager"&&<Button variant="outline" onClick={()=>openWorkspacePage("personal")}><Clock3 className="size-4"/>My timesheets</Button>}
           {(canReviewEntries||canAIReview)&&<Button variant="outline" onClick={()=>openWorkspacePage("approvals")}><CheckCircle2 className="size-4"/>Approvals</Button>}
           {role==="account_manager"&&permissions.view_all_timesheets&&<Button variant="outline" onClick={()=>openWorkspacePage("period-index")}><Layers3 className="size-4"/>Timesheets</Button>}
           {role==="account_manager"&&permissions.view_accounts&&<Button variant="outline" onClick={()=>openWorkspacePage("accounts")}><ShieldCheck className="size-4"/>Final timesheets</Button>}
-          {role==="account_manager"&&permissions.review_entries&&<Button variant="outline" onClick={()=>setExtensionPanelOpen(true)}><Timer className="size-4"/>Extensions</Button>}
+          {(role==="account_manager"||role==="manager")&&(permissions.review_entries||role==="manager"&&permissions.submit_entries)&&<Button variant="outline" onClick={()=>setExtensionPanelOpen(true)}><Timer className="size-4"/>{role==="manager"&&permissions.submit_entries&&!permissions.review_entries?"Request extension":"Extensions"}</Button>}
           <Button variant="outline" onClick={()=>openWorkspacePage(canViewTeamReports?"report":"my-report")}><BarChart3 className="size-4"/>{canViewTeamReports?"Reports":"My report"}</Button>
           {canViewAdmin&&<Button variant="outline" onClick={()=>openWorkspacePage("admin","admin")}><ShieldCheck className="size-4"/>Admin</Button>}
           {permissions.view_personal_reports&&role==="contractor"&&<Button variant="outline" onClick={()=>openWorkspacePage("activity")}><Activity className="size-4"/>Account activity</Button>}
@@ -865,10 +871,10 @@ export function TimesheetApp({
       {!accessDenied&&!(view==="log"||view==="personal"||view==="period-index"||(view==="admin"&&adminStartSection==="timesheets"))&&<SubmissionDeadlineNotice/>}
       {lifecycleOpen&&!accessDenied&&(canViewAdmin||(role==="manager"&&permissions.delegate_permissions))&&<WindowSurface title={canViewAdmin?"Access lifecycle":"Temporary coverage"} onBack={()=>setLifecycleOpen(false)}><section className="min-h-0 w-full overflow-auto bg-white"><AccessLifecyclePanel key={role} admin={canViewAdmin} permissions={permissions}/></section></WindowSurface>}
       {canViewAdmin && technologyReports && <SecurityRiskWindow onClose={() => setTechnologyReports(false)} />}
-      {!accessDenied&&extensionPanelOpen&&(role==="account_manager"?permissions.review_entries:(role==="employee"||role==="contractor")&&permissions.submit_entries)&&<SubmissionExtensionPanel reviewer={role==="account_manager"} onClose={()=>{setExtensionPanelOpen(false);setEntriesRefresh(value=>value+1)}}/>}
+      {!accessDenied&&extensionPanelOpen&&((role==="account_manager"||role==="manager")&&permissions.review_entries||((role==="employee"||role==="contractor"||role==="manager")&&permissions.submit_entries))&&<SubmissionExtensionPanel reviewer={(role==="account_manager"||role==="manager")&&permissions.review_entries} canRequest={permissions.submit_entries&&(role==="employee"||role==="contractor"||role==="manager")} requesterRole={role==="manager"?"manager":role==="employee"?"employee":"contractor"} onClose={()=>{setExtensionPanelOpen(false);setEntriesRefresh(value=>value+1)}}/>}
 
-      {!accessDenied&&workspaceWindow&&<WindowSurface title={workspaceWindow==="notes"?"Create timesheet entries":workspaceWindow==="projects"?(permissions.manage_projects?"Projects and assignments":"My projects"):workspaceWindow==="overview"?"Workspace overview":"Workflow totals"} onBack={()=>setWorkspaceWindow(null)} compact={workspaceWindow!=="notes"}><section className={"flex min-h-0 w-full flex-col bg-white "+(workspaceWindow==="notes"||workspaceWindow==="projects"?"max-w-none":"mx-auto max-w-6xl")}><div className="min-h-0 flex-1 overflow-auto p-4">
-      {workspaceWindow==="projects"?(permissions.manage_projects||permissions.create_projects?<ProjectManagement fullWidth canManage={permissions.manage_projects} canCreate={permissions.manage_projects||permissions.create_projects}/>:<p role="status" className="m-4 border border-orange-200 bg-orange-50 p-3 text-sm text-orange-950">Project access was updated. Returning to your available workspace…</p>):workspaceWindow==="overview"?<RoleOverview role={role}/>:workspaceWindow==="notes"?(permissions.create_entries?<NoteInput canCreateProjects={permissions.create_projects} onParsed={async (parsed,periodId)=>{await addParsed(parsed,periodId);setWorkspaceWindow(null);if(role!=="admin"||view!=="admin")openWorkspacePage(role==="manager"?"personal":"log")}}/>:<p role="status" className="m-4 border border-orange-200 bg-orange-50 p-3 text-sm text-orange-950">Time-entry access was updated. Returning to your available workspace…</p>):<WorkflowOverview
+      {!accessDenied&&workspaceWindow&&<WindowSurface title={workspaceWindow==="notes"?"Create timesheet entries":workspaceWindow==="projects"?(permissions.manage_projects?role==="manager"?"My projects and team assignments":"Organization projects and assignments":"My projects"):workspaceWindow==="overview"?"Workspace overview":"Workflow totals"} onBack={()=>setWorkspaceWindow(null)} compact={workspaceWindow!=="notes"}><section className={"flex min-h-0 w-full flex-col bg-white "+(workspaceWindow==="notes"||workspaceWindow==="projects"?"max-w-none":"mx-auto max-w-6xl")}><div className="min-h-0 flex-1 overflow-auto p-4">
+      {workspaceWindow==="projects"?(permissions.manage_projects||permissions.create_projects?<ProjectManagement fullWidth canManage={permissions.manage_projects} canCreate={permissions.manage_projects||permissions.create_projects} organizationWide={role==="admin"||role==="account_manager"}/>:<p role="status" className="m-4 border border-orange-200 bg-orange-50 p-3 text-sm text-orange-950">Project access was updated. Returning to your available workspace…</p>):workspaceWindow==="overview"?<RoleOverview role={role}/>:workspaceWindow==="notes"?(permissions.create_entries?<NoteInput canCreateProjects={permissions.create_projects} onParsed={async (parsed,periodId)=>{await addParsed(parsed,periodId);setWorkspaceWindow(null);if(role!=="admin"||view!=="admin")openWorkspacePage(role==="manager"?"personal":"log")}}/>:<p role="status" className="m-4 border border-orange-200 bg-orange-50 p-3 text-sm text-orange-950">Time-entry access was updated. Returning to your available workspace…</p>):<WorkflowOverview
         approvedCount={approvedEntries.length}
         draftCount={draftEntries.length}
         pendingCount={pendingEntries.length}
@@ -876,7 +882,7 @@ export function TimesheetApp({
         role={role}
       />}
       </div></section></WindowSurface>}
-      {!accessDenied&&role==="account_manager"&&accountManagerTool&&(accountManagerTool==="periods"?permissions.manage_timesheet_periods:permissions.manage_projects)&&<WindowSurface title={accountManagerTool==="periods"?"Timesheet periods and submission windows":"Projects and workforce assignments"} onBack={()=>setAccountManagerTool(null)}><section className={accountManagerTool==="periods"?"flex h-full min-h-0 w-full flex-col overflow-hidden bg-white":"min-h-0 w-full overflow-auto bg-white"}>{accountManagerTool==="periods"?<div className="flex min-h-0 flex-1 flex-col p-3 sm:p-5"><SubmissionDeadlineSettings defaultOpen/></div>:<ProjectManagement fullWidth canManage={permissions.manage_projects} canCreate={permissions.manage_projects}/>}</section></WindowSurface>}
+      {!accessDenied&&role==="account_manager"&&accountManagerTool&&(accountManagerTool==="periods"?permissions.manage_timesheet_periods:permissions.manage_projects)&&<WindowSurface title={accountManagerTool==="periods"?"Timesheet periods and submission windows":"Projects and workforce assignments"} onBack={()=>setAccountManagerTool(null)}><section className={accountManagerTool==="periods"?"flex h-full min-h-0 w-full flex-col overflow-hidden bg-white":"min-h-0 w-full overflow-auto bg-white"}>{accountManagerTool==="periods"?<div className="flex min-h-0 flex-1 flex-col p-3 sm:p-5"><SubmissionDeadlineSettings defaultOpen/></div>:<ProjectManagement fullWidth canManage={permissions.manage_projects} canCreate={permissions.manage_projects} organizationWide/>}</section></WindowSurface>}
       {!accessDenied&&reviewerHelp&&role==="manager"&&permissions.request_review_help&&permissions.delegate_permissions&&permissions.send_messages&&<ReviewerHelpDialog entries={reviewerHelp} email={userEmail??""} encryption={messageEncryption} onClose={()=>setReviewerHelp(null)} onComplete={()=>{setReviewerHelp(null);messageInbox.refresh();setEntriesRefresh(value=>value+1)}}/>}
       {suggestedReview && <EntryReviewDialog entry={suggestedReview.entry} decision={suggestedReview.decision} initialNote={suggestedReview.reason} onCancel={() => setSuggestedReview(null)} onConfirm={async note => {
         await changeEntryStatus(suggestedReview.entry.id,suggestedReview.decision,note || undefined,suggestedReview.entry.revision)
@@ -897,6 +903,7 @@ export function TimesheetApp({
             canCreate={permissions.create_entries}
             canReview={canReviewEntries||canAIReview}
             canReports={canViewTeamReports}
+            canExport={permissions.export_entries}
             canManageProjects={permissions.manage_projects}
             canCreateProjects={permissions.create_projects}
             canManageAccess={permissions.delegate_permissions}
@@ -904,8 +911,8 @@ export function TimesheetApp({
             canManagePeriods={permissions.manage_timesheet_periods}
             canViewAllTimesheets={permissions.view_all_timesheets}
             canViewAccounts={permissions.view_accounts}
-            canViewTeamDirectory={role==="manager"&&permissions.view_team}
-            onTimesheets={()=>openWorkspacePage("period-index")}
+            canRequestExtension={role==="manager"&&permissions.submit_entries}
+            onTimesheets={()=>openWorkspacePage(role==="manager"?"personal":"period-index")}
             onReviews={()=>openWorkspacePage("approvals")}
             onLogTime={()=>setWorkspaceWindow("notes")}
             onReport={()=>openWorkspacePage(canViewTeamReports?"report":"my-report")}
@@ -914,6 +921,7 @@ export function TimesheetApp({
             onActivity={()=>openWorkspacePage("activity")}
             onPeriodSettings={()=>setAccountManagerTool("periods")}
             onFinalApprovals={()=>openWorkspacePage("accounts")}
+            onRequestExtension={()=>setExtensionPanelOpen(true)}
           />}
           {view!=="home"&&<>
           {savedStatus&&!syncError&&<p role="status" className="border-y border-green-200 bg-green-50 px-4 py-2 text-sm text-green-900">{savedStatus}</p>}
@@ -977,7 +985,7 @@ export function TimesheetApp({
         />
         </>
       ) : view === "approvals" ? (
-        role==="account_manager"? <section aria-label="Approval workspace" className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden"><BusinessAccounts canSend={false} canReview={permissions.review_accounts&&permissions.review_entries} canAI={permissions.ai_accounts} canAuthorize={permissions.authorize_payouts} onManagePeriods={permissions.manage_timesheet_periods?()=>setAccountManagerTool("periods"):undefined} onManageProjects={permissions.manage_projects?()=>setAccountManagerTool("projects"):undefined} onDataChanged={()=>setEntriesRefresh(value=>value+1)}/></section> : <section aria-label="Approval workspace" className="min-w-0 space-y-4">
+        role==="account_manager"? <section aria-label="Approval workspace" className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden"><div className="min-h-0 flex-1 overflow-auto p-3"><section aria-label="Direct account-manager approvals" className="mb-4 border-l-4 border-blue-500 bg-blue-50/60 px-3 py-2"><h2 className="text-sm font-semibold">Direct account-manager approvals</h2><p className="mb-2 text-xs text-muted-foreground">Manager personal timesheets come here for final review. Existing direct assignments are also kept visible; manager-approved workforce batches are in the handoff queue below.</p>{pendingEntries.length?<ApprovalSelection entries={pendingEntries} email={userEmail??""} canReview={canReviewEntries} canAI={canAIReview} allowSelfApproval finalApprover onUpdated={entry=>{entryReadEpoch.current++;setEntries(previous=>previous.map(current=>current.id===entry.id?entry:current))}}/>:<p className="py-2 text-sm text-muted-foreground">No direct submissions are awaiting review.</p>}</section><div className="min-h-[50dvh]"><BusinessAccounts canSend={false} canReview={permissions.review_accounts&&permissions.review_entries} canAI={permissions.ai_accounts} canAuthorize={permissions.authorize_payouts} onManagePeriods={permissions.manage_timesheet_periods?()=>setAccountManagerTool("periods"):undefined} onManageProjects={permissions.manage_projects?()=>setAccountManagerTool("projects"):undefined} onDataChanged={()=>setEntriesRefresh(value=>value+1)}/></div></div></section> : <section aria-label="Approval workspace" className="min-w-0 space-y-4">
         {role==="manager"&&<div className="flex flex-wrap items-center justify-between gap-2 border-y border-red-200 bg-red-50/60 px-3 py-2"><div><h2 className="text-sm font-semibold text-red-950">Manager review archive</h2><p className="text-xs text-red-900">Rejection decisions and return reasons, searchable and grouped by person or date.</p></div><ManagerRejectionArchive/></div>}
         {(canReviewEntries||canAIReview||canViewTeamReports)&&<ManagerWorkspace canReview={canReviewEntries} canReports={canViewTeamReports} canAI={canAIReview} pending={pendingEntries.length} entries={pendingEntries} onApprovals={()=>{}} onReports={()=>openWorkspacePage("report")} onRecommendation={(entry,decision,reason)=>setSuggestedReview({entry,decision,reason})}/>}
         {pendingEntries.length === 0 ? (
@@ -1175,6 +1183,10 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
   const [users, setUsers] = useState<AdminDirectoryUser[]>([])
   const [auditEvents, setAuditEvents] = useState<AdminAuditEvent[]>([])
   const [allActivityEvents, setAllActivityEvents] = useState<AdminAuditEvent[]>([])
+  const [operationalEvents,setOperationalEvents]=useState<AdminAuditEvent[]>([])
+  const [operationalCursor,setOperationalCursor]=useState<{occurredAt:string;id:string}|null>(null)
+  const [operationalFilters,setOperationalFilters]=useState<OperationalFilters>({search:"",from:"",through:"",category:"",status:""})
+  const [auditFilters,setAuditFilters]=useState<OperationalFilters>({search:"",from:"",through:"",category:"",status:""})
   const [activityCursor,setActivityCursor]=useState<{occurredAt:string;id:string}|null>(null)
   const [activityLoadingMore,setActivityLoadingMore]=useState(false)
   const [activityWindowOpen, setActivityWindowOpen] = useState(false)
@@ -1563,40 +1575,63 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
     setActivityWindowOpen(true)
     setActivityError(null)
 
-    if (allActivityEvents.length > 0) return
-
-    setActivityLoading(true)
-    try {
-      const res = await fetch(apiPath("/api/audit?limit=250"), {
-        cache: "no-store",
-      })
-      const data = await res.json()
-      if (!res.ok) {
-        throw new Error(data.error ?? "Failed to load app activity.")
-      }
-      setAllActivityEvents(data.events ?? [])
-      setActivityCursor(data.nextCursor??null)
-    } catch (err) {
-      setActivityError(
-        err instanceof Error ? err.message : "Failed to load app activity.",
-      )
-    } finally {
-      setActivityLoading(false)
+    if(report==="api-errors"){
+      await loadOperationalEvents(operationalFilters,false)
+      return
     }
+
+    await loadAuditEvents(auditFilters,false,report)
+  }
+
+  async function loadAuditEvents(filters:OperationalFilters,append:boolean,scope:AdminAuditReport|null=activityReport){
+    if(append&&!activityCursor)return
+    append?setActivityLoadingMore(true):setActivityLoading(true);setActivityError(null)
+    try{
+      const params=new URLSearchParams({limit:"100"})
+      if(filters.search.trim())params.set("search",filters.search.trim())
+      if(filters.from)params.set("from",filters.from)
+      if(filters.through)params.set("through",filters.through)
+      if(filters.category)params.set("targetType",filters.category)
+      if(scope&&scope!=="api-errors")params.set("scope",scope)
+      if(append&&activityCursor){params.set("beforeAt",activityCursor.occurredAt);params.set("beforeId",activityCursor.id)}
+      const response=await fetch(apiPath(`/api/audit?${params}`),{cache:"no-store"}),data=await response.json()
+      if(!response.ok)throw new Error(data.error??"Failed to load app activity.")
+      setAllActivityEvents(previous=>append?[...previous,...(data.events??[])]:data.events??[])
+      setActivityCursor(data.nextCursor??null)
+    }catch(error){setActivityError(error instanceof Error?error.message:"Failed to load app activity.")}
+    finally{setActivityLoading(false);setActivityLoadingMore(false)}
+  }
+
+  async function loadOperationalEvents(filters:OperationalFilters,append:boolean){
+    if(append&&!operationalCursor)return
+    setActivityError(null)
+    append?setActivityLoadingMore(true):setActivityLoading(true)
+    try{
+      const params=new URLSearchParams({limit:"100"})
+      if(filters.search.trim())params.set("search",filters.search.trim())
+      if(filters.from)params.set("from",filters.from)
+      if(filters.through)params.set("through",filters.through)
+      if(filters.category)params.set("category",filters.category)
+      if(filters.status)params.set("status",filters.status)
+      if(append&&operationalCursor){params.set("beforeAt",operationalCursor.occurredAt);params.set("beforeId",operationalCursor.id)}
+      const response=await fetch(apiPath(`/api/operational-events?${params}`),{cache:"no-store"}),data=await response.json()
+      if(!response.ok)throw new Error(data.error??"Failed to load operational events.")
+      const mapped=mapOperationalEvents(data.events??[])
+      setOperationalEvents(previous=>append?[...previous,...mapped]:mapped)
+      setOperationalCursor(data.nextCursor??null)
+    }catch(error){setActivityError(error instanceof Error?error.message:"Operational events could not be loaded.")}
+    finally{setActivityLoading(false);setActivityLoadingMore(false)}
   }
 
   async function loadMoreActivity():Promise<void>{
+    if(activityReport==="api-errors"){
+      if(activityLoadingMore)return
+      await loadOperationalEvents(operationalFilters,true)
+      return
+    }
     if(!activityCursor||activityLoadingMore)return
     setActivityLoadingMore(true);setActivityError(null)
-    try{
-      const query=new URLSearchParams({limit:"250",beforeAt:activityCursor.occurredAt,beforeId:activityCursor.id})
-      const response=await fetch(apiPath(`/api/audit?${query.toString()}`),{cache:"no-store"})
-      const data=await response.json()
-      if(!response.ok)throw new Error(data.error??"Failed to load older audit events.")
-      setAllActivityEvents(previous=>[...previous,...(data.events??[])])
-      setActivityCursor(data.nextCursor??null)
-    }catch(error){setActivityError(error instanceof Error?error.message:"Failed to load older audit events.")}
-    finally{setActivityLoadingMore(false)}
+    await loadAuditEvents(auditFilters,true,activityReport)
   }
 
   const activityEvents = allActivityEvents.length > 0 ? allActivityEvents : auditEvents
@@ -1660,6 +1695,7 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
               <label className="sr-only" htmlFor="patron-search">Search patrons by name or email</label><input id="patron-search" type="search" value={patronSearch} onChange={event=>setPatronSearch(event.target.value)} placeholder="Search name or email" className="h-8 min-w-0 flex-1 basis-52 rounded-md border border-slate-300 px-2.5 text-sm"/>
               <label className="sr-only" htmlFor="patron-role-filter">Filter patrons by role</label><select id="patron-role-filter" value={patronRoleFilter} onChange={event=>setPatronRoleFilter(event.target.value)} className="h-8 rounded-md border border-slate-300 bg-white px-2 text-xs"><option value="all">All roles</option>{["admin","manager","account_manager","employee","contractor","none"].map(value=><option key={value} value={value}>{value==="none"?"Unassigned":value.replaceAll("_"," ")}</option>)}</select>
               <label className="sr-only" htmlFor="patron-status-filter">Filter people by access status</label><select id="patron-status-filter" value={patronStatusFilter} onChange={event=>setPatronStatusFilter(event.target.value)} className="h-8 rounded-md border border-slate-300 bg-white px-2 text-xs"><option value="all">All access states</option><option value="needs_attention">Needs attention</option>{["active","suspended","retired","blocked","denied","observed"].map(value=><option key={value} value={value}>{value==="observed"?"Observed":accessStatusLabel(value as AccessStatus)}</option>)}</select>
+              <DataExportMenu title="Patron directory" filename="patron-directory" rows={landingPatrons.map(user=>({name:displayOfficialName(user.displayName),email:user.email,role:user.role,accessStatus:user.accessStatus,accessSource:user.accessSource,configured:user.accessConfigured,lastUpdated:user.updatedAt??""}))} summary={{patrons:landingPatrons.length,role:patronRoleFilter,status:patronStatusFilter,search:patronSearch||"None"}}/>
             </div>
             <div className="min-h-0 flex-1 overflow-auto overscroll-contain">
               {loading?<p role="status" className="p-3 text-sm text-slate-600">Loading organization patrons...</p>:error?<p role="alert" className="p-3 text-sm text-red-700">{error}</p>:landingPatrons.length===0?<p className="p-3 text-sm text-slate-600">No patrons match these filters.</p>:<table className="w-full min-w-[500px] text-left text-sm"><thead className="sticky top-0 z-[1] bg-sky-50"><tr className="border-b border-sky-200 text-[11px] uppercase text-sky-950"><th className="px-2.5 py-1.5 font-medium">Patron</th><th className="px-2.5 py-1.5 font-medium">Role</th><th className="px-2.5 py-1.5 font-medium">Access</th><th className="px-2.5 py-1.5 text-right font-medium">Edit</th></tr></thead><tbody>{landingPatrons.map(user=><tr key={user.email} className="border-b border-slate-100 odd:bg-white even:bg-sky-50/30 hover:bg-orange-50"><td className="px-2.5 py-1.5"><button type="button" className="max-w-full truncate text-left text-sm font-medium text-slate-900 underline-offset-2 hover:underline" onClick={()=>setSelectedPatron(user)}>{displayOfficialName(user.displayName)}</button></td><td className="px-2.5 py-1.5"><span className={`inline-flex rounded-full border px-1.5 py-0.5 text-[11px] font-medium capitalize ${roleBadgeClass(user.role)}`}>{user.role.replaceAll("_"," ")}</span></td><td className="px-2.5 py-1.5 text-xs">{user.accessStatus==="observed"?"Observed":accessStatusLabel(user.accessStatus)}</td><td className="px-2.5 py-1 text-right"><Button type="button" variant="outline" size="sm" className="h-7 border-orange-300 bg-orange-50 px-2 text-orange-900 hover:bg-orange-100" onClick={()=>openEditUserEditor(user)} disabled={savingUser===user.email}><Pencil className="size-3.5"/><span className="sr-only">Edit access for {displayOfficialName(user.displayName)}</span></Button></td></tr>)}</tbody></table>}
@@ -1724,6 +1760,7 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
       {!rightsOnly&&adminSection==="timesheets"&&<WindowSurface title="Timesheets" onBack={backAdminSection}>
         <section className="flex min-h-0 w-full flex-col gap-3 overflow-auto bg-white p-4 sm:p-6">
           <header className="flex flex-wrap items-center justify-between gap-2 border-b border-green-200 bg-green-50 px-3 py-2"><div><h2 className="font-semibold text-green-950">Timesheet periods</h2><p className="text-xs text-green-900">Choose a period to open its raw timesheets, approval tools, and manual or AI-assisted workflows.</p></div><div className="flex flex-wrap gap-2">{canManagePeriods&&<Button variant="outline" size="sm" onClick={()=>setAdminTimesheetTool("periods")}><CalendarClock className="size-4"/>Period settings</Button>}<Button variant="outline" size="sm" onClick={onRefreshEntries}><Activity className="size-4"/>Refresh</Button></div></header>
+          {canReviewEntries&&pendingEntries.length>0&&<section className="flex flex-wrap items-center justify-between gap-3 border-l-4 border-orange-500 bg-orange-50 px-3 py-2.5"><div><h3 className="text-sm font-semibold text-orange-950">Escalations needing admin attention</h3><p className="text-xs text-orange-900">Managers normally handle approvals. Step in only for coverage, troubleshooting, or a requested override.</p></div><Button size="sm" variant="outline" className="border-orange-300 bg-white text-orange-950 hover:bg-orange-100" onClick={()=>setAdminTimesheetTool("entries")}><Layers3 className="size-4"/>Open {pendingEntries.length} pending timesheets</Button></section>}
           <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[minmax(15rem,0.72fr)_minmax(0,1.28fr)]">
             <nav aria-label="Timesheet periods" className="min-h-0 overflow-auto rounded-lg border border-sky-200 bg-sky-50/40 p-2">
               <h3 className="px-2 py-1 text-xs font-semibold uppercase text-sky-950">Period archive</h3>
@@ -1762,9 +1799,9 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
       {!rightsOnly&&adminTimesheetTool==="periods"&&<WindowSurface title="Timesheet period settings" onBack={()=>setAdminTimesheetTool(null)}><section className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-white p-2 sm:p-3"><header className="mb-2 shrink-0 border-l-4 border-orange-500 bg-orange-50 px-3 py-2"><h2 className="font-semibold text-orange-950">Timesheet periods and submission windows</h2><p className="text-xs text-orange-900">Create a new period or edit and save an existing window. When a period's dates take effect, it becomes the current empty timesheet view for everyone; prior periods remain available in Timesheets archives.</p></header><SubmissionDeadlineSettings defaultOpen/></section></WindowSurface>}
       {!rightsOnly&&adminTimesheetTool==="entries"&&<WindowSurface title="Timesheet view" onBack={()=>setAdminTimesheetTool(null)}><section className="flex min-h-0 w-full flex-col gap-1 overflow-hidden bg-white p-2 sm:p-3">
         <header className="flex flex-wrap items-center justify-between gap-2 border-b border-green-200 bg-green-50 px-3 py-1.5"><div className="flex min-w-0 flex-wrap items-baseline gap-x-2"><h2 className="font-semibold text-green-950">Raw timesheet entries</h2><p className="text-xs text-green-900">Search, filter, group, review, and export time records.</p></div><div className="flex flex-wrap gap-1">{canCreateEntries&&<Button variant="outline" size="icon-sm" aria-label="Log time" title="Log time" onClick={onOpenEntryCapture}><Pencil className="size-4"/></Button>}<Button variant="outline" size="icon-sm" aria-label="Refresh entries" title="Refresh entries" onClick={onRefreshEntries}><Activity className="size-4"/></Button></div></header>
-        <EntriesLog stateKey={`admin-timesheets:${userEmail.toLowerCase()}`} userEmail={userEmail} entries={entries} onUpdate={onEntryUpdate} onStatusChange={onEntryStatusChange} onDelete={onEntryDelete} onClear={onEntryClear} canEdit={canEditEntries} canDelete={canDeleteEntries} canClear={canClearEntries} canReview={false} canSubmit={canSubmitEntries} canSubmitOthers canExport={canExportEntries} periodView initialPeriodSelection={adminPeriodSelection} hideHeader periodToolbarCenter={(canReviewEntries||canAIReview)&&<Button type="button" variant="outline" size="sm" aria-label="Review queue" title="Open the full review queue" className="h-8 w-full max-w-2xl justify-center border-orange-300 bg-orange-50/70 text-orange-950 hover:bg-orange-100" onClick={()=>setReviewQueueOpen(true)}><CheckCircle2 className="size-4 text-orange-700"/>Review queue<span className="rounded-full bg-white px-1.5 py-0.5 text-[10px] tabular-nums">{pendingEntries.length} awaiting</span></Button>} title="Raw timesheet entries" description="Search, filter, group, review, and export time records."/>
+        <EntriesLog stateKey={`admin-timesheets:${userEmail.toLowerCase()}`} userEmail={userEmail} entries={entries} onUpdate={onEntryUpdate} onStatusChange={onEntryStatusChange} onDelete={onEntryDelete} onClear={onEntryClear} canEdit={canEditEntries} canDelete={canDeleteEntries} canClear={canClearEntries} canReview={false} canSubmit={canSubmitEntries} canSubmitOthers canExport={canExportEntries} periodView initialPeriodSelection={adminPeriodSelection} hideHeader periodToolbarCenter={canReviewEntries&&pendingEntries.length>0&&<details className="group relative mx-auto"><summary className="flex h-7 cursor-pointer list-none items-center gap-1.5 border border-orange-200 bg-orange-50 px-2 text-xs font-medium text-orange-950 hover:bg-orange-100 [&::-webkit-details-marker]:hidden"><ShieldCheck className="size-3.5"/>Exceptional actions <span className="rounded-full bg-white px-1.5 tabular-nums">{pendingEntries.length}</span><ChevronDown className="size-3.5 transition-transform group-open:rotate-180"/></summary><div className="absolute left-0 top-full z-30 mt-1 border border-orange-200 bg-white p-1 shadow-lg"><Button type="button" variant="ghost" size="sm" className="whitespace-nowrap" onClick={()=>setReviewQueueOpen(true)}><CheckCircle2 className="size-4"/>Resolve pending timesheets</Button></div></details>} title="Raw timesheet entries" description="Search, filter, group, and export time records."/>
       </section></WindowSurface>}
-      {!rightsOnly&&adminTimesheetTool==="entries"&&reviewQueueOpen&&<WindowSurface title="Review queue" onBack={()=>setReviewQueueOpen(false)}><section className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-white"><header className="shrink-0 border-b border-orange-200 bg-orange-50 px-4 py-3"><h2 className="font-semibold text-orange-950">Timesheets awaiting review</h2><p className="text-xs text-orange-900">{pendingEntries.length} awaiting · AI suggestions are advisory; a person confirms every action.</p></header><div className="min-h-0 flex-1 overflow-auto p-3 sm:p-5"><ApprovalSelection entries={pendingEntries} email={userEmail} canReview={canReviewEntries} canAI={canAIReview} onUpdated={onApprovalUpdated}/></div></section></WindowSurface>}
+      {!rightsOnly&&adminTimesheetTool==="entries"&&reviewQueueOpen&&<WindowSurface title="Review queue" onBack={()=>setReviewQueueOpen(false)}><section className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-white"><header className="shrink-0 border-b border-orange-200 bg-orange-50 px-4 py-3"><h2 className="font-semibold text-orange-950">Timesheets awaiting review</h2><p className="text-xs text-orange-900">{pendingEntries.length} awaiting · Admin actions require an intervention reason and remain in the audit history.</p></header><div className="min-h-0 flex-1 overflow-auto p-3 sm:p-5"><ApprovalSelection entries={pendingEntries} email={userEmail} canReview={canReviewEntries} canAI={canAIReview} adminOverride onUpdated={onApprovalUpdated}/></div></section></WindowSurface>}
       {!rightsOnly&&adminReportOpen&&<WindowSurface title="Analytics reports" onBack={()=>setAdminReportOpen(false)}><section className="min-h-0 w-full overflow-auto bg-white p-4 sm:p-6">{reportContent}</section></WindowSurface>}
       {!rightsOnly&&adminIssuesOpen&&<WindowSurface title="Issues and requests" onBack={()=>setAdminIssuesOpen(false)}><AdminIssuesWorkspace onSummaryChange={setIssueSummary}/></WindowSurface>}
       {!rightsOnly&&assistantRunsOpen&&<WindowSurface title="AI workflow activity" onBack={()=>setAssistantRunsOpen(false)}><AssistantRunReport/></WindowSurface>}
@@ -1832,12 +1869,16 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
 
       {activityWindowOpen && (
         <AdminActivityWindow
-          events={activityEvents}
+          events={activityReport==="api-errors"?operationalEvents:activityEvents}
           error={activityError}
           loading={activityLoading}
-          hasMore={activityCursor!==null}
+          hasMore={activityReport==="api-errors"?operationalCursor!==null:activityCursor!==null}
           loadingMore={activityLoadingMore}
           onLoadMore={()=>void loadMoreActivity()}
+          operationalFilters={operationalFilters}
+          onOperationalFilters={filters=>{setOperationalFilters(filters);void loadOperationalEvents(filters,false)}}
+          auditFilters={auditFilters}
+          onAuditFilters={filters=>{setAuditFilters(filters);void loadAuditEvents(filters,false,activityReport)}}
           report={activityReport}
           onClose={() => setActivityWindowOpen(false)}
         />
@@ -2207,6 +2248,10 @@ function AdminActivityWindow({
   hasMore,
   loadingMore,
   onLoadMore,
+  operationalFilters,
+  onOperationalFilters,
+  auditFilters,
+  onAuditFilters,
   onClose,
 }: {
   events: AdminAuditEvent[]
@@ -2216,6 +2261,10 @@ function AdminActivityWindow({
   hasMore:boolean
   loadingMore:boolean
   onLoadMore:()=>void
+  operationalFilters:OperationalFilters
+  onOperationalFilters:(filters:OperationalFilters)=>void
+  auditFilters:OperationalFilters
+  onAuditFilters:(filters:OperationalFilters)=>void
   onClose: () => void
 }) {
   const [selectedEvent, setSelectedEvent] = useState<AdminAuditEvent | null>(
@@ -2223,22 +2272,34 @@ function AdminActivityWindow({
   )
   const [showSecurity, setShowSecurity] = useState(false)
   const [showErrors,setShowErrors]=useState(report==="api-errors")
-  const [search,setSearch]=useState("")
-  const [dateFrom,setDateFrom]=useState("")
-  const [dateThrough,setDateThrough]=useState("")
+  const activeFilters=report==="api-errors"?operationalFilters:auditFilters
+  const updateFilters=report==="api-errors"?onOperationalFilters:onAuditFilters
+  const [search,setSearch]=useState(activeFilters.search)
+  const [dateFrom,setDateFrom]=useState(activeFilters.from)
+  const [dateThrough,setDateThrough]=useState(activeFilters.through)
+  const [categoryFilter,setCategoryFilter]=useState(activeFilters.category)
+  const [statusFilter,setStatusFilter]=useState(activeFilters.status)
   const [groupBy,setGroupBy]=useState<"day"|"month"|"year"|"period">("day")
   const [periodFilter,setPeriodFilter]=useState("all")
   const [sortOrder,setSortOrder]=useState<"newest"|"oldest">("newest")
   const [periods,setPeriods]=useState<{id:string;name:string;startDate:string;endDate:string}[]>([])
+  const filterMount=useRef(false)
+  useEffect(()=>{
+    if(!filterMount.current){filterMount.current=true;return}
+    const selectedPeriod=periods.find(period=>period.id===periodFilter)
+    const timeout=setTimeout(()=>updateFilters({search,from:dateFrom||selectedPeriod?.startDate||"",through:dateThrough||selectedPeriod?.endDate||"",category:categoryFilter,status:statusFilter}),300)
+    return()=>clearTimeout(timeout)
+  },[search,dateFrom,dateThrough,categoryFilter,statusFilter,periodFilter,report])
   useEffect(()=>{let active=true;void fetch(apiPath("/api/timesheet-periods"),{cache:"no-store"}).then(async response=>response.ok?response.json():null).then(data=>{if(active&&Array.isArray(data?.periods))setPeriods(data.periods)}).catch(()=>{});return()=>{active=false}},[])
   const dayOf=(event:AdminAuditEvent)=>event.occurredAt.slice(0,10)
   const periodOf=(event:AdminAuditEvent)=>periods.find(period=>dayOf(event)>=period.startDate&&dayOf(event)<=period.endDate)
   const visibleEvents=events.filter(event=>{
     const day=dayOf(event),period=periodOf(event)
     const haystack=[event.actorEmail,event.action,event.targetType,event.targetId??"",event.requestPath??"",event.requestMethod??"",event.userAgent??"",formatAuditMetadata(event)].join(" ").toLowerCase()
-    const matchesReport=report==="api-errors"?event.action==="client_error_reported":report===null?true:report==="access"?(event.targetType==="managed_user_access"||event.targetType==="account_identity")&&["user_access_created","user_access_updated"].includes(event.action):report==="periods"?event.targetType==="timesheet_period"&&["timesheet_period_created","timesheet_period_updated"].includes(event.action):event.targetType==="time_project"&&["project_created","project_updated"].includes(event.action)
+    const isOperational=event.action==="operational_failure"||event.action==="client_error_reported"
+    const matchesReport=report==="api-errors"?isOperational:report===null?true:report==="access"?(event.targetType==="managed_user_access"||event.targetType==="account_identity")&&["user_access_created","user_access_updated"].includes(event.action):report==="periods"?event.targetType==="timesheet_period"&&["timesheet_period_created","timesheet_period_updated"].includes(event.action):event.targetType==="time_project"&&["project_created","project_updated"].includes(event.action)
     const errorsOnly=report==="api-errors"||showErrors
-    return matchesReport&&(!errorsOnly||event.action==="client_error_reported")&&(!dateFrom||day>=dateFrom)&&(!dateThrough||day<=dateThrough)&&(periodFilter==="all"||period?.id===periodFilter)&&(!search.trim()||haystack.includes(search.trim().toLowerCase()))
+    return matchesReport&&(!errorsOnly||isOperational)&&(!dateFrom||day>=dateFrom)&&(!dateThrough||day<=dateThrough)&&(periodFilter==="all"||period?.id===periodFilter)&&(!search.trim()||haystack.includes(search.trim().toLowerCase()))
   }).sort((a,b)=>sortOrder==="newest"?b.occurredAt.localeCompare(a.occurredAt):a.occurredAt.localeCompare(b.occurredAt))
   const groupedEvents=Array.from(visibleEvents.reduce((groups,event)=>{
     const day=dayOf(event),period=periodOf(event)
@@ -2256,7 +2317,7 @@ function AdminActivityWindow({
               <Activity className="size-4 text-blue-700" aria-hidden="true" />
               <h2 className="mr-1 text-sm font-semibold text-blue-950">{report===null?"All app activity":report==="access"?"Access change history":report==="periods"?"Timesheet period history":report==="api-errors"?"API error report":"Project history"}</h2>
               {report===null&&<><Button variant={showErrors?"default":"outline"} size="sm" onClick={()=>setShowErrors(false)}>All activity</Button>
-              <Button variant={showErrors?"default":"outline"} size="sm" className={showErrors?"bg-red-700 hover:bg-red-800":"border-red-200 bg-red-50 text-red-800 hover:bg-red-100"} onClick={()=>setShowErrors(true)}>Application errors ({events.filter(event=>event.action==="client_error_reported").length})</Button>
+              <Button variant={showErrors?"default":"outline"} size="sm" className={showErrors?"bg-red-700 hover:bg-red-800":"border-red-200 bg-red-50 text-red-800 hover:bg-red-100"} onClick={()=>setShowErrors(true)}>Application errors ({events.filter(event=>event.action==="client_error_reported"||event.action==="operational_failure").length})</Button>
               <Button variant="outline" className="border-red-200 bg-red-50 text-red-800 hover:bg-red-100" onClick={() => setShowSecurity(true)}>Security risks</Button></>}
             </div>
           </div>
@@ -2275,12 +2336,17 @@ function AdminActivityWindow({
 
         <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-sky-200 bg-gradient-to-r from-sky-50 via-white to-emerald-50 px-2 py-1.5">
           <label className="min-w-48 flex-1 text-[11px] font-medium text-slate-700">Search logs<input aria-label="Search audit logs" type="search" value={search} onChange={event=>setSearch(event.target.value)} placeholder="Actor, action, request, target…" className="mt-0.5 h-7 w-full rounded-md border border-slate-300 bg-white px-2 text-xs"/></label>
-          {report&&<Button type="button" variant="outline" size="sm" className="h-8" disabled={!visibleEvents.length} title="Download the filtered events currently loaded" aria-label={`Export ${visibleEvents.length} visible report events as CSV`} onClick={()=>downloadAuditCsv(visibleEvents,report)}><Download className="size-4"/>Export CSV</Button>}
+          <DataExportMenu title={report===null?"App activity":report==="access"?"Access change history":report==="periods"?"Timesheet period history":report==="api-errors"?"API error report":"Project history"} filename="admin-activity" rows={visibleEvents.map(event=>({occurredAt:event.occurredAt,actor:event.actorEmail,action:formatAuditAction(event.action),targetType:event.targetType,targetId:event.targetId??"",requestMethod:event.requestMethod??"",requestPath:event.requestPath??"",requestId:event.requestId??"",metadata:event.metadata}))} summary={{events:visibleEvents.length,actors:new Set(visibleEvents.map(event=>event.actorEmail)).size,from:dateFrom||"Any",through:dateThrough||"Any",period:periodFilter}}/>
           <details className="group relative min-w-0">
             <summary className="flex h-7 cursor-pointer list-none items-center rounded-md border border-sky-200 bg-white px-2 text-[11px] font-medium text-sky-950 hover:bg-sky-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 [&::-webkit-details-marker]:hidden"><SlidersHorizontal className="mr-1 size-3"/>View options<ChevronDown className="ml-1.5 size-3 transition-transform group-open:rotate-180"/></summary>
             <div className="absolute z-10 mt-1 flex flex-wrap items-end gap-2 rounded-md border border-sky-200 bg-white p-3 shadow-lg">
           <label className="text-xs font-medium text-slate-700">From<input aria-label="Audit date from" type="date" value={dateFrom} max={dateThrough||undefined} onChange={event=>setDateFrom(event.target.value)} className="mt-1 h-8 rounded-md border border-slate-300 bg-white px-2 text-xs"/></label>
           <label className="text-xs font-medium text-slate-700">Through<input aria-label="Audit date through" type="date" value={dateThrough} min={dateFrom||undefined} onChange={event=>setDateThrough(event.target.value)} className="mt-1 h-8 rounded-md border border-slate-300 bg-white px-2 text-xs"/></label>
+          <label className="text-xs font-medium text-slate-700">{report==="api-errors"?"Failure category":"Record type"}<select aria-label={report==="api-errors"?"API failure category":"Audit record type"} value={categoryFilter} onChange={event=>setCategoryFilter(event.target.value)} className="mt-1 h-8 max-w-52 rounded-md border border-slate-300 bg-white px-2 text-xs">
+            <option value="">All types</option>
+            {report==="api-errors"?<><option value="authorization_denied">Authorization denied</option><option value="validation_failed">Validation failed</option><option value="workflow_conflict">Workflow conflict</option><option value="server_error">Server error</option><option value="request_failed">Other request failure</option><option value="client_error">Reported client error</option></>:<>{["time_entry","timesheet_period","time_project","managed_user_access","account_identity","submission_extension","app_issue","review_request"].map(type=><option key={type} value={type}>{type.replaceAll("_"," ")}</option>)}</>}
+          </select></label>
+          {report==="api-errors"&&<label className="text-xs font-medium text-slate-700">HTTP status<select aria-label="API HTTP status filter" value={statusFilter} onChange={event=>setStatusFilter(event.target.value)} className="mt-1 h-8 rounded-md border border-slate-300 bg-white px-2 text-xs"><option value="">All failures</option>{[400,401,403,404,409,413,422,429,500,502,503,504].map(status=><option key={status} value={String(status)}>{status}</option>)}</select></label>}
           <label className="text-xs font-medium text-slate-700">Timesheet period<select aria-label="Audit timesheet period filter" value={periodFilter} onChange={event=>setPeriodFilter(event.target.value)} className="mt-1 h-8 max-w-48 rounded-md border border-slate-300 bg-white px-2 text-xs"><option value="all">All periods</option>{periods.map(period=><option key={period.id} value={period.id}>{period.name}</option>)}</select></label>
           <label className="text-xs font-medium text-slate-700">Group by<select aria-label="Group audit logs by" value={groupBy} onChange={event=>setGroupBy(event.target.value as typeof groupBy)} className="mt-1 h-8 rounded-md border border-slate-300 bg-white px-2 text-xs"><option value="day">Day</option><option value="month">Month</option><option value="year">Year</option><option value="period">Timesheet period</option></select></label>
           <label className="text-xs font-medium text-slate-700">Sort<select aria-label="Sort audit logs" value={sortOrder} onChange={event=>setSortOrder(event.target.value as typeof sortOrder)} className="mt-1 h-8 rounded-md border border-slate-300 bg-white px-2 text-xs"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></label>
@@ -2635,23 +2701,6 @@ function formatAdminDate(value: string) {
  * @param value - ISO timestamp returned by the audit API.
  * @returns Localized date-time label or original value when parsing fails.
  */
-function downloadAuditCsv(events:AdminAuditEvent[],report:AdminAuditReport):void {
-  const headers=["Occurred at","Actor","Action","Target type","Target ID","Metadata","Request method","Request path","Request ID"]
-  const cell=(value:unknown)=>{
-    const text=String(value??"")
-    const safe=/^[\u0000-\u0020]*[=+\-@]/.test(text)?`'${text}`:text
-    return `"${safe.replaceAll('"','""')}"`
-  }
-  const rows=events.map(event=>[event.occurredAt,event.actorEmail,formatAuditAction(event.action),event.targetType,event.targetId??"",JSON.stringify(event.metadata),event.requestMethod??"",event.requestPath??"",event.requestId??""])
-  const csv=[headers.map(cell).join(","),...rows.map(row=>row.map(cell).join(","))].join("\r\n")
-  const url=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}))
-  const link=document.createElement("a")
-  link.href=url
-  link.download=`${report}-audit-${new Date().toISOString().slice(0,10)}.csv`
-  link.click()
-  URL.revokeObjectURL(url)
-}
-
 function formatAdminDateTime(value: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value

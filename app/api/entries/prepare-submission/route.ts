@@ -5,6 +5,7 @@
  */
 import { generateText, Output } from "ai"
 import { z } from "zod"
+import { withOperationalCapture } from "@/lib/api-outcome-capture"
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { listTimeEntries } from "@/lib/db"
@@ -20,7 +21,7 @@ const adviceSchema = z.object({ items: z.array(z.object({ entryId: z.string(), r
  * @param request - JSON containing entry IDs and their displayed revisions.
  * @returns Promise<Response> with per-entry advice/revisions or a safe failure.
  */
-export async function POST(request: Request): Promise<Response> {
+async function prepareSubmission(request: Request): Promise<Response> {
   try {
     const email = (await auth())?.user?.email
     const access = await getEffectivePermissions(email)
@@ -50,3 +51,4 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ error: failure.error, code: failure.code }, { status: failure.status, headers: { "Cache-Control": "no-store" } })
   }
 }
+export const POST=withOperationalCapture("/api/entries/prepare-submission","POST",prepareSubmission)

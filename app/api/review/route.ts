@@ -10,6 +10,7 @@ import { createReviewAccess } from "@/lib/review-access"
 import { listTimeEntries } from "@/lib/db"
 import { generateText, Output } from "ai"
 import { z } from "zod"
+import { withOperationalCapture } from "@/lib/api-outcome-capture"
 import type { TimeEntry } from "@/lib/types"
 import { aiReviewFailure } from "@/lib/ai-review-errors"
 import { getAiModel } from "@/lib/ai-models"
@@ -24,7 +25,7 @@ const schema = z.object({ recommendations: z.array(z.object({
  * No client-provided entry data is trusted and no approval mutation is performed.
  * @returns Promise<Response> containing grounded recommendations or a safe error.
  */
-export async function POST(req?:Request): Promise<Response> {
+async function adviseTimesheetReview(req?:Request): Promise<Response> {
   try {
     const email = (await auth())?.user?.email
     const access = await getEffectivePermissions(email)
@@ -63,3 +64,4 @@ export async function POST(req?:Request): Promise<Response> {
     return Response.json({error:failure.error,code:failure.code},{status:failure.status,headers:{"Cache-Control":"no-store"}})
   }
 }
+export const POST=withOperationalCapture("/api/review","POST",adviseTimesheetReview)

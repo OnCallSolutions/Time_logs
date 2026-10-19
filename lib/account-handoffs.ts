@@ -174,10 +174,11 @@ export async function decideTimesheetBatch(input:{ownerEmail:string;startDate:st
     FROM locked l CROSS JOIN valid v WHERE v.ok AND e.id=l.id AND l.expected_revision IS NOT NULL
       AND e.updated_at=l.expected_revision::timestamptz AND e.status='submitted' RETURNING e.*
   ), forwarded AS (
-    INSERT INTO account_handoffs(entry_id,assigned_to,handed_by,source_updated_at,evidence)
-    SELECT id,'business_accounts',${actor.toLowerCase()},updated_at,
-      jsonb_build_object('contractor',contractor,'ownerEmail',owner_email,'workerCategory',${category}::text,'date',work_date,'hours',hours,'project',project,'description',description,'reviewedBy',reviewed_by,'reviewedAt',reviewed_at)
-    FROM changed WHERE ${decision}='approved' AND NOT ${finalAccountDecision} RETURNING id,entry_id
+    INSERT INTO account_handoffs(entry_id,assigned_to,handed_by,source_updated_at,evidence,review_state,review_note,account_reviewed_by,account_reviewed_at)
+    SELECT id,CASE WHEN ${finalAccountDecision} THEN ${actor.toLowerCase()} ELSE 'business_accounts' END,${actor.toLowerCase()},updated_at,
+      jsonb_build_object('contractor',contractor,'ownerEmail',owner_email,'workerCategory',${category}::text,'date',work_date,'hours',hours,'project',project,'description',description,'reviewedBy',reviewed_by,'reviewedAt',reviewed_at),
+      CASE WHEN ${finalAccountDecision} THEN 'account_approved' ELSE 'pending' END,${finalAccountDecision?note:""},CASE WHEN ${finalAccountDecision} THEN ${actor.toLowerCase()} ELSE NULL END,CASE WHEN ${finalAccountDecision} THEN now() ELSE NULL END
+    FROM changed WHERE ${decision}='approved' RETURNING id,entry_id
   ), archived AS (
     INSERT INTO entry_rejection_archive(actor_email,entry_id,contractor,owner_email,project,work_date,hours,reason,rejected_at)
     SELECT ${actor.toLowerCase()},id,contractor,owner_email,project,work_date,hours,review_note,reviewed_at FROM changed
@@ -185,7 +186,7 @@ export async function decideTimesheetBatch(input:{ownerEmail:string;startDate:st
   ), audited AS (
     INSERT INTO audit_events(actor_email,action,target_type,target_id,metadata,ip_address,user_agent,request_method,request_path,request_id)
     SELECT ${actor.toLowerCase()},CASE WHEN ${decision}='approved' THEN 'entry_approved' WHEN id=${badEntryId}::uuid THEN 'entry_rejected' ELSE 'timesheet_returned' END,
-      'time_entry',changed.id::text,jsonb_build_object('timesheetDecision',${decision}::text,'batchEntryCount',${input.selection.length},'markedRejected',changed.id=${badEntryId}::uuid,'handoffId',forwarded.id,'correctionDueAt',${input.correctionDueAt??null}::text,'correctionOwner',CASE WHEN ${decision}='rejected' THEN changed.owner_email ELSE NULL END),
+      'time_entry',changed.id::text,jsonb_build_object('timesheetDecision',${decision}::text,'batchEntryCount',${input.selection.length},'markedRejected',changed.id=${badEntryId}::uuid,'handoffId',forwarded.id,'finalAccountDecision',${finalAccountDecision},'decisionNote',CASE WHEN ${finalAccountDecision} THEN ${note} ELSE NULL END,'correctionDueAt',${input.correctionDueAt??null}::text,'correctionOwner',CASE WHEN ${decision}='rejected' THEN changed.owner_email ELSE NULL END),
       ${context.ipAddress},${context.userAgent},${context.requestMethod},${context.requestPath},${context.requestId}
     FROM changed LEFT JOIN forwarded ON forwarded.entry_id=changed.id
     WHERE ${decision}<>'rejected' OR changed.id<>${badEntryId}::uuid OR EXISTS(SELECT 1 FROM archived WHERE archived.entry_id=changed.id) RETURNING target_id

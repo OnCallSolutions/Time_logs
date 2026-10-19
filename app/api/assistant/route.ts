@@ -4,6 +4,7 @@
  * Message text enters model context only through explicit per-message user sharing.
  */
 import { generateText, Output } from "ai"
+import { withOperationalCapture } from "@/lib/api-outcome-capture"
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { assistantInputSchema, assistantResponseSchema, canOfferAction } from "@/lib/assistant-contract"
@@ -20,7 +21,7 @@ import { getAiModel } from "@/lib/ai-models"
 export const maxDuration = 30
 
 /** @param request - Bounded same-origin chat request. @returns Promise<Response> with plain text and signed proposals; never executes model actions. */
-export async function POST(request: Request): Promise<Response> {
+async function runAssistant(request: Request): Promise<Response> {
   let input
   try { input = assistantInputSchema.parse(await readAssistantRequest(request)) }
   catch { return Response.json({ error: "Use a same-origin JSON request with a shorter conversation." }, { status: 400 }) }
@@ -121,3 +122,4 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ error: "The assistant is unavailable. Your workspace controls are still available." }, { status: 503 })
   }
 }
+export const POST=withOperationalCapture("/api/assistant","POST",runAssistant)

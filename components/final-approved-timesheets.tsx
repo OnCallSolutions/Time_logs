@@ -1,9 +1,10 @@
 "use client"
 
 import { useEffect,useMemo,useState } from "react"
-import { Download,Printer,RotateCcw } from "lucide-react"
+import { RotateCcw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { WindowSurface } from "@/components/window-surface"
+import { DataExportMenu } from "@/components/data-export-menu"
 import { apiPath } from "@/lib/paths"
 import type { TimesheetPeriod } from "@/lib/db"
 import type { TimeEntry } from "@/lib/types"
@@ -44,13 +45,6 @@ export function FinalApprovedTimesheets({entries,email,onUpdated}:{entries:TimeE
   const totalHours=visibleEntries.reduce((sum,entry)=>sum+Number(entry.hours),0)
   const managers=[...new Set(batches.map(batch=>batch.manager))].sort()
 
-  function exportCsv(){
-    const quote=(value:unknown)=>`"${String(value??"").replaceAll('"','""')}"`
-    const rows=[["Patron","Approving manager","Period","Period start","Period end","Work date","Project","Description","Hours"],...visibleEntries.map(entry=>{const batch=filtered.find(group=>group.entries.some(item=>item.id===entry.id))!;return [entry.contractor,batch.manager,batch.period.name,batch.period.startDate,batch.period.endDate,entry.date,entry.project,entry.description,entry.hours]})]
-    const blob=new Blob([rows.map(row=>row.map(quote).join(",")).join("\r\n")],{type:"text/csv;charset=utf-8"})
-    const url=URL.createObjectURL(blob),anchor=document.createElement("a");anchor.href=url;anchor.download="final-approved-timesheets.csv";anchor.click();URL.revokeObjectURL(url)
-  }
-
   async function reopen(){
     if(!selectedBatches.length||!reason.trim()||busy)return
     setBusy(true);setError("")
@@ -66,7 +60,7 @@ export function FinalApprovedTimesheets({entries,email,onUpdated}:{entries:TimeE
   }
 
   return <section aria-label="Final approved timesheets" className="flex h-full min-h-0 w-full flex-col gap-2 overflow-hidden bg-white p-2 text-slate-950 sm:p-3">
-    <header className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-emerald-200 bg-emerald-50 px-3 py-2"><div><h2 className="text-sm font-semibold text-emerald-950">Final approved timesheets</h2><p className="text-xs text-slate-700">Approved by you · view and export, or reopen a complete batch to the approval queue.</p></div><div className="flex gap-2"><Button size="sm" variant="outline" disabled={!visibleEntries.length} onClick={()=>window.print()}><Printer className="size-4"/>Print / PDF</Button><Button size="sm" variant="outline" disabled={!visibleEntries.length} onClick={exportCsv}><Download className="size-4"/>CSV</Button><Button size="sm" disabled={!selectedBatches.length} onClick={()=>{setError("");setReason("");setConfirm(true)}}><RotateCcw className="size-4"/>Reopen selected ({selectedBatches.length})</Button></div></header>
+    <header className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-emerald-200 bg-emerald-50 px-3 py-2"><div><h2 className="text-sm font-semibold text-emerald-950">Final approved timesheets</h2><p className="text-xs text-slate-700">Approved by you · view and export, or reopen a complete batch to the approval queue.</p></div><div className="flex flex-wrap items-center gap-2"><DataExportMenu title="Final approved timesheets" filename="final-approved-timesheets" rows={visibleEntries.map(entry=>{const batch=filtered.find(group=>group.entries.some(item=>item.id===entry.id));return {patron:entry.contractor,approvingManager:batch?.manager??"Unassigned",period:batch?.period.name??"",periodStart:batch?.period.startDate??"",periodEnd:batch?.period.endDate??"",workDate:entry.date,project:entry.project,description:entry.description,hours:Number(entry.hours),status:entry.status}})} summary={{period:periodFilter==="all"?"All periods":periods.find(period=>period.id===periodFilter)?.name??periodFilter,manager:managerFilter==="all"?"All managers":managerFilter,timesheets:filtered.length,entries:visibleEntries.length,hours:Number(totalHours.toFixed(2))}}/><Button size="sm" disabled={!selectedBatches.length} onClick={()=>{setError("");setReason("");setConfirm(true)}}><RotateCcw className="size-4"/>Reopen selected ({selectedBatches.length})</Button></div></header>
     <div className="grid shrink-0 gap-2 sm:grid-cols-[minmax(12rem,1fr)_12rem_12rem]"><input aria-label="Search final approved timesheets" type="search" value={query} onChange={event=>setQuery(event.target.value)} placeholder="Search patron, project, manager, or period" className="h-9 min-w-0 border border-slate-300 px-3 text-sm"/><select aria-label="Filter approved period" value={periodFilter} onChange={event=>setPeriodFilter(event.target.value)} className="h-9 border border-slate-300 px-2 text-sm"><option value="all">All periods</option>{periods.map(period=><option key={period.id} value={period.id}>{period.name} · {period.startDate} - {period.endDate}</option>)}</select><select aria-label="Filter approving manager" value={managerFilter} onChange={event=>setManagerFilter(event.target.value)} className="h-9 border border-slate-300 px-2 text-sm"><option value="all">All managers</option>{managers.map(manager=><option key={manager}>{manager}</option>)}</select></div>
     <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-y border-slate-200 py-1.5 text-xs"><span>{filtered.length} timesheets · {visibleEntries.length} entries · {totalHours.toFixed(2)} hours</span><span>Selecting a batch reopens all its entries</span></div>
     {notice&&<p role="status" className="shrink-0 text-sm text-emerald-800">{notice}</p>}{error&&!confirm&&<p role="alert" className="shrink-0 text-sm text-red-800">{error}</p>}

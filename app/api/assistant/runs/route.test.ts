@@ -14,7 +14,12 @@ it("returns sanitized run events to admins without caching",async()=>{
   expect(response.status).toBe(200)
   expect(response.headers.get("cache-control")).toContain("no-store")
   expect(await response.json()).toMatchObject({runs:[{id:"123e4567-e89b-42d3-a456-426614174000"}]})
-  expect(listAssistantRuns).toHaveBeenCalledWith(25,undefined)
+  expect(listAssistantRuns).toHaveBeenCalledWith(25,undefined,{search:undefined,status:undefined,from:undefined,through:undefined})
+})
+it("filters AI activity in the database before paging older matching history",async()=>{
+  const response=await GET(new Request("https://app.example/api/assistant/runs?search=extract&status=failed&from=2026-10-01&through=2026-10-19&limit=50&beforeAt=2026-10-10T08%3A00%3A00.000Z&beforeId=123e4567-e89b-42d3-a456-426614174000"))
+  expect(response.status).toBe(200)
+  expect(listAssistantRuns).toHaveBeenCalledWith(50,{startedAt:"2026-10-10T08:00:00.000Z",id:"123e4567-e89b-42d3-a456-426614174000"},{search:"extract",status:"failed",from:"2026-10-01",through:"2026-10-19"})
 })
 it("does not expose AI telemetry to non-admin patrons",async()=>{
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"manager"} as never)

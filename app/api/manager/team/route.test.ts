@@ -32,9 +32,15 @@ it("returns only active employees and contractors assigned to the signed-in mana
   expect(response.headers.get("cache-control")).toBe("no-store")
 })
 
-it("denies non-managers and managers whose team visibility was revoked",async()=>{
+it("keeps the manager directory available when broad team-entry visibility is revoked",async()=>{
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"manager",permissions:{view_team:false}} as never)
-  expect((await GET()).status).toBe(403)
+  const response=await GET()
+  expect(response.status).toBe(200)
+  expect(await response.json()).toEqual({people:[{email:"assigned@example.com",displayName:"Assigned Worker",role:"employee",contractorNumber:null}]})
+  expect(listManagerWorkforceEmails).toHaveBeenCalledWith("manager@example.com")
+})
+
+it("denies non-managers",async()=>{
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"employee",permissions:{view_team:true}} as never)
   expect((await GET()).status).toBe(403)
   expect(actorRoster).not.toHaveBeenCalled()

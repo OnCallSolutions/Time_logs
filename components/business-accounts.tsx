@@ -5,9 +5,10 @@
  */
 "use client"
 import { Fragment,useEffect,useState } from "react"
-import { CalendarDays, Check, ChevronRight, Download, Eye, Pencil, Printer, Sparkles, Users } from "lucide-react"
+import { CalendarDays, Check, ChevronRight, Eye, Pencil, Sparkles, Users } from "lucide-react"
 import { Button } from "./ui/button"
 import { WindowSurface } from "./window-surface"
+import { DataExportMenu } from "./data-export-menu"
 import { apiPath } from "@/lib/paths"
 import type { TimeEntry } from "@/lib/types"
 import { BusinessAccountActions } from "./business-account-actions"
@@ -32,7 +33,6 @@ export function BusinessAccounts({canSend,canReview=false,canAI=false,canAuthori
   const [editing,setEditing]=useState<Handoff|null>(null),[editDraft,setEditDraft]=useState({project:"",date:"",hours:"",description:"",reason:""})
   const [aiOpen,setAiOpen]=useState(false),[report,setReport]=useState<{summary:string;recommendations:{handoffId:string;severity:string;reason:string}[]}|null>(null)
   const [samplesOpen,setSamplesOpen]=useState(false)
-  const [exporting,setExporting]=useState(false)
   const [periodSelection,setPeriodSelection]=useState("all")
   const today=new Date().toISOString().slice(0,10)
   const periods=[...(data.periods??[])].sort((a,b)=>b.startDate.localeCompare(a.startDate))
@@ -99,18 +99,6 @@ export function BusinessAccounts({canSend,canReview=false,canAI=false,canAuthori
     try{const response=await fetch(apiPath("/api/accounts"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ids,recipient})});const value=await response.json();if(!response.ok)throw new Error(value.error);setResult(`${value.createdCount} new handoffs from ${value.requestedCount} selected entries.`);setConfirm(false);setIds([]);setRevision(previous=>previous+1)}
     catch(error){setError(error instanceof Error?error.message:"Handoff failed.")}finally{setBusy(false)}
   }
-  /** Downloads the same filtered, versioned approved-evidence document exposed to API clients. */
-  async function exportApprovedJSON(){
-    setExporting(true);setError("")
-    try{
-      const query=new URLSearchParams({periodId:periodSelection,manager,workerCategory:category,worker,search,state,sort})
-      const response=await fetch(apiPath(`/api/accounts/export?${query}`),{cache:"no-store"})
-      if(!response.ok){const body=await response.json();throw new Error(body.error??"Export could not be prepared.")}
-      const blob=await response.blob();const url=URL.createObjectURL(blob);const anchor=document.createElement("a")
-      anchor.href=url;anchor.download=`approved-timesheets-${periodSelection}.json`;anchor.click();URL.revokeObjectURL(url)
-      setResult("Approved timesheet JSON downloaded.")
-    }catch(cause){setError(cause instanceof Error?cause.message:"Approved timesheet export failed.")}finally{setExporting(false)}
-  }
   const openReviews=periodRows.filter(row=>row.review_state==="pending"||row.review_state==="needs_information"||row.review_state==="reopened_for_review")
   const accountApproved=periodRows.filter(row=>row.current&&row.review_state==="account_approved")
   const financeReady=periodRows.filter(row=>row.current&&row.review_state==="payout_eligible")
@@ -164,7 +152,7 @@ export function BusinessAccounts({canSend,canReview=false,canAI=false,canAuthori
         </div>
       </details>
     </div>
-    <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-200 py-1.5 text-[11px]"><div className="flex flex-wrap gap-3"><span>{rows.length} entries · {batchCount(rows)} batches</span><span>{rows.reduce((sum,row)=>sum+Number(row.evidence.hours),0).toFixed(1)}h</span><span className="text-orange-700">{rows.filter(row=>!row.current).length} changed</span></div><div className="flex gap-1.5"><Button size="sm" variant="outline" help="Print the current period, manager, and filter view." disabled={!rows.length} onClick={()=>window.print()}><Printer className="size-3.5"/>Print / PDF</Button><Button size="sm" variant="outline" help="Download the filtered evidence as JSON." disabled={!rows.length||exporting} onClick={()=>void exportApprovedJSON()}><Download className="size-3.5"/>{exporting?"Preparing...":"JSON"}</Button></div></div>
+    <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-200 py-1.5 text-[11px]"><div className="flex flex-wrap gap-3"><span>{rows.length} entries · {batchCount(rows)} batches</span><span>{rows.reduce((sum,row)=>sum+Number(row.evidence.hours),0).toFixed(1)}h</span><span className="text-orange-700">{rows.filter(row=>!row.current).length} changed</span></div><DataExportMenu title="Account review" filename="account-timesheet-review" rows={rows.map(row=>({patron:row.evidence.contractor,workerCategory:row.evidence.workerCategory??"contractor",project:row.evidence.project,approvingManager:managerLabel(row.evidence.reviewedBy),workDate:row.evidence.date,hours:Number(row.evidence.hours),reviewState:row.review_state,sourceCurrent:row.current,description:row.evidence.description,reviewNote:row.review_note??""}))} summary={{period:selectedPeriod?.label??"All periods",manager:manager==="all"?"All managers":managerLabel(manager),entries:rows.length,batches:batchCount(rows),hours:Number(rows.reduce((sum,row)=>sum+Number(row.evidence.hours),0).toFixed(2))}}/></div>
     {rows.length>0&&<div className="min-h-0 flex-1 overflow-auto overscroll-contain rounded-md border border-sky-200 bg-white"><table className="w-full min-w-[760px] text-left text-xs"><thead className="sticky top-0 z-[1] bg-sky-50 text-sky-950"><tr>{[...(canReview?["Select batch"]:[]),"Employee / contractor · project","Approving manager","Work date","Approved hours","Account review","Actions"].map(label=><th key={label} className="px-2.5 py-2 font-semibold">{label}</th>)}</tr></thead><tbody>{managerGroups.map(([managerName,groupRows])=><Fragment key={managerName}><tr className="border-y border-blue-200 bg-blue-50"><th colSpan={canReview?7:6} className="px-2.5 py-2 text-left font-semibold text-blue-950">{managerLabel(managerName)}<span className="ml-2 font-normal text-blue-800">{batchCount(groupRows)} batches</span></th></tr>{groupRows.map(row=><tr key={row.id} className="border-t border-slate-100 odd:bg-white even:bg-sky-50/30 hover:bg-orange-50">{canReview&&<td className="px-2.5 py-2"><input type="checkbox" aria-label={`Select account timesheet ${row.id}`} disabled={!isActionable(row)||(!selected.includes(row.id)&&selected.length>=100)} checked={selected.includes(row.id)} onChange={event=>toggleBatch(row,event.target.checked)}/></td>}<td className="px-2.5 py-2"><span className="block font-medium">{row.evidence.contractor}</span><span className="text-slate-600">{row.evidence.project} · <span className="capitalize">{row.evidence.workerCategory??"contractor"}</span></span></td><td className="max-w-40 px-2.5 py-2"><span className="block truncate" title={managerLabel(row.evidence.reviewedBy)}>{managerLabel(row.evidence.reviewedBy)}</span><span className="block break-all text-[10px] text-slate-500">{row.evidence.reviewedBy}</span></td><td className="whitespace-nowrap px-2.5 py-2">{row.evidence.date}</td><td className="px-2.5 py-2 tabular-nums font-medium">{row.evidence.hours}h</td><td className="px-2.5 py-2"><span className={`inline-flex rounded-full border px-2 py-0.5 capitalize ${row.current?"border-emerald-200 bg-emerald-50 text-emerald-800":"border-red-200 bg-red-50 text-red-800"}`}>{row.review_state.replaceAll("_"," ")}</span>{!row.current&&<span className="ml-1 text-red-700">· source changed</span>}</td><td className="px-2.5 py-2"><div className="flex items-center gap-1"><Button variant="ghost" size="icon" aria-label={`View ${row.evidence.contractor} evidence`} title="View evidence" onClick={()=>setDetail(row)}><Eye className="size-4"/></Button>{canReview&&row.review_state==="reopened_for_review"&&<Button size="sm" variant="outline" title="Correct this entry before approving or returning the recalled timesheet." disabled={!row.current} onClick={()=>{setEditDraft({project:row.evidence.project,date:row.evidence.date,hours:String(row.evidence.hours),description:row.evidence.description,reason:""});setEditing(row);setError("")}}><Pencil className="size-3.5"/>Correct</Button>}{canReview&&<Button size="sm" variant="outline" title="Update account triage only after final timesheet approval." disabled={!row.current||["account_approved","reopened_for_review","payout_eligible","returned_to_manager","returned_to_submitter"].includes(row.review_state)} onClick={()=>{setError("");setNote("");setOutcome("needs_information");setReview(row)}}>Triage</Button>}</div></td></tr>)}</Fragment>)}</tbody></table></div>}
     {!rows.length&&<p className="border border-dashed border-sky-200 bg-sky-50/40 px-4 py-8 text-center text-sm text-slate-600">{periodRows.length?"No timesheets match these review filters.":"No approved manager timesheets in this period yet."}</p>}
       </div>

@@ -8,9 +8,10 @@
  * authorization to have already happened upstream through the API response.
  */
 import { useMemo } from "react"
-import { Download, Users, Clock, FolderKanban, Search, FilterX, LayoutGrid, List, ChevronDown, SlidersHorizontal } from "lucide-react"
+import { Users, Clock, FolderKanban, Search, FilterX, LayoutGrid, List, ChevronDown, SlidersHorizontal } from "lucide-react"
 import { useRetainedViewState } from "@/components/use-retained-view-state"
 import { Button } from "@/components/ui/button"
+import { DataExportMenu } from "@/components/data-export-menu"
 import type { EntryStatus, TimeEntry } from "@/lib/types"
 
 const statusOptions: { value: "all" | EntryStatus; label: string }[] = [
@@ -152,46 +153,6 @@ export function ManagerReport({ entries, stateKey }: { entries: TimeEntry[]; sta
       : `${fmtDate(dates[0])} – ${fmtDate(dates[dates.length - 1])}`
   }, [filtered])
 
-  /**
-   * Downloads the currently filtered report rows as a CSV file.
-   *
-   * Values are quoted and embedded quotes are escaped so contractor names,
-   * descriptions, or project labels containing commas remain valid CSV fields.
-   *
-   * @returns Nothing; triggers a browser download as a side effect.
-   */
-  function exportCsv() {
-    const rows = [
-      [
-        "Contractor",
-        "Date",
-        "Project",
-        "Description",
-        "Status",
-        "Review note",
-        "Hours",
-      ],
-      ...filtered.map((e) => [
-        e.contractor,
-        e.date,
-        e.project,
-        e.description,
-        e.status,
-        e.reviewNote ?? "",
-        String(e.hours),
-      ]),
-    ]
-    const csv = rows
-      .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","))
-      .join("\n")
-    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }))
-    const a = document.createElement("a")
-    a.href = url
-    a.download = "contractor-hours-report.csv"
-    a.click()
-    URL.revokeObjectURL(url)
-  }
-
   const selectCls =
     "h-8 rounded-md border border-input bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
 
@@ -260,9 +221,7 @@ export function ManagerReport({ entries, stateKey }: { entries: TimeEntry[]; sta
           <label className="flex items-center gap-1.5 text-xs text-slate-600" htmlFor="report-date-from">From<input id="report-date-from" aria-label="From date" type="date" value={dateFrom} max={dateThrough||undefined} onChange={event=>setDateFrom(event.target.value)} className={selectCls}/></label>
           <label className="flex items-center gap-1.5 text-xs text-slate-600" htmlFor="report-date-through">Through<input id="report-date-through" aria-label="Through date" type="date" value={dateThrough} min={dateFrom||undefined} onChange={event=>setDateThrough(event.target.value)} className={selectCls}/></label>
           <Button variant="outline" size="icon-sm" title="Clear filters" aria-label="Clear filters" disabled={!hasFilters} onClick={resetFilters} className="border-slate-300 bg-white"><FilterX className="size-4" /></Button>
-          <Button variant="outline" size="sm" onClick={exportCsv} className="border-orange-300 bg-orange-50 text-orange-900 hover:bg-orange-100">
-            <Download className="size-3.5" aria-hidden="true" /> Export
-          </Button>
+          <DataExportMenu title="Timesheet analytics" filename="timesheet-analytics" rows={viewBy==="summary"?byGroup.map(group=>({group:group.name,entries:group.count,hours:Number(group.hours.toFixed(2)),projects:group.projects,people:group.contractors,firstDate:group.firstDate,lastDate:group.lastDate})):sortedDetails.map(entry=>({contractor:entry.contractor,date:entry.date,project:entry.project,description:entry.description,status:entry.status,reviewNote:entry.reviewNote??"",hours:Number(entry.hours)}))} summary={{records:viewBy==="summary"?byGroup.length:filtered.length,totalHours:Number(totalHours.toFixed(2)),view:viewBy,period:dateRange}} />
         </div>
         <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-sky-100 pt-2">
           <div className="flex flex-wrap items-center gap-2">

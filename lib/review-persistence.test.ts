@@ -58,12 +58,15 @@ it("types an omitted reviewer parameter in the audited status-update guard",asyn
   expect(update.text).toMatch(/status='submitted' AND lower\(owner_email\)<>lower\(\$\d+\) AND \$\d+::text IS NOT NULL/)
 })
 it("bounds extension requests and approval grants by the account-manager-configured grace window",async()=>{
-  await createTimesheetExtensionRequest({ownerEmail:"owner@example.invalid",periodId:id,assignedTo:actor,reason:"A documented delay",requestedUntil:"2099-01-01T00:00:00.000Z"},context)
-  await decideTimesheetExtensionRequest(id,actor,"approved","",context)
+  await createTimesheetExtensionRequest({ownerEmail:"owner@example.invalid",periodId:id,assignedTo:actor,reason:"A documented delay",requestedUntil:"2099-01-01T00:00:00.000Z",notBeforeUntil:"2098-12-31T00:00:00.000Z",hardCapUntil:"2099-01-02T00:00:00.000Z"},context)
+  await decideTimesheetExtensionRequest(id,actor,"approved","Approved for documented delay.","2099-01-01T00:00:00.000Z",false,context)
   const statements=queries.map(query=>query.text)
   const create=queries.find(query=>query.text.includes("INSERT INTO timesheet_extension_requests"))!
   const approve=queries.find(query=>query.text.includes("UPDATE timesheet_extension_requests"))!
-  expect(create.text).toContain("p.manager_grace_days*interval '1 day'")
-  expect(approve.text).toContain("r.requested_until<=p.submission_deadline+(p.manager_grace_days*interval '1 day')")
+  expect(create.text).toContain("requested_until,not_before_until,hard_cap_until")
+  expect(create.text).toMatch(/\$\d+::timestamptz<=\$\d+::timestamptz/)
+  expect(approve.text).toContain("COALESCE(r.hard_cap_until,p.manager_submission_deadline)")
+  expect(approve.text).toContain("COALESCE(r.not_before_until,p.submission_deadline)")
+  expect(approve.text).toContain("r.requested_until")
   expect(statements.some(statement=>statement.includes("INSERT INTO audit_events"))).toBe(true)
 })

@@ -119,7 +119,7 @@ function inbox(incoming=false,expired=false):MessageInbox{
   return {messages:[{id:"123e4567-e89b-42d3-a456-426614174000",sender_email:incoming?"employee@example.com":"manager@example.com",sender_name:incoming?"Alex Employee":"You",recipient_email:incoming?"manager@example.com":"employee@example.com",recipient_name:"Taylor Contractor",body:"Original message",created_at:new Date(Date.now()-(expired?61:1)*60000).toISOString()}],email:"manager@example.com",admin:false,error:null,loading:false,unread:incoming?1:0,notification:null,dismissNotification:vi.fn(),refresh:vi.fn()}
 }
 /** @returns Mock fetch handling a roster and successful lifecycle mutations. */
-function requests(){const fn=vi.fn(async (url:string)=>new Response(JSON.stringify(url.includes("delegation")?{users:[]}:{ok:true}),{headers:{"Content-Type":"application/json"}}));vi.stubGlobal("fetch",fn);return fn}
+function requests(){const fn=vi.fn(async (url:string,_init?:RequestInit)=>new Response(JSON.stringify(url.includes("delegation")?{users:[]}:{ok:true}),{headers:{"Content-Type":"application/json"}}));vi.stubGlobal("fetch",fn);return fn}
 it("does not save edits until Save is clicked",async()=>{
   const fetchMock=requests();render(<MessagesPanel canSend inbox={inbox()}/>);const user=userEvent.setup()
   await user.click(screen.getByRole("button",{name:/Taylor/}))
@@ -204,4 +204,18 @@ it("anchors a reply composer below message history and pastes at the current car
   await user.click(screen.getByRole("button",{name:"Paste from clipboard"}))
   expect(await screen.findByRole("textbox",{name:"Message Taylor"})).toHaveValue("Pasted draft")
   expect(screen.getByRole("button",{name:"Send reply"})).toBeEnabled()
+})
+it("switches to view-only messaging when send permission is revoked",async()=>{
+  const fetchMock=requests(),state=inbox(),user=userEvent.setup()
+  const view=render(<MessagesPanel canSend inbox={state}/>);
+  await user.click(screen.getByRole("button",{name:/Taylor/}))
+  await user.type(screen.getByRole("textbox",{name:"Message Taylor"}),"Unsent draft")
+  expect(screen.getByRole("form",{name:"Reply composer"})).toBeVisible()
+  view.rerender(<MessagesPanel canSend={false} inbox={state} initialDraft={{recipient:"employee@example.com",body:"Assistant draft"}}/>);
+  await waitFor(()=>expect(screen.queryByRole("form",{name:"Reply composer"})).not.toBeInTheDocument())
+  expect(screen.getByText("Original message")).toBeVisible()
+  expect(screen.queryByRole("button",{name:"New message"})).not.toBeInTheDocument()
+  expect(screen.queryByRole("dialog",{name:"New message"})).not.toBeInTheDocument()
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+  expect(fetchMock.mock.calls.some(call=>call[1]?.method==="POST")).toBe(false)
 })

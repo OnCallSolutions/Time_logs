@@ -6,6 +6,7 @@
  * the same access resolver so UI navigation and backend permissions stay aligned.
  */
 import { z } from "zod"
+import { withOperationalCapture } from "@/lib/api-outcome-capture"
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { getEffectiveUserRole } from "@/lib/access"
@@ -77,7 +78,7 @@ async function getAccess() {
  *
  * @returns JSON response containing visible entries or an error.
  */
-export async function GET() {
+async function getEntries() {
   try {
     const access = await getAccess()
     if (!access) {
@@ -122,7 +123,7 @@ export async function GET() {
  * @param req - Request containing parsed time entries in the JSON body.
  * @returns JSON response containing created entries or an error.
  */
-export async function POST(req: Request) {
+async function createEntries(req: Request) {
   try {
     const access = await getAccess()
     if (!access) {
@@ -165,7 +166,7 @@ export async function POST(req: Request) {
  *
  * @returns JSON response confirming deletion or reporting an error.
  */
-export async function DELETE(req: Request) {
+async function deleteEntries(req: Request) {
   try {
     const access = await getAccess()
     if (!access) {
@@ -196,3 +197,7 @@ export async function DELETE(req: Request) {
     )
   }
 }
+
+export const GET=withOperationalCapture("/api/entries","GET",getEntries)
+export const POST=withOperationalCapture("/api/entries","POST",createEntries)
+export const DELETE=withOperationalCapture("/api/entries","DELETE",deleteEntries)

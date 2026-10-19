@@ -4,6 +4,7 @@ import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { getAuditContext } from "@/lib/audit"
 import { correctReopenedTimesheetEntry } from "@/lib/account-handoffs"
+import { withOperationalCapture } from "@/lib/api-outcome-capture"
 
 const schema=z.object({
   id:z.string().uuid(),periodId:z.string().uuid(),revision:z.string().datetime({offset:true}),
@@ -11,7 +12,7 @@ const schema=z.object({
   description:z.string().trim().min(1).max(2000),reason:z.string().trim().min(5).max(500),
 }).strict()
 
-export async function PATCH(request:Request){
+async function correctAccountEntry(request:Request){
   try{
     const email=(await auth())?.user?.email,access=await getEffectivePermissions(email)
     if(!email||!access.role)return Response.json({error:"Unauthorized."},{status:401})
@@ -26,3 +27,4 @@ export async function PATCH(request:Request){
     return Response.json({error:invalid?"Provide valid corrected entry details and a reason.":"Entry could not be corrected."},{status:invalid?400:503})
   }
 }
+export const PATCH=withOperationalCapture("/api/accounts/correct-entry","PATCH",correctAccountEntry)

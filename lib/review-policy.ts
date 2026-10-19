@@ -15,6 +15,6 @@ import type { Permissions } from "./permissions"
  */
 export function canReviewRole(reviewer:UserRole|null,owner:UserRole|null,permissions?:Permissions):boolean {
   if(!owner)return false
-  return owner==="manager"?(reviewer==="account_manager"||(reviewer==="manager"&&!!permissions?.view_manager_entries&&!!permissions?.review_manager_entries)):
+  return owner==="manager"?((reviewer==="admin"||reviewer==="account_manager"||reviewer==="manager")&&!!permissions?.view_manager_entries&&!!permissions?.review_manager_entries):
     reviewer!=="account_manager"||!!permissions?.review_entries
 }

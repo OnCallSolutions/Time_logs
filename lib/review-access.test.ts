@@ -25,7 +25,7 @@ it("separates cross-manager visibility from approval",()=>{
 it("requires both explicit rights for manager-personal assistance",()=>{
   expect(directReviewAccess(entry,"helper@example.com",{role:"manager",permissions:resolvePermissions("manager",{view_manager_entries:true})},"manager")).toEqual({visible:true,reviewable:false})
   expect(directReviewAccess(entry,"helper@example.com",{role:"manager",permissions:resolvePermissions("manager",{view_manager_entries:true,review_manager_entries:true})},"manager").reviewable).toBe(true)
-  expect(directReviewAccess(entry,"admin@example.com",{role:"admin",permissions:resolvePermissions("admin",{view_manager_entries:true,review_manager_entries:true})},"manager").reviewable).toBe(false)
+  expect(directReviewAccess(entry,"admin@example.com",{role:"admin",permissions:resolvePermissions("admin")},"manager").reviewable).toBe(true)
 })
 it("lets an account manager review only assigned submitted workforce timesheets",()=>{
   const assigned={...entry,reviewManagerEmail:"accounts@example.com"}

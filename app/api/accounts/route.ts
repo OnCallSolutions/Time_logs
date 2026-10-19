@@ -11,10 +11,11 @@ import { getTimeEntry,listTimeEntries,listTimesheetPeriods,recordAuditEvent } fr
 import { createHandoffs,listHandoffs,reviewHandoff,accountTriageStates,actOnHandoffs } from "@/lib/account-handoffs"
 import { getAuditContext } from "@/lib/audit"
 import { listAccountIdentities } from "@/lib/account-identities"
+import { withOperationalCapture } from "@/lib/api-outcome-capture"
 import { z } from "zod"
 
 /** @returns Authorized assignees or a scoped business-account queue. */
-export async function GET(){
+async function getAccountHandoffs(){
   try{
     const email=(await auth())?.user?.email;const access=await getEffectivePermissions(email)
     if(!email||!access.role)return Response.json({error:"Forbidden."},{status:403})
@@ -26,7 +27,7 @@ export async function GET(){
 }
 
 /** @param req - Explicit selected entry IDs and account-manager assignment. @returns Confirmed handoffs or scoped validation errors. */
-export async function POST(req:Request){
+async function createAccountHandoff(req:Request){
   try{
     const email=(await auth())?.user?.email;const access=await getEffectivePermissions(email)
     if(!email||!(access.role==="manager"||access.role==="admin")||!access.permissions.send_to_accounts)return Response.json({error:"Forbidden."},{status:403})
@@ -48,7 +49,7 @@ export async function POST(req:Request){
 }
 
 /** @param req - Explicit scoped triage action and expected review version. @returns Confirmed review state or a concurrency/authorization failure. */
-export async function PATCH(req:Request){
+async function updateAccountHandoff(req:Request){
   try{
     const email=(await auth())?.user?.email;const access=await getEffectivePermissions(email)
     if(!email||!(access.role==="account_manager"||access.role==="admin")||!access.permissions.view_accounts||!access.permissions.review_accounts)return Response.json({error:"Account review rights are required."},{status:403})
@@ -99,3 +100,6 @@ export async function PATCH(req:Request){
     return Response.json({updated})
   }catch(error){return Response.json({error:error instanceof z.ZodError||error instanceof SyntaxError?"Invalid account review.":"Account review unavailable."},{status:error instanceof z.ZodError||error instanceof SyntaxError?400:500})}
 }
+export const GET=withOperationalCapture("/api/accounts","GET",getAccountHandoffs)
+export const POST=withOperationalCapture("/api/accounts","POST",createAccountHandoff)
+export const PATCH=withOperationalCapture("/api/accounts","PATCH",updateAccountHandoff)

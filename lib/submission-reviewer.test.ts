@@ -40,7 +40,7 @@ it("uses the alphabetically first authorized manager when no manager provisioned
   expect(await resolveSubmissionReviewer("person@example.com")).toEqual({email:"a-manager@example.com",displayName:"Alex Manager",assignment:"available_manager"})
 })
 
-it("uses the enabled account manager as the default reviewer ahead of ordinary managers",async()=>{
+it("keeps contractor submissions with their manager when an account manager is active",async()=>{
   vi.mocked(actorRoster).mockResolvedValue([
     {email:"a-manager@example.com",role:"manager",accessStatus:"active",displayName:"Alex Manager"},
     {email:"accounts@example.com",role:"account_manager",accessStatus:"active",displayName:"Morgan Accounts"},
@@ -49,7 +49,24 @@ it("uses the enabled account manager as the default reviewer ahead of ordinary m
     ? {role:"account_manager",permissions:resolvePermissions("account_manager")}
     : {role:"manager",permissions:resolvePermissions("manager")})
   vi.mocked(getAccountIdentityCreator).mockResolvedValue("a-manager@example.com")
-  expect(await resolveSubmissionReviewer("person@example.com")).toEqual({email:"accounts@example.com",displayName:"Morgan Accounts",assignment:"available_manager"})
+  expect(await resolveSubmissionReviewer("person@example.com")).toEqual({email:"a-manager@example.com",displayName:"Alex Manager",assignment:"added_by_manager"})
+})
+
+it("routes a manager's personal timesheet to the account manager",async()=>{
+  vi.mocked(actorRoster).mockResolvedValue([
+    {email:"manager@example.com",role:"manager",accessStatus:"active",displayName:"Pat Manager"},
+    {email:"accounts@example.com",role:"account_manager",accessStatus:"active",displayName:"Morgan Accounts"},
+  ])
+  vi.mocked(getEffectivePermissions).mockImplementation(async email=>email==="accounts@example.com"
+    ? {role:"account_manager",permissions:resolvePermissions("account_manager")}
+    : {role:"manager",permissions:resolvePermissions("manager")})
+  expect(await resolveSubmissionReviewer("manager@example.com")).toEqual({email:"accounts@example.com",displayName:"Morgan Accounts",assignment:"available_manager"})
+})
+
+it("does not silently send workforce submissions to the account manager when no manager can review",async()=>{
+  vi.mocked(actorRoster).mockResolvedValue([{email:"accounts@example.com",role:"account_manager",accessStatus:"active",displayName:"Morgan Accounts"}])
+  vi.mocked(getEffectivePermissions).mockResolvedValue({role:"account_manager",permissions:resolvePermissions("account_manager")})
+  expect(await resolveSubmissionReviewer("person@example.com")).toBeNull()
 })
 
 it("falls back to a regular manager when the account manager review right is revoked",async()=>{

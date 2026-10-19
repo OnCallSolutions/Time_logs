@@ -3,14 +3,15 @@ import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { actorRoster } from "@/lib/collaboration"
 import { listManagerWorkforceEmails } from "@/lib/db"
+import { withOperationalCapture } from "@/lib/api-outcome-capture"
 
 export const runtime="nodejs"
 
-export async function GET():Promise<Response>{
+async function getManagerTeam():Promise<Response>{
   try{
     const email=(await auth())?.user?.email?.toLowerCase()
     const access=await getEffectivePermissions(email)
-    if(!email||access.role!=="manager"||!access.permissions.view_team)return Response.json({error:"Team directory access is not available."},{status:403})
+    if(!email||access.role!=="manager")return Response.json({error:"Team directory access is not available."},{status:403})
     const [assignedEmails,roster]=await Promise.all([listManagerWorkforceEmails(email),actorRoster()])
     const assigned=new Set(assignedEmails)
     const people=roster.filter(user=>assigned.has(user.email.toLowerCase())&&user.accessStatus==="active"&&(user.role==="employee"||user.role==="contractor"))
@@ -20,3 +21,4 @@ export async function GET():Promise<Response>{
     return Response.json({error:"Unable to load your team directory."},{status:500})
   }
 }
+export const GET=withOperationalCapture("/api/manager/team","GET",getManagerTeam)

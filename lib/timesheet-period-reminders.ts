@@ -50,7 +50,7 @@ export async function getCurrentSubmissionCompliance(){
     SELECT lower(a.patron_email) AS email,array_agg(DISTINCT p.name ORDER BY p.name) AS projects,
       max(CASE WHEN lower(a.assigned_by)<>lower(a.patron_email) THEN lower(a.assigned_by) END) AS assigned_by
     FROM time_project_assignments a JOIN time_projects p ON p.id=a.project_id CROSS JOIN period
-    WHERE p.active GROUP BY lower(a.patron_email)
+    WHERE p.active AND a.status='active' GROUP BY lower(a.patron_email)
   ),submissions AS (
     SELECT lower(e.owner_email) AS email,max(a.occurred_at) AS submitted_at
     FROM time_entries e JOIN period p ON e.work_date BETWEEN p.start_date AND p.end_date
@@ -108,7 +108,7 @@ function isDue(target:Date,now:Date,force:boolean){
 }
 
 async function hasActiveProject(email:string):Promise<boolean>{
-  const rows=await sql`SELECT EXISTS(SELECT 1 FROM time_project_assignments a JOIN time_projects p ON p.id=a.project_id WHERE p.active AND lower(a.patron_email)=lower(${email})) AS assigned`
+  const rows=await sql`SELECT EXISTS(SELECT 1 FROM time_project_assignments a JOIN time_projects p ON p.id=a.project_id WHERE p.active AND a.status='active' AND lower(a.patron_email)=lower(${email})) AS assigned`
   return Boolean(rows[0]?.assigned)
 }
 async function hasSubmittedBy(email:string,period:{id:string;start_date:string;end_date:string},cutoff:Date):Promise<boolean>{
@@ -166,7 +166,7 @@ export async function sendDueTimesheetReminders(forceManual=false,manualActor="s
     const workerCutoff=new Date(workerHard.getTime()-15*60_000)
     if(isDue(workerHard,now,forceManual))for(const worker of workers){
       if(!await hasActiveProject(worker.email)||await hasSubmittedBy(worker.email,period as {id:string;start_date:string;end_date:string},workerCutoff))continue
-      const assignment=await sql`SELECT DISTINCT lower(a.assigned_by) AS assigned_by,lower(p.created_by) AS created_by FROM time_project_assignments a JOIN time_projects p ON p.id=a.project_id WHERE p.active AND lower(a.patron_email)=lower(${worker.email})`
+      const assignment=await sql`SELECT DISTINCT lower(a.assigned_by) AS assigned_by,lower(p.created_by) AS created_by FROM time_project_assignments a JOIN time_projects p ON p.id=a.project_id WHERE p.active AND a.status='active' AND lower(a.patron_email)=lower(${worker.email})`
       const assignedManagers=[...new Set(assignment.flatMap(row=>[String(row.assigned_by),String(row.created_by)]).filter(email=>managers.some(manager=>manager.email.toLowerCase()===email)))]
       const recipients=assignedManagers.length?assignedManagers:accountManagers.slice(0,1).map(person=>person.email.toLowerCase())
       if(policy.mode==="manual"&&!forceManual){for(const reviewer of accountManagers)sent+=await createReminder(String(period.id),reviewer.email,`manual_worker_hard_${worker.email.toLowerCase()}`,"Manual hard reminder is due",`Send the overdue ${name} timesheet reminder to ${worker.displayName||worker.email}${recipients.length?` via ${recipients.join(", ")}`:"; no assigned manager was found"}.`,actor)}

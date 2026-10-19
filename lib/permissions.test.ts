@@ -9,6 +9,13 @@ it("retains existing defaults and supports explicit revocation",()=>{
   expect(resolvePermissions("manager",{review_entries:false}).review_entries).toBe(false)
   expect(resolvePermissions("employee",{review_entries:true}).review_entries).toBe(true)
 })
+it("allows every authenticated patron role to export visible records and preserves explicit revocation",()=>{
+  for(const role of ["contractor","employee","manager","account_manager","admin"] as const){
+    expect(resolvePermissions(role).export_entries).toBe(true)
+    expect(resolvePermissions(role,{export_entries:false}).export_entries).toBe(false)
+  }
+  expect(resolvePermissions(null).export_entries).toBe(false)
+})
 it("does not grant rights to denied accounts",()=>{
   expect(Object.values(resolvePermissions(null,{view_team:true,review_entries:true})).every(value=>!value)).toBe(true)
 })
@@ -36,6 +43,9 @@ it("lets account managers manage their own entries and review the final queue",(
 })
 it("gives account managers final-approval access but keeps AI and payout rights separate",()=>{
   expect(resolvePermissions("account_manager")).toMatchObject({view_accounts:true,review_accounts:true,ai_accounts:false,authorize_payouts:false})
+  expect(resolvePermissions("account_manager")).toMatchObject({view_manager_entries:true,review_manager_entries:true})
+  expect(resolvePermissions("account_manager",{review_manager_entries:false})).toMatchObject({review_manager_entries:false})
+  expect(resolvePermissions("admin")).toMatchObject({view_manager_entries:true,review_manager_entries:true})
   expect(resolvePermissions("account_manager",{view_accounts:false,review_accounts:false})).toMatchObject({view_accounts:false,review_accounts:false})
 })
 it("keeps project management with managers while making contractor project creation explicitly delegable",()=>{

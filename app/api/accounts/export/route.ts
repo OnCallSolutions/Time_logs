@@ -3,11 +3,12 @@ import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { listHandoffs } from "@/lib/account-handoffs"
 import { listTimesheetPeriods } from "@/lib/db"
+import { withOperationalCapture } from "@/lib/api-outcome-capture"
 
 export const runtime = "nodejs"
 
 /** Returns the selected period/manager slice as a portable, API-ready JSON document. */
-export async function GET(request: Request) {
+async function exportAccountTimesheets(request: Request) {
   try {
     const email = (await auth())?.user?.email?.toLowerCase()
     const access = await getEffectivePermissions(email)
@@ -76,3 +77,4 @@ export async function GET(request: Request) {
     return Response.json({ error: "Approved timesheet export is unavailable." }, { status: 503 })
   }
 }
+export const GET=withOperationalCapture("/api/accounts/export","GET",exportAccountTimesheets)

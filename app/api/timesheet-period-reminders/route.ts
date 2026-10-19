@@ -1,5 +1,6 @@
 /** Serves account-scoped deadline alerts and runs the authenticated scheduled sender. */
 import { z } from "zod"
+import { withOperationalCapture } from "@/lib/api-outcome-capture"
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { getCurrentSubmissionCompliance, getTimesheetReminderPolicy, listTimesheetReminders, markTimesheetRemindersRead, sendDueTimesheetReminders, updateTimesheetReminderPolicy } from "@/lib/timesheet-period-reminders"
@@ -9,7 +10,7 @@ import { listTimesheetPeriodScheduleIssues, listTimesheetPeriods, reconcileTimes
 export const runtime="nodejs"
 const readSchema=z.object({ids:z.array(z.string().uuid()).min(1).max(100)}).strict()
 
-export async function GET(req:Request){
+async function getPeriodReminders(req:Request){
   try{
     if(new URL(req.url).searchParams.get("scheduled")==="1"){
       if(!process.env.CRON_SECRET||req.headers.get("authorization")!==`Bearer ${process.env.CRON_SECRET}`)return Response.json({error:"Unauthorized."},{status:401})
@@ -33,7 +34,7 @@ export async function GET(req:Request){
   }catch{return Response.json({error:"Timesheet reminders unavailable."},{status:503})}
 }
 
-export async function PATCH(req:Request){
+async function updatePeriodReminders(req:Request){
   try{
     const email=(await auth())?.user?.email;const access=await getEffectivePermissions(email)
     if(!email||!access.role)return Response.json({error:"Unauthorized."},{status:401})
@@ -51,7 +52,7 @@ export async function PATCH(req:Request){
   }catch(error){return Response.json({error:error instanceof z.ZodError||error instanceof SyntaxError?"Invalid notification selection.":"Could not update reminder state."},{status:error instanceof z.ZodError||error instanceof SyntaxError?400:503})}
 }
 
-export async function POST(req:Request){
+async function sendPeriodReminders(req:Request){
   try{
     const email=(await auth())?.user?.email;const access=await getEffectivePermissions(email)
     if(!email||!access.role)return Response.json({error:"Unauthorized."},{status:401})
@@ -60,3 +61,7 @@ export async function POST(req:Request){
     return Response.json({sent:await sendDueTimesheetReminders(true,email)},{headers:{"Cache-Control":"no-store"}})
   }catch(error){return Response.json({error:error instanceof z.ZodError||error instanceof SyntaxError?"Invalid reminder action.":"Due reminders could not be sent."},{status:error instanceof z.ZodError||error instanceof SyntaxError?400:503})}
 }
+
+export const GET=withOperationalCapture("/api/timesheet-period-reminders","GET",getPeriodReminders)
+export const PATCH=withOperationalCapture("/api/timesheet-period-reminders","PATCH",updatePeriodReminders)
+export const POST=withOperationalCapture("/api/timesheet-period-reminders","POST",sendPeriodReminders)

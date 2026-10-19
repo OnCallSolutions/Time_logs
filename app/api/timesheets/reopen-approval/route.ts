@@ -4,6 +4,7 @@ import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { getAuditContext } from "@/lib/audit"
 import { reopenApprovedTimesheet } from "@/lib/account-handoffs"
+import { withOperationalCapture } from "@/lib/api-outcome-capture"
 
 export const runtime="nodejs"
 
@@ -12,7 +13,7 @@ const schema=z.object({
   reason:z.string().trim().min(5).max(500),selection:z.array(z.object({id:z.string().uuid(),revision:z.string().datetime({offset:true})}).strict()).min(1).max(100),
 }).strict()
 
-export async function POST(req:Request){
+async function reopenTimesheetApproval(req:Request){
   try{
     const email=(await auth())?.user?.email,access=await getEffectivePermissions(email)
     if(!email||!access.role)return Response.json({error:"Unauthorized."},{status:401})
@@ -29,3 +30,4 @@ export async function POST(req:Request){
     return Response.json({error:invalid?"Enter the complete timesheet, period, revisions, and a reason.":"Timesheet could not be reopened."},{status:invalid?400:503})
   }
 }
+export const POST=withOperationalCapture("/api/timesheets/reopen-approval","POST",reopenTimesheetApproval)

@@ -1,8 +1,4 @@
-/**
- * Resolves the assigned reviewer for employee and contractor submissions.
- * The enabled account manager is the default operational reviewer; otherwise
- * prefer the active manager who provisioned the account, then a stable fallback.
- */
+/** Resolves the first independent reviewer for a submitted timesheet. */
 import "server-only"
 import { getAccountIdentityCreator } from "@/lib/account-identities"
 import { actorRoster } from "@/lib/collaboration"
@@ -31,28 +27,23 @@ export async function resolvePatronManager(ownerEmail:string):Promise<Pick<Submi
 export async function resolveSubmissionReviewer(ownerEmail:string):Promise<SubmissionReviewer|null>{
   const owner=ownerEmail.toLowerCase()
   const [creator,roster]=await Promise.all([getAccountIdentityCreator(owner),actorRoster()])
+  const ownerRole=roster.find(actor=>actor.email.toLowerCase()===owner)?.role
+  const managerPersonalSheet=ownerRole==="manager"
   const candidates=await Promise.all(roster
-    .filter(actor=>(actor.role==="manager"||actor.role==="account_manager")&&actor.accessStatus==="active"&&actor.email.toLowerCase()!==owner)
+    .filter(actor=>actor.role===(managerPersonalSheet?"account_manager":"manager")&&actor.accessStatus==="active"&&actor.email.toLowerCase()!==owner)
     .map(async actor=>{
       const access=await getEffectivePermissions(actor.email)
-      const eligible=access.role==="manager"
-        ? access.permissions.review_entries&&access.permissions.view_team
-        : access.role==="account_manager"&&access.permissions.review_entries
+      const eligible=managerPersonalSheet
+        ? access.role==="account_manager"&&access.permissions.review_entries&&access.permissions.review_manager_entries&&access.permissions.view_manager_entries
+        : access.role==="manager"&&access.permissions.review_entries&&access.permissions.view_team
       return eligible
-        ? {email:actor.email.toLowerCase(),displayName:actor.displayName||actor.email,assignment:"available_manager" as const,role:access.role}
+        ? {email:actor.email.toLowerCase(),displayName:actor.displayName||actor.email,assignment:"available_manager" as const}
         : null
     }))
-  const managers=candidates.filter(actor=>actor!==null)
-    .sort((a,b)=>Number(b.role==="account_manager")-Number(a.role==="account_manager")||a.displayName.localeCompare(b.displayName)||a.email.localeCompare(b.email))
-  if(!managers.length)return null
-  if(managers[0].role==="account_manager"){
-    const {role:_,...reviewer}=managers[0]
-    return reviewer
-  }
-  const addedBy=managers.find(manager=>manager.email===creator?.toLowerCase())
-  const selected=addedBy??managers[0]
-  const {role:_,...reviewer}=selected
-  return addedBy?{...reviewer,assignment:"added_by_manager"}:reviewer
+  const managers=candidates.filter((candidate):candidate is {email:string;displayName:string;assignment:"available_manager"}=>candidate!==null)
+    .sort((a,b)=>Number(b.email===creator?.toLowerCase())-Number(a.email===creator?.toLowerCase())||a.displayName.localeCompare(b.displayName)||a.email.localeCompare(b.email))
+  const selected=managers[0]
+  return selected?{...selected,assignment:!managerPersonalSheet&&selected.email===creator?.toLowerCase()?"added_by_manager":"available_manager"}:null
 }
 
 /** Resolves an active account manager for patron deadline-extension decisions. */

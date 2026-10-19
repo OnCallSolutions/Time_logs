@@ -2,8 +2,9 @@
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { listAccountApprovedEntryIds } from "@/lib/account-handoffs"
+import { withOperationalCapture } from "@/lib/api-outcome-capture"
 
-export async function GET(){
+async function getFinalApprovedTimesheets(){
   try{
     const email=(await auth())?.user?.email,access=await getEffectivePermissions(email)
     if(!email||!access.role)return Response.json({error:"Unauthorized."},{status:401})
@@ -14,3 +15,4 @@ export async function GET(){
     return Response.json({error:"Final approved timesheets are unavailable."},{status:503})
   }
 }
+export const GET=withOperationalCapture("/api/timesheets/final-approved","GET",getFinalApprovedTimesheets)

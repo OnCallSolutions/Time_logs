@@ -6,6 +6,7 @@
  * row ownership is checked in SQL.
  */
 import { z } from "zod"
+import { withOperationalCapture } from "@/lib/api-outcome-capture"
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { getEffectiveUserRole } from "@/lib/access"
@@ -177,7 +178,7 @@ function validateStatusChange(
  * @param context - Route context containing the entry id parameter.
  * @returns JSON response containing the updated entry or an error.
  */
-export async function PATCH(
+async function updateEntry(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
@@ -295,6 +296,7 @@ export async function PATCH(
         if(supplied.size!==selection.length||selection.some(item=>supplied.get(item.id)!==item.revision))return Response.json({error:"The timesheet changed. Refresh the complete timesheet before deciding."},{status:409})
       }
       if(patch.status==="rejected"&&!patch.reviewNote?.trim())return Response.json({error:"A rejection reason is required."},{status:400})
+      if(patch.status==="approved"&&access.role==="admin"&&!patch.reviewNote?.trim())return Response.json({error:"An admin approval requires an intervention reason."},{status:400})
       let correctionDueAt:string|undefined
       if(patch.status==="rejected"){
         if(!patch.correctionDueAt)return Response.json({error:"Choose a correction deadline before returning this timesheet."},{status:400})
@@ -305,7 +307,8 @@ export async function PATCH(
       }
       if(patch.status==="approved"&&!selfAccountManagerApproval&&!((await listAccountIdentities([current.ownerEmail]))[0]))return Response.json({error:"Only a registered account can be approved into the business-accounts workflow."},{status:409})
       const ownerRole=await getEffectiveUserRole(current.ownerEmail)
-      const updated=await decideTimesheetBatch({ownerEmail:current.ownerEmail,startDate,endDate,selection,rejectedEntryId:patch.status==="rejected"?id:undefined,correctionDueAt},access.email,patch.status,ownerRole??"contractor",access.role==="account_manager",patch.reviewNote?.trim()??"",getAuditContext(req))
+      const finalAccountDecision=access.role==="account_manager"||(access.role==="admin"&&(ownerRole==="manager"||ownerRole==="account_manager"))
+      const updated=await decideTimesheetBatch({ownerEmail:current.ownerEmail,startDate,endDate,selection,rejectedEntryId:patch.status==="rejected"?id:undefined,correctionDueAt},access.email,patch.status,ownerRole??"contractor",finalAccountDecision,patch.reviewNote?.trim()??"",getAuditContext(req))
       if(updated.length!==selection.length)return Response.json({error:"The timesheet changed while it was being reviewed. Refresh before deciding."},{status:409})
       return Response.json({entry:updated.find(entry=>entry.id===id),entries:updated})
     }
@@ -409,7 +412,7 @@ export async function PATCH(
  * @param context - Route context containing the entry id parameter.
  * @returns JSON response confirming deletion or reporting an error.
  */
-export async function DELETE(
+async function deleteEntry(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
@@ -472,3 +475,6 @@ export async function DELETE(
     )
   }
 }
+
+export const PATCH=withOperationalCapture("/api/entries/[id]","PATCH",updateEntry)
+export const DELETE=withOperationalCapture("/api/entries/[id]","DELETE",deleteEntry)

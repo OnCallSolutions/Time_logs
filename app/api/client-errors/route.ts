@@ -4,6 +4,7 @@ import {auth} from "@/auth"
 import {getEffectivePermissions} from "@/lib/effective-permissions"
 import {getAuditContext} from "@/lib/audit"
 import {recordAuditEvent} from "@/lib/db"
+import {recordOperationalEvent,sanitizeOperationalMessage} from "@/lib/operational-events"
 import {readJsonLimited,RequestBodyTooLargeError} from "@/lib/read-json-limited"
 
 export const runtime="nodejs"
@@ -17,10 +18,6 @@ const inputSchema=z.object({
   message:z.string().max(400),
 }).strict()
 
-function sanitizeMessage(message:string):string{
-  return message.replace(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g,"[redacted email]").replace(/Bearer\s+\S+/gi,"Bearer [redacted]").replace(/[\u0000-\u001f\u007f]/g," ").slice(0,240)
-}
-
 export async function POST(request:Request){
   try{
     if(Number(request.headers.get("content-length")??0)>8192)return Response.json({error:"Report is too large."},{status:413})
@@ -28,7 +25,10 @@ export async function POST(request:Request){
     const access=await getEffectivePermissions(email)
     if(!email||!access.role)return Response.json({error:"Unauthorized."},{status:401})
     const input=inputSchema.parse(await readJsonLimited(request,8192))
-    await recordAuditEvent({actorEmail:email,action:"client_error_reported",targetType:"client_error",targetId:input.reference,metadata:{operation:input.operation,route:input.route,httpMethod:input.method??null,errorCode:input.code??null,httpStatus:input.status??null,message:sanitizeMessage(input.message)},...getAuditContext(request)})
+    const context=getAuditContext(request)
+    const message=sanitizeOperationalMessage(input.message)
+    await recordOperationalEvent({correlationId:input.reference,actorEmail:email,category:"client_error",operation:input.operation,route:input.route,method:input.method??null,httpStatus:input.status??null,errorCode:input.code??null,message,requestId:context.requestId})
+    await recordAuditEvent({actorEmail:email,action:"client_error_reported",targetType:"client_error",targetId:input.reference,metadata:{operation:input.operation,route:input.route,httpMethod:input.method??null,errorCode:input.code??null,httpStatus:input.status??null,message},...context})
     return Response.json({accepted:true},{status:202,headers:{"Cache-Control":"no-store"}})
   }catch(error){
     const tooLarge=error instanceof RequestBodyTooLargeError

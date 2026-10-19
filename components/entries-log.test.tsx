@@ -62,6 +62,15 @@ it("exposes filtered CSV export only when the caller has the explicit export rig
   expect(screen.getByRole("button",{name:"Export (1)"})).toBeEnabled()
 })
 
+it("keeps export discoverable on headerless and empty timesheet pages",()=>{
+  const actions={onUpdate:vi.fn(),onStatusChange:vi.fn(),onDelete:vi.fn(),onClear:vi.fn()}
+  const {rerender}=render(<EntriesLog entries={[entry]} hideHeader canExport {...actions}/> )
+  expect(screen.getByRole("button",{name:"Export (1)"})).toBeVisible()
+  expect(screen.queryByRole("heading",{name:"Time entries"})).not.toBeInTheDocument()
+  rerender(<EntriesLog entries={[]} canExport {...actions}/> )
+  expect(screen.getByRole("button",{name:"Export timesheets"})).toBeDisabled()
+})
+
 it("offers direct Excel/CSV and PDF downloads only to authorized patrons",async()=>{
   const user=userEvent.setup()
   const {rerender}=render(<EntriesLog entries={[entry]} onUpdate={vi.fn()} onStatusChange={vi.fn()} onDelete={vi.fn()} onClear={vi.fn()}/> )

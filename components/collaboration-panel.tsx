@@ -10,6 +10,7 @@ import { AddPerson } from "./add-person"
 export { MessagesPanel } from "@/components/messages-panel"
 import { Button } from "@/components/ui/button"
 import { WindowSurface } from "@/components/window-surface"
+import { DataExportMenu } from "@/components/data-export-menu"
 import { apiPath } from "@/lib/paths"
 import { notifyPermissionsChanged } from "@/lib/permission-events"
 import { permissionLabels, delegablePermissions, type Permission, type Permissions } from "@/lib/permissions"
@@ -78,7 +79,7 @@ export function EmployeeRightsPanel({permissions,admin=false}:{permissions:Permi
     finally{setSaving(false)}
   }
   return <section aria-label="Manage employees/contractors" className="space-y-4">
-    <h2 className="text-base font-semibold">Manage employees/contractors</h2>
+    <header className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-base font-semibold">Manage employees/contractors</h2><DataExportMenu title="Patron rights directory" filename="patron-rights-directory" rows={roleGroups.flatMap(group=>group.people.map(user=>({name:displayName(user.displayName),email:user.email,role:user.role,accessStatus:user.accessStatus,companyReference:user.companyReference??"",contractorNumber:user.contractorNumber??"",enabledRights:Object.entries(user.permissions).filter(([,enabled])=>enabled).map(([permission])=>permission).join(", ")})))} summary={{patrons:users.length,roles:roleGroups.map(group=>group.role).join(", ")}}/></header>
     <AddPerson admin={admin}/>
     {(error||rosterError)&&<p role="alert" className="text-sm text-destructive">{error||rosterError}</p>}
     <div className="max-h-[60dvh] overflow-auto overscroll-contain"><table className="w-full min-w-[560px] text-left text-sm"><thead className="sticky top-0 bg-white"><tr className="border-b"><th className="p-2">Patron</th><th className="p-2">ID</th><th className="p-2">Role</th><th className="p-2 text-right">Actions</th></tr></thead><tbody>{roleGroups.map(group=><Fragment key={group.role}><tr className="border-y border-blue-200 bg-blue-50"><th colSpan={4} className="p-2 text-left text-xs font-semibold uppercase text-blue-950">{group.role.replaceAll("_"," ")} · {group.people.length}</th></tr>{group.people.map(user=><tr key={user.email} className="border-b"><td className="p-2"><button type="button" className="font-medium underline-offset-2 hover:underline" onClick={()=>setDetails(user)}>{displayName(user.displayName)}</button></td><td className="p-2 font-mono text-xs">{user.companyReference||"—"}</td><td className="p-2 capitalize">{user.role.replaceAll("_"," ")}</td><td className="p-2 text-right">{(user.role==="employee"||user.role==="contractor")&&user.accessStatus==="active"?<Button variant="outline" size="sm" aria-label={`Edit rights for ${displayName(user.displayName)}`} onClick={()=>{setEmail(user.email);setDraft({...user.permissions});setBaseline({...user.permissions});setError(null);setEditing(true)}}><Pencil className="size-3"/>Edit rights</Button>:<span className="text-xs text-muted-foreground">Admin managed</span>}</td></tr>)}</Fragment>)}</tbody></table></div>

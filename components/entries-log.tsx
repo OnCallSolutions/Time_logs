@@ -258,6 +258,7 @@ export function EntriesLog({
     return (
       <div className="border-y border-border bg-card/50">
       {periodView?<div className="timesheet-period-toolbar-container min-w-0 border-b border-indigo-300 bg-indigo-100/80 px-2.5 py-1.5"><div className="timesheet-period-toolbar items-center gap-1"><span role="status" className={`timesheet-period-deadline text-left text-xs font-semibold ${submissionClosed?"text-red-950":"text-orange-950"}`}>{deadlineMessage}</span>{periodToolbarCenter&&<div className="timesheet-period-center min-w-0">{periodToolbarCenter}</div>}</div></div>:canSubmit&&<p role="status" className={`border-b px-4 py-2 text-xs ${submissionClosed?"border-red-200 bg-red-50 text-red-900":"border-orange-200 bg-orange-50/70 text-orange-950"}`}>{deadlineMessage}</p>}
+      {canExport&&<div className="flex justify-end border-b border-slate-200 bg-white px-3 py-1.5"><Button variant="outline" size="sm" className="h-7 border-emerald-300 bg-emerald-50 px-2 text-xs text-emerald-900" disabled aria-label="Export timesheets"> <Download className="size-3.5" aria-hidden="true"/>Export (0)</Button></div>}
       <div className="flex min-h-56 flex-col items-center justify-center px-6 py-10 text-center">
         {!hideHeader&&<div className="mb-6 w-full max-w-3xl text-left">
           <h2 className="text-sm font-semibold">{title}</h2>
@@ -361,14 +362,14 @@ export function EntriesLog({
         await onStatusChange(review.entry.id, review.decision, note || undefined, review.entry.revision)
         setReview(null)
       }} />}
-      {!hideHeader&&<div className="flex flex-wrap items-center justify-between gap-1.5 border-b border-orange-200 bg-gradient-to-r from-orange-50 via-white to-sky-50 px-2.5 py-1.5">
-        <div>
+      <div className="flex flex-wrap items-center justify-between gap-1.5 border-b border-orange-200 bg-gradient-to-r from-orange-50 via-white to-sky-50 px-2.5 py-1.5">
+        {!hideHeader&&<div>
           <h2 className="text-sm font-semibold">{title}</h2>
           <p className="text-[11px] text-muted-foreground">
             {periodEntries.length} {periodEntries.length === 1 ? "entry" : "entries"} ·{" "}
             {description}
           </p>
-        </div>
+        </div>}
         <div className="flex flex-wrap items-center gap-1">
           {canClear&&<Button variant="destructive" size="sm" className="h-7 px-2 text-xs" onClick={() => setClearConfirmationOpen(true)}><Trash2 className="size-3.5" aria-hidden="true" />Clear all</Button>}
           {canExport&&<div className="relative">
@@ -382,7 +383,7 @@ export function EntriesLog({
             {exportError&&<p role="alert" className="absolute right-0 top-full z-30 mt-1 w-56 rounded border border-red-200 bg-white p-2 text-xs text-red-800 shadow">{exportError}</p>}
           </div>}
         </div>
-      </div>}
+      </div>
       {periodView&&<div className="timesheet-period-toolbar-container min-w-0 border-b border-indigo-300 bg-indigo-100/80 px-2.5 py-1.5">
         <div className="timesheet-period-toolbar items-center gap-1">
         <span role="status" className={`timesheet-period-deadline text-left text-xs font-semibold ${submissionClosed?"text-red-950":"text-orange-950"}`}>{deadlineMessage}</span>

@@ -4,6 +4,7 @@
  * Baseline creation does not accept elevated roles, permissions or caller-issued IDs.
  */
 import { z } from "zod"
+import { withOperationalCapture } from "@/lib/api-outcome-capture"
 import { auth } from "@/auth"
 import { getConfiguredAccessUsers, getEffectiveUserRole } from "@/lib/access"
 import { listKnownUsers, listManagedAccessUsers, recordAuditEvent } from "@/lib/db"
@@ -13,7 +14,7 @@ import { getAuditContext } from "@/lib/audit"
 import { companyEmailDomains } from "@/lib/company-directory"
 
 /** @returns Promise<Response> with official identity for the current authenticated account only. */
-export async function GET(): Promise<Response> {
+async function getPeople(): Promise<Response> {
   const email = (await auth())?.user?.email
   if (!email || !await getEffectiveUserRole(email)) return Response.json({ error: "Forbidden." }, { status: 403 })
   return Response.json({ identity: (await listAccountIdentities([email]))[0] ?? null, companyEmailDomains: companyEmailDomains() }, { headers: { "Cache-Control": "no-store" } })
@@ -23,7 +24,7 @@ export async function GET(): Promise<Response> {
  * @param request - Strict official name/email/baseline-role payload, never permissions.
  * @returns Promise<Response> with immutable contractor number or a safe conflict.
  */
-export async function POST(request: Request): Promise<Response> {
+async function createPerson(request: Request): Promise<Response> {
   try {
     const actor = (await auth())?.user?.email, role = await getEffectiveUserRole(actor)
     if (!actor || (role !== "admin" && role !== "manager")) return Response.json({ error: "Forbidden." }, { status: 403 })
@@ -49,7 +50,7 @@ export async function POST(request: Request): Promise<Response> {
  * @param request - Strict email and normalized official-name payload.
  * @returns Promise<Response> with the saved identity or a safe validation error.
  */
-export async function PATCH(request: Request): Promise<Response> {
+async function updatePerson(request: Request): Promise<Response> {
   try {
     const actor = (await auth())?.user?.email
     if (!actor || await getEffectiveUserRole(actor) !== "admin") return Response.json({ error: "Forbidden." }, { status: 403 })
@@ -69,3 +70,7 @@ export async function PATCH(request: Request): Promise<Response> {
     return Response.json({ error: code === "23505" ? "That official name is already assigned to another patron." : error instanceof z.ZodError ? "Use an official name of 2-80 letters and valid separators." : "Unable to update the official name." }, { status: code === "23505" ? 409 : error instanceof z.ZodError || error instanceof SyntaxError ? 400 : 503 })
   }
 }
+
+export const GET=withOperationalCapture("/api/people","GET",getPeople)
+export const POST=withOperationalCapture("/api/people","POST",createPerson)
+export const PATCH=withOperationalCapture("/api/people","PATCH",updatePerson)

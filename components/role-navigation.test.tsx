@@ -58,7 +58,7 @@ it("gives contractors a dedicated capture-first home without placing raw entries
   testRole="contractor"
   render(<TimesheetApp role="contractor" userEmail="contractor@example.com" />)
   const home=await screen.findByRole("region",{name:"contractor workspace home"})
-  expect(within(home).getByRole("button",{name:/log project time/i})).toBeVisible()
+  expect(within(home).getByRole("button",{name:/extract timesheet with ai/i})).toBeVisible()
   expect(within(home).getByRole("button",{name:/my submissions/i})).toBeVisible()
   expect(within(home).getByRole("navigation",{name:"contractor dashboard actions"})).toBeVisible()
   expect(screen.queryByText("Employee A")).not.toBeInTheDocument()
@@ -169,7 +169,8 @@ it("groups admin tools beneath Admin, Reports, and Timesheets while preserving l
   expect(within(timesheetView).getAllByRole("heading",{name:"Raw timesheet entries"})[0]).toBeVisible()
   expect(within(timesheetView).getByRole("combobox",{name:"Timesheet period"})).toHaveValue("period-1")
   expect(within(timesheetView).getByRole("button",{name:"Log time"})).toBeVisible()
-  await userEvent.click(within(timesheetView).getByRole("button",{name:"Review queue"}))
+  await userEvent.click(within(timesheetView).getByText(/Exceptional actions/))
+  await userEvent.click(within(timesheetView).getByRole("button",{name:"Resolve pending timesheets"}))
   const reviewQueue=await screen.findByRole("dialog",{name:"Review queue"})
   expect(reviewQueue).toHaveAttribute("data-window-expanded","true")
   expect(within(reviewQueue).getByRole("heading",{name:"Timesheets awaiting review"})).toBeVisible()

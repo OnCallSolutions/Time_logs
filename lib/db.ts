@@ -168,6 +168,7 @@ export type AuditAction =
   | "client_error_reported"
   | "user_issue_submitted"
   | "issue_updated"
+  | "admin_extension_override"
 
 export type AuditEvent = {
   id: string
@@ -186,7 +187,7 @@ export type AuditEvent = {
 
 export type TimesheetPeriod = { id:string; name:string; startDate:string; endDate:string; submissionDeadline:string; managerSubmissionDeadline?:string; accountApprovalDeadline?:string; exceptionResolutionDeadline?:string; timezone?:string; managerGraceDays:number; reminderDays:number; createdBy:string; createdAt:string }
 export type TimesheetPeriodScheduleIssue = {id:string;issueKey:string;message:string;periodIds:string[];firstSeenAt:string;lastSeenAt:string}
-export type TimeProject = { id:string; name:string; description:string; active:boolean; createdBy:string; createdAt:string; updatedAt:string }
+export type TimeProject = { id:string; name:string; description:string; active:boolean; createdBy:string; managerEmail?:string|null; createdAt:string; updatedAt:string; used?:boolean }
 export type EntryRejectionRecord={id:string;actorEmail:string;entryId:string|null;contractor:string;ownerEmail:string|null;project:string;workDate:string|null;hours:number|null;reason:string;rejectedAt:string}
 
 type AuditEventRow = {
@@ -553,6 +554,8 @@ export function ensureSubmissionExtensionsTable(){
       assigned_to text NOT NULL,
       reason text NOT NULL CHECK(length(reason) BETWEEN 5 AND 1000),
       requested_until timestamptz NOT NULL,
+      not_before_until timestamptz,
+      hard_cap_until timestamptz,
       status text NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','denied')),
       reviewed_by text,
       reviewed_at timestamptz,
@@ -561,6 +564,8 @@ export function ensureSubmissionExtensionsTable(){
       created_at timestamptz NOT NULL DEFAULT now(),
       updated_at timestamptz NOT NULL DEFAULT now()
     )`
+    await sql`ALTER TABLE timesheet_extension_requests ADD COLUMN IF NOT EXISTS hard_cap_until timestamptz`
+    await sql`ALTER TABLE timesheet_extension_requests ADD COLUMN IF NOT EXISTS not_before_until timestamptz`
     await sql`CREATE UNIQUE INDEX IF NOT EXISTS timesheet_extension_pending_owner_period_idx ON timesheet_extension_requests(lower(requester_email),period_id) WHERE status='pending'`
     await sql`CREATE INDEX IF NOT EXISTS timesheet_extension_reviewer_status_idx ON timesheet_extension_requests(lower(assigned_to),status,created_at DESC)`
     await sql`CREATE INDEX IF NOT EXISTS timesheet_extension_owner_period_idx ON timesheet_extension_requests(lower(requester_email),period_id,status)`
@@ -574,44 +579,46 @@ function toTimesheetExtensionRequest(row:Record<string,unknown>):TimesheetExtens
 }
 
 /** Lists only the signed-in patron's requests or requests routed to their reviewer. */
-export async function listTimesheetExtensionRequests(email:string,reviewer=false):Promise<TimesheetExtensionRequest[]>{
+export async function listTimesheetExtensionRequests(email:string,reviewer=false,admin=false):Promise<TimesheetExtensionRequest[]>{
   await ensureSubmissionExtensionsTable()
-  const rows=reviewer
+  const rows=admin
+    ? await sql`SELECT r.*,p.name AS period_name,r.requester_email AS requester_name FROM timesheet_extension_requests r JOIN timesheet_periods p ON p.id=r.period_id ORDER BY CASE r.status WHEN 'pending' THEN 0 ELSE 1 END,r.created_at DESC LIMIT 500`
+    : reviewer
     ? await sql`SELECT r.*,p.name AS period_name,r.requester_email AS requester_name FROM timesheet_extension_requests r JOIN timesheet_periods p ON p.id=r.period_id WHERE lower(r.assigned_to)=lower(${email}) ORDER BY CASE r.status WHEN 'pending' THEN 0 ELSE 1 END,r.created_at DESC LIMIT 100`
     : await sql`SELECT r.*,p.name AS period_name,r.requester_email AS requester_name FROM timesheet_extension_requests r JOIN timesheet_periods p ON p.id=r.period_id WHERE lower(r.requester_email)=lower(${email}) ORDER BY r.created_at DESC LIMIT 100`
   return rows.map(row=>toTimesheetExtensionRequest(row as Record<string,unknown>))
 }
 
 /** Creates a request only when the patron has draft or returned work in that period. */
-export async function createTimesheetExtensionRequest(input:{ownerEmail:string;periodId:string;assignedTo:string;reason:string;requestedUntil:string},context:AuditContext):Promise<TimesheetExtensionRequest|null>{
+export async function createTimesheetExtensionRequest(input:{ownerEmail:string;periodId:string;assignedTo:string;reason:string;requestedUntil:string;notBeforeUntil:string;hardCapUntil:string},context:AuditContext):Promise<TimesheetExtensionRequest|null>{
   await ensureSubmissionExtensionsTable();await ensureTimeEntriesTable();await ensureAuditEventsTable()
   const rows=await sql`WITH created AS (
-    INSERT INTO timesheet_extension_requests(requester_email,period_id,assigned_to,reason,requested_until)
-    SELECT lower(${input.ownerEmail}),p.id,lower(${input.assignedTo}),${input.reason}::text,${input.requestedUntil}::timestamptz
+    INSERT INTO timesheet_extension_requests(requester_email,period_id,assigned_to,reason,requested_until,not_before_until,hard_cap_until)
+    SELECT lower(${input.ownerEmail}),p.id,lower(${input.assignedTo}),${input.reason}::text,${input.requestedUntil}::timestamptz,${input.notBeforeUntil}::timestamptz,${input.hardCapUntil}::timestamptz
     FROM timesheet_periods p WHERE p.id=${input.periodId}::uuid
-      AND ${input.requestedUntil}::timestamptz>p.submission_deadline
-      AND ${input.requestedUntil}::timestamptz<=p.submission_deadline+(p.manager_grace_days*interval '1 day')
+      AND ${input.requestedUntil}::timestamptz>${input.notBeforeUntil}::timestamptz
+      AND ${input.requestedUntil}::timestamptz<=${input.hardCapUntil}::timestamptz
       AND EXISTS(SELECT 1 FROM time_entries e WHERE lower(e.owner_email)=lower(${input.ownerEmail}) AND e.work_date BETWEEN p.start_date AND p.end_date AND e.status IN ('draft','rejected') AND e.payout_eligible_at IS NULL)
     ON CONFLICT DO NOTHING RETURNING *
   ), audited AS (
     INSERT INTO audit_events(actor_email,action,target_type,target_id,metadata,ip_address,user_agent,request_method,request_path,request_id)
-    SELECT lower(${input.ownerEmail}),'timesheet_extension_requested','timesheet_extension_request',id::text,jsonb_build_object('periodId',period_id,'assignedTo',assigned_to,'requestedUntil',requested_until),${context.ipAddress}::text,${context.userAgent}::text,${context.requestMethod}::text,${context.requestPath}::text,${context.requestId}::text FROM created RETURNING target_id
+    SELECT lower(${input.ownerEmail}),'timesheet_extension_requested','timesheet_extension_request',id::text,jsonb_build_object('periodId',period_id,'assignedTo',assigned_to,'requestedUntil',requested_until,'notBeforeUntil',not_before_until,'hardCapUntil',hard_cap_until),${context.ipAddress}::text,${context.userAgent}::text,${context.requestMethod}::text,${context.requestPath}::text,${context.requestId}::text FROM created RETURNING target_id
   ) SELECT c.*,p.name AS period_name,c.requester_email AS requester_name FROM created c JOIN timesheet_periods p ON p.id=c.period_id WHERE EXISTS(SELECT 1 FROM audited)`
   return rows.length?toTimesheetExtensionRequest(rows[0] as Record<string,unknown>):null
 }
 
 /** Makes a one-time, assigned-manager decision and records the grant atomically. */
-export async function decideTimesheetExtensionRequest(id:string,reviewerEmail:string,decision:"approved"|"denied",managerNote:string,context:AuditContext):Promise<TimesheetExtensionRequest|null>{
+export async function decideTimesheetExtensionRequest(id:string,reviewerEmail:string,decision:"approved"|"denied",managerNote:string,decisionUntil:string|null,override:boolean,context:AuditContext):Promise<TimesheetExtensionRequest|null>{
   await ensureSubmissionExtensionsTable();await ensureAuditEventsTable()
   const rows=await sql`WITH changed AS (
-    UPDATE timesheet_extension_requests r SET status=${decision},reviewed_by=lower(${reviewerEmail}),reviewed_at=now(),manager_note=${managerNote}::text,approved_until=CASE WHEN ${decision}='approved' THEN r.requested_until ELSE NULL END,updated_at=now()
+    UPDATE timesheet_extension_requests r SET status=${decision},reviewed_by=lower(${reviewerEmail}),reviewed_at=now(),manager_note=${managerNote}::text,approved_until=CASE WHEN ${decision}='approved' THEN ${decisionUntil}::timestamptz ELSE NULL END,updated_at=now()
     FROM timesheet_periods p
-    WHERE r.period_id=p.id AND r.id=${id}::uuid AND r.status='pending' AND lower(r.assigned_to)=lower(${reviewerEmail})
-      AND (${decision}<>'approved' OR (r.requested_until>p.submission_deadline AND r.requested_until<=p.submission_deadline+(p.manager_grace_days*interval '1 day')))
+    WHERE r.period_id=p.id AND r.id=${id}::uuid AND r.status='pending' AND (${override} OR lower(r.assigned_to)=lower(${reviewerEmail}))
+      AND (${decision}<>'approved' OR (r.requested_until>COALESCE(r.not_before_until,p.submission_deadline) AND ${decisionUntil}::timestamptz>COALESCE(r.not_before_until,p.submission_deadline) AND ${decisionUntil}::timestamptz<=r.requested_until AND ${decisionUntil}::timestamptz<=COALESCE(r.hard_cap_until,p.manager_submission_deadline)))
     RETURNING r.*
   ), audited AS (
     INSERT INTO audit_events(actor_email,action,target_type,target_id,metadata,ip_address,user_agent,request_method,request_path,request_id)
-    SELECT lower(${reviewerEmail}),CASE WHEN ${decision}='approved' THEN 'timesheet_extension_approved' ELSE 'timesheet_extension_denied' END,'timesheet_extension_request',id::text,jsonb_build_object('periodId',period_id,'requesterEmail',requester_email,'approvedUntil',approved_until,'hasManagerNote',length(manager_note)>0),${context.ipAddress}::text,${context.userAgent}::text,${context.requestMethod}::text,${context.requestPath}::text,${context.requestId}::text FROM changed RETURNING target_id
+    SELECT lower(${reviewerEmail}),CASE WHEN ${decision}='approved' THEN 'timesheet_extension_approved' ELSE 'timesheet_extension_denied' END,'timesheet_extension_request',id::text,jsonb_build_object('periodId',period_id,'requesterEmail',requester_email,'approvedUntil',approved_until,'assignedTo',assigned_to,'override',${override},'reason',manager_note),${context.ipAddress}::text,${context.userAgent}::text,${context.requestMethod}::text,${context.requestPath}::text,${context.requestId}::text FROM changed RETURNING target_id
   ) SELECT c.*,p.name AS period_name,c.requester_email AS requester_name FROM changed c JOIN timesheet_periods p ON p.id=c.period_id WHERE EXISTS(SELECT 1 FROM audited)`
   return rows.length?toTimesheetExtensionRequest(rows[0] as Record<string,unknown>):null
 }
@@ -636,14 +643,19 @@ export function ensureProjectsTable(){
       created_at timestamptz NOT NULL DEFAULT now(),
       updated_at timestamptz NOT NULL DEFAULT now()
     )`
+    await sql`ALTER TABLE time_projects ADD COLUMN IF NOT EXISTS manager_email text`
     await sql`CREATE UNIQUE INDEX IF NOT EXISTS time_projects_name_ci_idx ON time_projects(lower(name))`
     await sql`CREATE TABLE IF NOT EXISTS time_project_assignments (
       project_id uuid NOT NULL REFERENCES time_projects(id) ON DELETE CASCADE,
       patron_email text NOT NULL,
       assigned_by text NOT NULL,
       assigned_at timestamptz NOT NULL DEFAULT now(),
+      status text NOT NULL DEFAULT 'active' CHECK(status IN ('active','paused')),
       PRIMARY KEY(project_id,patron_email)
     )`
+    await sql`ALTER TABLE time_project_assignments ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'active'`
+    await sql`ALTER TABLE time_project_assignments DROP CONSTRAINT IF EXISTS time_project_assignments_status_check`
+    await sql`ALTER TABLE time_project_assignments ADD CONSTRAINT time_project_assignments_status_check CHECK(status IN ('active','paused'))`
     await sql`CREATE INDEX IF NOT EXISTS time_project_assignments_patron_idx ON time_project_assignments(lower(patron_email))`
     await sql`CREATE TABLE IF NOT EXISTS time_project_assignment_events (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -654,6 +666,8 @@ export function ensureProjectsTable(){
       actor_email text NOT NULL,
       occurred_at timestamptz NOT NULL DEFAULT now()
     )`
+    await sql`ALTER TABLE time_project_assignment_events DROP CONSTRAINT IF EXISTS time_project_assignment_events_action_check`
+    await sql`ALTER TABLE time_project_assignment_events ADD CONSTRAINT time_project_assignment_events_action_check CHECK(action IN ('assigned','reassigned','removed','paused','resumed'))`
     await sql`CREATE INDEX IF NOT EXISTS time_project_assignment_events_project_idx ON time_project_assignment_events(project_id,occurred_at DESC)`
     await sql`CREATE INDEX IF NOT EXISTS time_project_assignment_events_patron_idx ON time_project_assignment_events(lower(patron_email),occurred_at DESC)`
     await sql`CREATE UNIQUE INDEX IF NOT EXISTS time_project_assignment_events_backfill_idx ON time_project_assignment_events(project_id,lower(patron_email),action,lower(actor_email),occurred_at)`
@@ -677,12 +691,54 @@ export async function listTimeProjects(includeArchived=false,patronEmail?:string
   await ensureProjectsTable()
   const rows=patronEmail
     ? includeArchived
-      ? await sql`SELECT p.id,p.name,p.description,p.active,p.created_by,p.created_at::text AS created_at,p.updated_at::text AS updated_at FROM time_projects p JOIN time_project_assignments a ON a.project_id=p.id WHERE lower(a.patron_email)=lower(${patronEmail}) ORDER BY p.active DESC,lower(p.name)`
-      : await sql`SELECT p.id,p.name,p.description,p.active,p.created_by,p.created_at::text AS created_at,p.updated_at::text AS updated_at FROM time_projects p JOIN time_project_assignments a ON a.project_id=p.id WHERE p.active AND lower(a.patron_email)=lower(${patronEmail}) ORDER BY lower(p.name)`
+      ? await sql`SELECT p.id,p.name,p.description,p.active,p.created_by,p.manager_email,p.created_at::text AS created_at,p.updated_at::text AS updated_at,EXISTS(SELECT 1 FROM time_entries e WHERE lower(trim(e.project))=lower(p.name)) AS used FROM time_projects p JOIN time_project_assignments a ON a.project_id=p.id WHERE a.status='active' AND lower(a.patron_email)=lower(${patronEmail}) ORDER BY p.active DESC,lower(p.name)`
+      : await sql`SELECT p.id,p.name,p.description,p.active,p.created_by,p.manager_email,p.created_at::text AS created_at,p.updated_at::text AS updated_at,EXISTS(SELECT 1 FROM time_entries e WHERE lower(trim(e.project))=lower(p.name)) AS used FROM time_projects p JOIN time_project_assignments a ON a.project_id=p.id WHERE p.active AND a.status='active' AND lower(a.patron_email)=lower(${patronEmail}) ORDER BY lower(p.name)`
     : includeArchived
-      ? await sql`SELECT id,name,description,active,created_by,created_at::text AS created_at,updated_at::text AS updated_at FROM time_projects ORDER BY active DESC,lower(name)`
-      : await sql`SELECT id,name,description,active,created_by,created_at::text AS created_at,updated_at::text AS updated_at FROM time_projects WHERE active ORDER BY lower(name)`
-  return rows.map(row=>({id:String(row.id),name:String(row.name),description:String(row.description??""),active:Boolean(row.active),createdBy:String(row.created_by),createdAt:new Date(String(row.created_at)).toISOString(),updatedAt:new Date(String(row.updated_at)).toISOString()}))
+      ? await sql`SELECT p.id,p.name,p.description,p.active,p.created_by,p.manager_email,p.created_at::text AS created_at,p.updated_at::text AS updated_at,EXISTS(SELECT 1 FROM time_entries e WHERE lower(trim(e.project))=lower(p.name)) AS used FROM time_projects p ORDER BY active DESC,lower(name)`
+      : await sql`SELECT p.id,p.name,p.description,p.active,p.created_by,p.manager_email,p.created_at::text AS created_at,p.updated_at::text AS updated_at,EXISTS(SELECT 1 FROM time_entries e WHERE lower(trim(e.project))=lower(p.name)) AS used FROM time_projects p WHERE active ORDER BY lower(name)`
+  return rows.map(row=>({id:String(row.id),name:String(row.name),description:String(row.description??""),active:Boolean(row.active),createdBy:String(row.created_by),managerEmail:row.manager_email?String(row.manager_email):null,createdAt:new Date(String(row.created_at)).toISOString(),updatedAt:new Date(String(row.updated_at)).toISOString(),used:Boolean(row.used)}))
+}
+
+/** @returns Projects created, assigned, or explicitly assigned to a manager. */
+export async function listManagerTimeProjects(managerEmail:string,includeArchived=false):Promise<TimeProject[]>{
+  await ensureProjectsTable();await ensureAuditEventsTable()
+  const rows=await sql`SELECT DISTINCT p.id,p.name,p.description,p.active,p.created_by,p.manager_email,p.created_at::text AS created_at,p.updated_at::text AS updated_at,EXISTS(SELECT 1 FROM time_entries e WHERE lower(trim(e.project))=lower(p.name)) AS used
+    FROM time_projects p LEFT JOIN time_project_assignments a ON a.project_id=p.id
+    WHERE lower(p.created_by)=lower(${managerEmail}) OR lower(a.assigned_by)=lower(${managerEmail}) OR lower(a.patron_email)=lower(${managerEmail})
+      OR (lower(p.manager_email)=lower(${managerEmail}) AND (EXISTS(SELECT 1 FROM time_entries e WHERE lower(trim(e.project))=lower(p.name) AND lower(e.review_manager_email)=lower(${managerEmail}) AND e.status IN ('submitted','approved','rejected'))
+        OR EXISTS(SELECT 1 FROM audit_events event WHERE event.target_type='time_project' AND event.target_id=p.id::text AND event.action='project_merged')))
+    ORDER BY p.active DESC,lower(p.name)`
+  return rows.filter(row=>includeArchived||Boolean(row.active)).map(row=>({id:String(row.id),name:String(row.name),description:String(row.description??""),active:Boolean(row.active),createdBy:String(row.created_by),managerEmail:row.manager_email?String(row.manager_email):null,createdAt:new Date(String(row.created_at)).toISOString(),updatedAt:new Date(String(row.updated_at)).toISOString(),used:Boolean(row.used)}))
+}
+
+/** @returns Whether a manager has a management relationship with a project. */
+export async function isManagerProjectManager(managerEmail:string,projectId:string):Promise<boolean>{
+  await ensureProjectsTable();await ensureAuditEventsTable()
+  const rows=await sql`SELECT EXISTS(SELECT 1 FROM time_projects p LEFT JOIN time_project_assignments a ON a.project_id=p.id
+    WHERE p.id=${projectId}::uuid AND (lower(p.created_by)=lower(${managerEmail}) OR lower(a.assigned_by)=lower(${managerEmail}) OR lower(a.patron_email)=lower(${managerEmail}) OR (lower(p.manager_email)=lower(${managerEmail}) AND (EXISTS(SELECT 1 FROM time_entries e WHERE lower(trim(e.project))=lower(p.name) AND lower(e.review_manager_email)=lower(${managerEmail}) AND e.status IN ('submitted','approved','rejected')) OR EXISTS(SELECT 1 FROM audit_events event WHERE event.target_type='time_project' AND event.target_id=p.id::text AND event.action='project_merged'))))) AS allowed`
+  return Boolean(rows[0]?.allowed)
+}
+
+/** @returns Assignments limited to projects in one manager's scope. */
+export async function listManagerTimeProjectAssignments(managerEmail:string):Promise<{projectId:string;email:string;status:"active"|"paused"}[]>{
+  await ensureProjectsTable();await ensureAuditEventsTable()
+  const rows=await sql`SELECT DISTINCT a.project_id,lower(a.patron_email) AS patron_email,a.status FROM time_project_assignments a JOIN time_projects p ON p.id=a.project_id
+    WHERE lower(p.created_by)=lower(${managerEmail}) OR lower(a.assigned_by)=lower(${managerEmail}) OR lower(a.patron_email)=lower(${managerEmail})
+      OR (lower(p.manager_email)=lower(${managerEmail}) AND (EXISTS(SELECT 1 FROM time_entries e WHERE lower(trim(e.project))=lower(p.name) AND lower(e.review_manager_email)=lower(${managerEmail}) AND e.status IN ('submitted','approved','rejected'))
+        OR EXISTS(SELECT 1 FROM audit_events event WHERE event.target_type='time_project' AND event.target_id=p.id::text AND event.action='project_merged')))
+    ORDER BY lower(a.patron_email)`
+  return rows.map(row=>({projectId:String(row.project_id),email:String(row.patron_email),status:String(row.status)==="paused"?"paused":"active"}))
+}
+
+/** @returns Assignment history for projects in one manager's scope. */
+export async function listManagerTimeProjectAssignmentHistory(managerEmail:string,limit=500):Promise<{id:string;projectId:string;projectName:string;email:string;action:"assigned"|"reassigned"|"removed"|"paused"|"resumed";actorEmail:string;occurredAt:string}[]>{
+  await ensureProjectsTable();await ensureAuditEventsTable()
+  const safeLimit=Math.min(Math.max(limit,1),1000)
+  const rows=await sql`SELECT event.id,event.project_id,event.project_name,event.patron_email,event.action,event.actor_email,event.occurred_at::text AS occurred_at
+    FROM time_project_assignment_events event WHERE EXISTS(SELECT 1 FROM time_projects p LEFT JOIN time_project_assignments a ON a.project_id=p.id
+      WHERE p.id=event.project_id AND (lower(p.created_by)=lower(${managerEmail}) OR lower(a.assigned_by)=lower(${managerEmail}) OR lower(a.patron_email)=lower(${managerEmail}) OR (lower(p.manager_email)=lower(${managerEmail}) AND (EXISTS(SELECT 1 FROM time_entries entry WHERE lower(trim(entry.project))=lower(p.name) AND lower(entry.review_manager_email)=lower(${managerEmail}) AND entry.status IN ('submitted','approved','rejected')) OR EXISTS(SELECT 1 FROM audit_events merged WHERE merged.target_type='time_project' AND merged.target_id=p.id::text AND merged.action='project_merged'))))
+    ORDER BY event.occurred_at DESC,event.id DESC LIMIT ${safeLimit}`
+  return rows.map(row=>({id:String(row.id),projectId:String(row.project_id),projectName:String(row.project_name),email:String(row.patron_email),action:String(row.action) as "assigned"|"reassigned"|"removed"|"paused"|"resumed",actorEmail:String(row.actor_email),occurredAt:new Date(String(row.occurred_at)).toISOString()}))
 }
 
 /** Assigns or unassigns a project for one active patron. */
@@ -721,27 +777,47 @@ export async function setTimeProjectAssignment(projectId:string,patronEmail:stri
   return rows.length>0
 }
 
+/** Pauses or resumes a worker's project access while retaining the assignment. */
+export async function setTimeProjectAssignmentStatus(projectId:string,patronEmail:string,status:"active"|"paused",actor:string,context:AuditContext):Promise<boolean>{
+  await ensureProjectsTable();await ensureAuditEventsTable()
+  const action=status==="paused"?"paused":"resumed"
+  const rows=await sql`WITH changed AS (
+    UPDATE time_project_assignments SET status=${status},assigned_by=lower(${actor}),assigned_at=now()
+    WHERE project_id=${projectId}::uuid AND lower(patron_email)=lower(${patronEmail}) AND status IS DISTINCT FROM ${status}
+    RETURNING project_id,patron_email,status
+  ), history AS (
+    INSERT INTO time_project_assignment_events(project_id,project_name,patron_email,action,actor_email)
+    SELECT changed.project_id,project.name,changed.patron_email,${action},lower(${actor}) FROM changed JOIN time_projects project ON project.id=changed.project_id
+    RETURNING project_id
+  ), audited AS (
+    INSERT INTO audit_events(actor_email,action,target_type,target_id,metadata,ip_address,user_agent,request_method,request_path,request_id)
+    SELECT lower(${actor}),'project_updated','time_project',changed.project_id::text,jsonb_build_object('patronEmail',changed.patron_email,'assignmentStatus',changed.status),
+      ${context.ipAddress},${context.userAgent},${context.requestMethod},${context.requestPath},${context.requestId} FROM changed RETURNING target_id
+  ) SELECT changed.project_id FROM changed WHERE EXISTS(SELECT 1 FROM history) AND EXISTS(SELECT 1 FROM audited)`
+  return rows.length>0
+}
+
 /** @returns Active project IDs assigned to a patron for API validation. */
 export async function listAssignedTimeProjectIds(patronEmail:string):Promise<string[]>{
   await ensureProjectsTable()
-  const rows=await sql`SELECT p.id FROM time_projects p JOIN time_project_assignments a ON a.project_id=p.id WHERE p.active AND lower(a.patron_email)=lower(${patronEmail})`
+  const rows=await sql`SELECT p.id FROM time_projects p JOIN time_project_assignments a ON a.project_id=p.id WHERE p.active AND a.status='active' AND lower(a.patron_email)=lower(${patronEmail})`
   return rows.map(row=>String(row.id))
 }
 
 /** @returns Project IDs keyed to assigned patron emails for manager views. */
-export async function listTimeProjectAssignments():Promise<{projectId:string;email:string}[]>{
+export async function listTimeProjectAssignments():Promise<{projectId:string;email:string;status:"active"|"paused"}[]>{
   await ensureProjectsTable()
-  const rows=await sql`SELECT project_id,lower(patron_email) AS patron_email FROM time_project_assignments ORDER BY lower(patron_email)`
-  return rows.map(row=>({projectId:String(row.project_id),email:String(row.patron_email)}))
+  const rows=await sql`SELECT project_id,lower(patron_email) AS patron_email,status FROM time_project_assignments ORDER BY lower(patron_email)`
+  return rows.map(row=>({projectId:String(row.project_id),email:String(row.patron_email),status:String(row.status)==="paused"?"paused":"active"}))
 }
 
 /** @returns Recent immutable assignment changes for manager and admin project views. */
-export async function listTimeProjectAssignmentHistory(limit=500):Promise<{id:string;projectId:string;projectName:string;email:string;action:"assigned"|"reassigned"|"removed";actorEmail:string;occurredAt:string}[]>{
+export async function listTimeProjectAssignmentHistory(limit=500):Promise<{id:string;projectId:string;projectName:string;email:string;action:"assigned"|"reassigned"|"removed"|"paused"|"resumed";actorEmail:string;occurredAt:string}[]>{
   await ensureProjectsTable()
   const safeLimit=Math.min(Math.max(limit,1),1000)
   const rows=await sql`SELECT id,project_id,project_name,patron_email,action,actor_email,occurred_at::text AS occurred_at
     FROM time_project_assignment_events ORDER BY occurred_at DESC,id DESC LIMIT ${safeLimit}`
-  return rows.map(row=>({id:String(row.id),projectId:String(row.project_id),projectName:String(row.project_name),email:String(row.patron_email),action:String(row.action) as "assigned"|"reassigned"|"removed",actorEmail:String(row.actor_email),occurredAt:new Date(String(row.occurred_at)).toISOString()}))
+  return rows.map(row=>({id:String(row.id),projectId:String(row.project_id),projectName:String(row.project_name),email:String(row.patron_email),action:String(row.action) as "assigned"|"reassigned"|"removed"|"paused"|"resumed",actorEmail:String(row.actor_email),occurredAt:new Date(String(row.occurred_at)).toISOString()}))
 }
 
 /** @returns Employees and contractors assigned to a manager through an active project or reviewer assignment. */
@@ -750,9 +826,14 @@ export async function listManagerWorkforceEmails(managerEmail:string):Promise<st
   const rows=await sql`SELECT DISTINCT lower(team.email) AS email FROM (
     SELECT owner_email AS email FROM time_entries WHERE lower(review_manager_email)=lower(${managerEmail}) AND owner_email IS NOT NULL
     UNION
+    SELECT email FROM account_identities WHERE lower(created_by)=lower(${managerEmail})
+    UNION
     SELECT assignment.patron_email AS email FROM time_project_assignments assignment
       JOIN time_projects project ON project.id=assignment.project_id
-      WHERE project.active AND (lower(assignment.assigned_by)=lower(${managerEmail}) OR lower(project.created_by)=lower(${managerEmail}))
+      WHERE (project.active AND (lower(assignment.assigned_by)=lower(${managerEmail}) OR lower(project.created_by)=lower(${managerEmail})))
+        OR (project.active AND lower(project.manager_email)=lower(${managerEmail}) AND EXISTS(SELECT 1 FROM time_entries submitted
+          WHERE lower(submitted.owner_email)=lower(assignment.patron_email) AND lower(trim(submitted.project))=lower(project.name)
+            AND lower(submitted.review_manager_email)=lower(${managerEmail}) AND submitted.status IN ('submitted','approved','rejected')))
     UNION
     SELECT worker_assignment.patron_email AS email FROM time_project_assignments manager_assignment
       JOIN time_project_assignments worker_assignment ON worker_assignment.project_id=manager_assignment.project_id
@@ -770,16 +851,17 @@ export async function isActiveTimeProject(name:string):Promise<boolean>{
 }
 
 /** Adds a unique catalog project and its audit event atomically. */
-export async function createTimeProject(input:{name:string;description:string},actor:string,context:AuditContext,assignCreator=false,assignedManagerEmail?:string|null):Promise<TimeProject|null>{
+export async function createTimeProject(input:{name:string;description:string},actor:string,context:AuditContext,assignCreator=false,assignedManagerEmail?:string|null,initialAssignmentEmails:string[]=[]):Promise<TimeProject|null>{
   await ensureProjectsTable();await ensureAuditEventsTable()
   const rows=await sql`WITH saved AS (
-    INSERT INTO time_projects(name,description,created_by) VALUES(${input.name},${input.description},${actor.toLowerCase()})
+    INSERT INTO time_projects(name,description,created_by,manager_email) VALUES(${input.name},${input.description},${actor.toLowerCase()},${assignedManagerEmail?.toLowerCase()??null})
     ON CONFLICT DO NOTHING RETURNING *
   ), assigned AS (
     INSERT INTO time_project_assignments(project_id,patron_email,assigned_by)
     SELECT id,lower(created_by),lower(created_by) FROM saved WHERE ${assignCreator}
-    UNION ALL
-    SELECT id,lower(${assignedManagerEmail??null}),lower(created_by) FROM saved WHERE ${assignCreator} AND ${assignedManagerEmail??null} IS NOT NULL
+    UNION
+    SELECT saved.id,lower(initial.email),lower(saved.created_by) FROM saved CROSS JOIN unnest(${initialAssignmentEmails}::text[]) AS initial(email)
+      WHERE length(trim(initial.email))>0
     ON CONFLICT DO NOTHING RETURNING project_id,patron_email,assigned_by,assigned_at
   ), history AS (
     INSERT INTO time_project_assignment_events(project_id,project_name,patron_email,action,actor_email,occurred_at)
@@ -788,12 +870,50 @@ export async function createTimeProject(input:{name:string;description:string},a
     RETURNING project_id
   ), audited AS (
     INSERT INTO audit_events(actor_email,action,target_type,target_id,metadata,ip_address,user_agent,request_method,request_path,request_id)
-    SELECT created_by,'project_created','time_project',id::text,jsonb_build_object('name',name,'description',description,'assignedToCreator',${assignCreator}),
+    SELECT created_by,'project_created','time_project',id::text,jsonb_build_object('name',name,'description',description,'assignedToCreator',${assignCreator},'appointedManagerEmail',manager_email),
       ${context.ipAddress},${context.userAgent},${context.requestMethod},${context.requestPath},${context.requestId} FROM saved RETURNING target_id
-  ) SELECT id,name,description,active,created_by,created_at::text AS created_at,updated_at::text AS updated_at FROM saved
+  ) SELECT id,name,description,active,created_by,manager_email,created_at::text AS created_at,updated_at::text AS updated_at FROM saved
     WHERE EXISTS(SELECT 1 FROM audited) AND (NOT ${assignCreator} OR EXISTS(SELECT 1 FROM history))`
   const row=rows[0]
-  return row?{id:String(row.id),name:String(row.name),description:String(row.description??""),active:Boolean(row.active),createdBy:String(row.created_by),createdAt:new Date(String(row.created_at)).toISOString(),updatedAt:new Date(String(row.updated_at)).toISOString()}:null
+  return row?{id:String(row.id),name:String(row.name),description:String(row.description??""),active:Boolean(row.active),createdBy:String(row.created_by),managerEmail:row.manager_email?String(row.manager_email):null,createdAt:new Date(String(row.created_at)).toISOString(),updatedAt:new Date(String(row.updated_at)).toISOString()}:null
+}
+
+/** Merges a self-created project into its manager-selected canonical project. */
+export async function mergeTimeProjectInto(sourceId:string,targetId:string,actor:string,context:AuditContext):Promise<{sourceName:string;targetName:string;updatedEntries:number}|null>{
+  await ensureProjectsTable();await ensureAuditEventsTable()
+  const rows=await sql`WITH source AS (
+    SELECT * FROM time_projects WHERE id=${sourceId}::uuid AND active AND manager_email IS NOT NULL
+      AND lower(created_by)<>lower(manager_email) FOR UPDATE
+  ), target AS (
+    SELECT * FROM time_projects WHERE id=${targetId}::uuid AND active AND manager_email IS NULL AND id<>${sourceId}::uuid FOR UPDATE
+  ), assigned AS (
+    INSERT INTO time_project_assignments(project_id,patron_email,assigned_by)
+    SELECT target.id,lower(source.created_by),lower(${actor}) FROM source CROSS JOIN target
+    ON CONFLICT(project_id,patron_email) DO NOTHING
+    RETURNING project_id,patron_email,assigned_at
+  ), history AS (
+    INSERT INTO time_project_assignment_events(project_id,project_name,patron_email,action,actor_email,occurred_at)
+    SELECT target.id,target.name,assigned.patron_email,'assigned',lower(${actor}),assigned.assigned_at
+    FROM assigned JOIN target ON target.id=assigned.project_id RETURNING project_id
+  ), rewritten AS (
+    UPDATE time_entries entry SET project=target.name,updated_at=now()
+    FROM source CROSS JOIN target
+    WHERE lower(entry.owner_email)=lower(source.created_by) AND lower(trim(entry.project))=lower(source.name)
+    RETURNING entry.id
+  ), archived AS (
+    UPDATE time_projects project SET active=false,updated_at=now()
+    FROM source CROSS JOIN target WHERE project.id=source.id
+    RETURNING project.id
+  ), audited AS (
+    INSERT INTO audit_events(actor_email,action,target_type,target_id,metadata,ip_address,user_agent,request_method,request_path,request_id)
+    SELECT lower(${actor}),'project_merged','time_project',source.id::text,
+      jsonb_build_object('sourceName',source.name,'targetProjectId',target.id,'targetName',target.name,'creator',source.created_by,'updatedEntryCount',(SELECT count(*) FROM rewritten)),
+      ${context.ipAddress},${context.userAgent},${context.requestMethod},${context.requestPath},${context.requestId}
+    FROM source CROSS JOIN target JOIN archived ON archived.id=source.id RETURNING target_id
+  ) SELECT source.name AS source_name,target.name AS target_name,(SELECT count(*) FROM rewritten) AS updated_entries
+    FROM source CROSS JOIN target WHERE EXISTS(SELECT 1 FROM audited)`
+  const row=rows[0]
+  return row?{sourceName:String(row.source_name),targetName:String(row.target_name),updatedEntries:Number(row.updated_entries)}:null
 }
 
 /** Activates or archives a catalog project and records the change atomically. */
@@ -807,9 +927,27 @@ export async function setTimeProjectActive(id:string,active:boolean,actor:string
       jsonb_build_object('name',saved.name,'active',saved.active,'previousActive',before.active),
       ${context.ipAddress},${context.userAgent},${context.requestMethod},${context.requestPath},${context.requestId}
     FROM saved JOIN before ON true RETURNING target_id
-  ) SELECT id,name,description,active,created_by,created_at::text AS created_at,updated_at::text AS updated_at FROM saved WHERE EXISTS(SELECT 1 FROM audited)`
+  ) SELECT id,name,description,active,created_by,manager_email,created_at::text AS created_at,updated_at::text AS updated_at FROM saved WHERE EXISTS(SELECT 1 FROM audited)`
   const row=rows[0]
-  return row?{id:String(row.id),name:String(row.name),description:String(row.description??""),active:Boolean(row.active),createdBy:String(row.created_by),createdAt:new Date(String(row.created_at)).toISOString(),updatedAt:new Date(String(row.updated_at)).toISOString()}:null
+  return row?{id:String(row.id),name:String(row.name),description:String(row.description??""),active:Boolean(row.active),createdBy:String(row.created_by),managerEmail:row.manager_email?String(row.manager_email):null,createdAt:new Date(String(row.created_at)).toISOString(),updatedAt:new Date(String(row.updated_at)).toISOString()}:null
+}
+
+/** Deletes only a never-used project with no assignment history. */
+export async function deleteUnusedTimeProject(id:string,actor:string,context:AuditContext):Promise<boolean>{
+  await ensureProjectsTable();await ensureAuditEventsTable()
+  const rows=await sql`WITH candidate AS (
+    SELECT p.* FROM time_projects p WHERE p.id=${id}::uuid
+      AND NOT EXISTS(SELECT 1 FROM time_entries e WHERE lower(trim(e.project))=lower(trim(p.name)))
+      AND NOT EXISTS(SELECT 1 FROM time_project_assignment_events event WHERE event.project_id=p.id)
+    FOR UPDATE
+  ), deleted AS (
+    DELETE FROM time_projects p USING candidate c WHERE p.id=c.id RETURNING c.id,c.name
+  ), audited AS (
+    INSERT INTO audit_events(actor_email,action,target_type,target_id,metadata,ip_address,user_agent,request_method,request_path,request_id)
+    SELECT lower(${actor}),'project_deleted','time_project',deleted.id::text,jsonb_build_object('name',deleted.name,'unused',true),
+      ${context.ipAddress},${context.userAgent},${context.requestMethod},${context.requestPath},${context.requestId} FROM deleted RETURNING target_id
+  ) SELECT deleted.id FROM deleted WHERE EXISTS(SELECT 1 FROM audited)`
+  return rows.length>0
 }
 
 /** @returns Scheduled periods ordered by work start date, capped for a compact admin view. */
@@ -1245,14 +1383,34 @@ export async function listAuditEvents(limit = 100) {
   return (rows as AuditEventRow[]).map(toAuditEvent)
 }
 
+/** Finds the safe audit context tied to a support-case correlation reference. */
+export async function listAuditEventsByCorrelation(reference:string,limit=50){
+  await ensureAuditEventsTable()
+  const safeLimit=Math.min(Math.max(limit,1),100)
+  const rows=await sql`SELECT id,actor_email,action,target_type,target_id,metadata,ip_address,user_agent,request_method,request_path,request_id,occurred_at
+    FROM audit_events WHERE target_id=${reference} OR metadata->>'reference'=${reference}
+    ORDER BY occurred_at DESC,id DESC LIMIT ${safeLimit}`
+  return (rows as AuditEventRow[]).map(toAuditEvent)
+}
+
 /** Loads one keyset-paginated audit page so administrators can traverse full history. */
-export async function listAuditEventPage(options:{limit?:number;beforeAt?:string;beforeId?:string}={}){
+export async function listAuditEventPage(options:{limit?:number;beforeAt?:string;beforeId?:string;from?:string;through?:string;search?:string;actor?:string;action?:string;targetType?:string;scope?:string}={}){
   await ensureAuditEventsTable()
   const safeLimit=Math.min(Math.max(options.limit??250,1),250)
   const rows=await sql`
     SELECT id,actor_email,action,target_type,target_id,metadata,ip_address,user_agent,request_method,request_path,request_id,occurred_at
     FROM audit_events
     WHERE (${options.beforeAt??null}::timestamptz IS NULL OR (occurred_at,id)<(${options.beforeAt??null}::timestamptz,${options.beforeId??null}::uuid))
+      AND (${options.from??null}::date IS NULL OR occurred_at>=${options.from??null}::date)
+      AND (${options.through??null}::date IS NULL OR occurred_at<(${options.through??null}::date+interval '1 day'))
+      AND (${options.actor??null}::text IS NULL OR lower(actor_email)=lower(${options.actor??null}))
+      AND (${options.action??null}::text IS NULL OR action=${options.action??null})
+      AND (${options.targetType??null}::text IS NULL OR target_type=${options.targetType??null})
+      AND (${options.scope??null}::text IS NULL OR
+        (${options.scope??null}='access' AND target_type IN ('managed_user_access','account_identity') AND action IN ('user_access_created','user_access_updated')) OR
+        (${options.scope??null}='periods' AND target_type='timesheet_period' AND action IN ('timesheet_period_created','timesheet_period_updated')) OR
+        (${options.scope??null}='projects' AND target_type='time_project' AND action IN ('project_created','project_updated')))
+      AND (${options.search??null}::text IS NULL OR concat_ws(' ',actor_email,action,target_type,target_id,request_method,request_path,request_id,metadata::text) ILIKE ${options.search?`%${options.search}%`:null})
     ORDER BY occurred_at DESC,id DESC
     LIMIT ${safeLimit+1}
   ` as AuditEventRow[]

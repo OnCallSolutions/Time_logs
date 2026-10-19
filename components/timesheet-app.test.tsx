@@ -168,7 +168,7 @@ function mockTimesheetFetch(entries:unknown[] = []) {
       return jsonResponse({ events: [] })
     }
 
-    if (url === "/tanovo-time/api/audit?limit=250") {
+    if (url.startsWith("/tanovo-time/api/audit?limit=100")) {
       return jsonResponse({ events: [{
         id: "audit-1",
         actorEmail: "admin@example.com",
@@ -236,7 +236,11 @@ function mockTimesheetFetch(entries:unknown[] = []) {
         metadata:{operation:"entry.submit",route:"/api/entries/[id]",httpMethod:"PATCH",httpStatus:503,errorCode:"42P18",message:"Submission could not be confirmed."},
         ipAddress:null,userAgent:null,requestMethod:"POST",requestPath:"/tanovo-time/api/client-errors",requestId:null,
         occurredAt:"2026-10-17T11:55:00.000Z",
-      }] })
+      }],nextCursor:null })
+    }
+
+    if(url==="/tanovo-time/api/operational-events?limit=100"){
+      return jsonResponse({events:[{id:"operational-1",correlationId:"e4b21455-ca7d-468c-aee9-3b6a9d3767ea",actorEmail:"contractor@example.com",category:"client_error",operation:"entry.submit",route:"/api/entries/[id]",method:"PATCH",httpStatus:503,errorCode:"42P18",message:"Submission could not be confirmed.",requestId:"request-op-1",occurredAt:"2026-10-17T11:55:00.000Z"}],nextCursor:null})
     }
 
     return jsonResponse({ error: `Unhandled test URL: ${url}` }, 404)
@@ -349,7 +353,7 @@ describe("TimesheetApp admin directory", () => {
     expect(within(activity).getByRole("combobox",{name:"Audit timesheet period filter"})).toBeVisible()
     expect(within(activity).getByText("Distinct actors")).toBeVisible()
     expect(within(activity).getByText("entry approved")).toHaveClass("bg-emerald-50")
-    expect(within(activity).getByText("time entry")).toHaveClass("bg-blue-50")
+    expect(within(activity).getAllByText("time entry").at(-1)).toHaveClass("bg-blue-50")
     expect(within(activity).queryByText("/tanovo-time/api/entries/entry-1")).not.toBeInTheDocument()
     expect(within(activity).queryByText("203.0.113.10")).not.toBeInTheDocument()
 
@@ -371,10 +375,10 @@ describe("TimesheetApp admin directory", () => {
     const reports=await screen.findByRole("dialog",{name:"Reports"})
     await user.click(within(reports).getByRole("button",{name:"Open API error report"}))
     const report=await screen.findByRole("dialog",{name:"API error report"})
-    await waitFor(()=>expect(fetchCalls.some(call=>call.url==="/tanovo-time/api/audit?limit=250")).toBe(true))
+    await waitFor(()=>expect(fetchCalls.some(call=>call.url==="/tanovo-time/api/operational-events?limit=100")).toBe(true))
     expect(await within(report).findByText("PATCH /api/entries/[id]",{exact:false})).toBeVisible()
     expect(within(report).getByText("42P18")).toBeVisible()
-    expect(within(report).getByText("503")).toBeVisible()
+    expect(within(report).getAllByText("503").at(-1)).toBeVisible()
     expect(within(report).getByText(/e4b21455-ca7d-468c-aee9-3b6a9d3767ea/)).toBeVisible()
   })
 
@@ -390,13 +394,14 @@ describe("TimesheetApp admin directory", () => {
     const rightsRow=within(report).getByRole("row",{name:/manager@example.com user access updated/i})
     expect(rightsRow).toHaveTextContent("employee@example.com")
     expect(rightsRow).toHaveTextContent("Oct 17, 2026")
-    const exportButton=within(report).getByRole("button",{name:"Export 1 visible report events as CSV"})
+    const exportButton=within(report).getByRole("button",{name:"Export Access change history"})
     expect(exportButton).toBeEnabled()
     const originalCreate=Object.getOwnPropertyDescriptor(URL,"createObjectURL")
     const createObjectUrl=vi.fn(()=>"blob:test")
     Object.defineProperty(URL,"createObjectURL",{configurable:true,value:createObjectUrl})
     const clickLink=vi.spyOn(HTMLAnchorElement.prototype,"click").mockImplementation(()=>{})
     await user.click(exportButton)
+    await user.click(within(report).getByRole("menuitem",{name:"CSV"}))
     expect(createObjectUrl).toHaveBeenCalledOnce()
     expect(clickLink).toHaveBeenCalledOnce()
     clickLink.mockRestore()
@@ -475,16 +480,7 @@ describe("TimesheetApp admin directory", () => {
     expect(within(captureWindow).getByTestId("note-input")).toBeVisible()
     await user.click(within(captureWindow).getByRole("button",{name:"Back"}))
     await waitFor(()=>expect(entryWindow).toBeVisible())
-    const reviewLauncher=within(entryWindow).getByRole("button",{name:"Review queue"})
-    expect(reviewLauncher).toBeVisible()
-    expect(reviewLauncher.closest("details")).toBeNull()
-    await user.click(reviewLauncher)
-    const reviewWindow=await screen.findByRole("dialog",{name:"Review queue"})
-    expect(reviewWindow).toHaveAttribute("data-window-expanded","true")
-    expect(within(reviewWindow).getByRole("heading",{name:"Timesheets awaiting review"})).toBeVisible()
-    expect(within(reviewWindow).getByRole("button", { name: "AI suggestions" })).toBeVisible()
-    await user.click(within(reviewWindow).getByRole("button", { name: "Back" }))
-    await waitFor(()=>expect(entryWindow).toBeVisible())
+    expect(within(entryWindow).queryByText(/Exceptional actions/)).not.toBeInTheDocument()
     expect(within(entryWindow).getByTestId("entries-log")).toBeInTheDocument()
     expect(within(entryWindow).getByRole("button", { name: "Refresh entries" })).toBeVisible()
     await user.click(within(entryWindow).getByRole("button", { name: "Back" }))

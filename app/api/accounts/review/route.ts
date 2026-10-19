@@ -10,13 +10,14 @@ import { recordAuditEvent } from "@/lib/db"
 import { getAuditContext } from "@/lib/audit"
 import { generateText,Output } from "ai"
 import { z } from "zod"
+import { withOperationalCapture } from "@/lib/api-outcome-capture"
 import { aiReviewFailure } from "@/lib/ai-review-errors"
 import { getAiModel } from "@/lib/ai-models"
 export const maxDuration=30
 const schema=z.object({summary:z.string().max(1000),recommendations:z.array(z.object({handoffId:z.string().uuid(),assessment:z.enum(["looks_consistent","needs_information","potential_duplicate"]),severity:z.enum(["low","medium","high"]),reason:z.string().min(1).max(500)})).max(50)})
 
 /** @param req - Optional explicit handoff selection; identities/evidence are loaded on the server. @returns Scoped advisory report with evidence revision references. */
-export async function POST(req:Request){
+async function runAccountReview(req:Request){
   try{
     const email=(await auth())?.user?.email;const access=await getEffectivePermissions(email)
     if(!email||!(access.role==="account_manager"||access.role==="admin")||!access.permissions.view_accounts||!access.permissions.ai_accounts)return Response.json({error:"AI account-review rights are required."},{status:403})
@@ -48,3 +49,4 @@ export async function POST(req:Request){
     return Response.json({error:failure.error,code:failure.code},{status:failure.status,headers:{"Cache-Control":"no-store"}})
   }
 }
+export const POST=withOperationalCapture("/api/accounts/review","POST",runAccountReview)

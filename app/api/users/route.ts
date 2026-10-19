@@ -6,6 +6,7 @@
  * Administrators can add people, assign roles, and deny or block access here.
  */
 import { z } from "zod"
+import { withOperationalCapture } from "@/lib/api-outcome-capture"
 import { auth } from "@/auth"
 import {
   getConfiguredAccessUsers,
@@ -137,7 +138,7 @@ function sortDirectoryUsers(users: DirectoryUser[]) {
  *
  * @returns JSON response containing merged user directory rows or an error.
  */
-export async function GET() {
+async function getUsers() {
   try {
     const adminEmail = await getAdminEmail()
 
@@ -243,7 +244,7 @@ export async function GET() {
  * @param req - Request containing email, role, access status, and optional note.
  * @returns JSON response containing the saved access assignment.
  */
-export async function POST(req: Request) {
+async function createUser(req: Request) {
   return saveManagedAccess(req)
 }
 
@@ -256,9 +257,13 @@ export async function POST(req: Request) {
  * @param req - Request containing email, role, access status, and optional note.
  * @returns JSON response containing the saved access assignment.
  */
-export async function PATCH(req: Request) {
+async function updateUser(req: Request) {
   return saveManagedAccess(req)
 }
+
+export const GET=withOperationalCapture("/api/users","GET",getUsers)
+export const POST=withOperationalCapture("/api/users","POST",createUser)
+export const PATCH=withOperationalCapture("/api/users","PATCH",updateUser)
 
 /**
  * Persists an admin-managed access decision and records it in the audit trail.

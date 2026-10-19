@@ -4,6 +4,7 @@
  * Nonces are consumed before dispatch; uncertain outcomes require refresh, not replay.
  */
 import { z } from "zod"
+import { withOperationalCapture } from "@/lib/api-outcome-capture"
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { canOfferAction } from "@/lib/assistant-contract"
@@ -19,7 +20,7 @@ import { PATCH as updateDelegatedRights } from "@/app/api/delegation/route"
 import { listTimesheetPeriods } from "@/lib/db"
 
 /** @param request - Confirmation containing only an immutable signed token. @returns Promise<Response> with confirmed result or a safe retry instruction. */
-export async function POST(request: Request): Promise<Response> {
+async function executeAssistantAction(request: Request): Promise<Response> {
   let input
   try { input = z.object({ token: z.string().max(100_000) }).strict().parse(await readAssistantRequest(request, 110_000)) }
   catch { return Response.json({ error: "Invalid action confirmation." }, { status: 400 }) }
@@ -73,3 +74,4 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ error: "The action could not be confirmed. Refresh the workspace before trying again." }, { status: 503 })
   }
 }
+export const POST=withOperationalCapture("/api/assistant/actions","POST",executeAssistantAction)

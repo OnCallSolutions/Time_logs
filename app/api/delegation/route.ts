@@ -10,6 +10,7 @@ import { actorRoster,employeeRoster } from "@/lib/collaboration"
 import { permissionLabels, delegablePermissions, type Permission } from "@/lib/permissions"
 import { getAuditContext } from "@/lib/audit"
 import { z } from "zod"
+import { withOperationalCapture } from "@/lib/api-outcome-capture"
 import { emailSchema } from "@/lib/identity-policy"
 import { ensureAccountIdentitiesForActors } from "@/lib/account-identities"
 /**
@@ -17,7 +18,7 @@ import { ensureAccountIdentitiesForActors } from "@/lib/account-identities"
  * Managers still modify only active employee workflow rights through PATCH.
  * @returns Promise<Response> with actor summaries or a forbidden response.
  */
-export async function GET(): Promise<Response> {
+async function getDelegatedRights(): Promise<Response> {
   const email = (await auth())?.user?.email
   const access = await getEffectivePermissions(email)
   if (!email || !(access.role === "admin" || access.role === "manager") ||
@@ -31,7 +32,7 @@ export async function GET(): Promise<Response> {
  * @param req - Request with target employee email and explicit permission changes.
  * @returns Promise<Response> with saved rights or a safe error.
  */
-export async function PATCH(req:Request): Promise<Response> {
+async function updateDelegatedRights(req:Request): Promise<Response> {
   try {
     const email = (await auth())?.user?.email
     const access = await getEffectivePermissions(email)
@@ -51,3 +52,5 @@ export async function PATCH(req:Request): Promise<Response> {
     return Response.json({user})
   } catch { return Response.json({error:"Unable to save delegated rights."},{status:400}) }
 }
+export const GET=withOperationalCapture("/api/delegation","GET",getDelegatedRights)
+export const PATCH=withOperationalCapture("/api/delegation","PATCH",updateDelegatedRights)

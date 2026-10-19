@@ -5,6 +5,7 @@ import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { getAuditContext } from "@/lib/audit"
 import { persistenceFailureDetails } from "@/lib/persistence-diagnostics"
 import { createTimesheetPeriod, listTimesheetPeriodScheduleIssues, listTimesheetPeriods, reconcileTimesheetPeriodSchedule, updateTimesheetPeriod } from "@/lib/db"
+import { withOperationalCapture } from "@/lib/api-outcome-capture"
 
 export const runtime = "nodejs"
 
@@ -29,7 +30,7 @@ function deadlineOrderIsValid(input:{submissionDeadline:string;managerSubmission
   return worker<manager&&manager<accounts&&accounts<=resolution
 }
 
-export async function GET(request:Request) {
+async function getTimesheetPeriods(request:Request) {
   try {
     const email = (await auth())?.user?.email
     const access = await getEffectivePermissions(email)
@@ -41,7 +42,7 @@ export async function GET(request:Request) {
   }
 }
 
-export async function POST(req: Request) {
+async function createTimesheetPeriodHandler(req: Request) {
   try {
     const email = (await auth())?.user?.email
     const access = await getEffectivePermissions(email)
@@ -63,7 +64,7 @@ export async function POST(req: Request) {
 }
 
 /** Applies an audited period/deadline override; the explanation is required. */
-export async function PATCH(req: Request) {
+async function updateTimesheetPeriodHandler(req: Request) {
   try {
     const email = (await auth())?.user?.email
     const access = await getEffectivePermissions(email)
@@ -83,3 +84,7 @@ export async function PATCH(req: Request) {
     return Response.json({ error:invalid?"Enter valid period details and a reason for the change.":"Timesheet period could not be updated." }, { status:invalid?400:503 })
   }
 }
+
+export const GET=withOperationalCapture("/api/timesheet-periods","GET",getTimesheetPeriods)
+export const POST=withOperationalCapture("/api/timesheet-periods","POST",createTimesheetPeriodHandler)
+export const PATCH=withOperationalCapture("/api/timesheet-periods","PATCH",updateTimesheetPeriodHandler)

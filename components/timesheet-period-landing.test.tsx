@@ -47,6 +47,46 @@ it("shows up to six latest entries in the personal period preview",async()=>{
   expect(within(preview).queryByText("Project 6")).not.toBeInTheDocument()
 })
 
+it("filters archived periods by date-window overlap, including periods that begin before the window",async()=>{
+  const onSelect=vi.fn()
+  vi.stubGlobal("fetch",vi.fn(async()=>new Response(JSON.stringify({periods:[
+    {id:"july",name:"July",startDate:"2025-07-01",endDate:"2025-07-19",submissionDeadline:"2025-07-21T17:00:00.000Z"},
+    {id:"crossing",name:"Crossing period",startDate:"2025-07-20",endDate:"2025-08-20",submissionDeadline:"2025-08-22T17:00:00.000Z"},
+    {id:"august",name:"August",startDate:"2025-08-01",endDate:"2025-08-31",submissionDeadline:"2025-09-02T17:00:00.000Z"},
+    {id:"september",name:"September",startDate:"2025-09-01",endDate:"2025-09-30",submissionDeadline:"2025-10-02T17:00:00.000Z"},
+  ]}))))
+  render(<TimesheetPeriodLanding entries={[]} onSelect={onSelect}/> )
+  await screen.findByRole("navigation",{name:"Available timesheet periods"})
+  const list=screen.getByRole("navigation",{name:"Available timesheet periods"})
+  await screen.findByRole("button",{name:/September/})
+  await userEvent.selectOptions(within(list).getByRole("combobox",{name:"Filter timesheet periods"}),"archived")
+  await userEvent.type(within(list).getByLabelText("Periods from date"),"2025-08-15")
+  await userEvent.type(within(list).getByLabelText("Periods through date"),"2025-09-10")
+  expect(within(list).getByRole("button",{name:/Crossing period/})).toBeVisible()
+  expect(within(list).getByRole("button",{name:/August/})).toBeVisible()
+  expect(within(list).getByRole("button",{name:/September/})).toBeVisible()
+  expect(within(list).queryByRole("button",{name:/July/})).not.toBeInTheDocument()
+  await userEvent.click(within(list).getByRole("button",{name:/September/}))
+  expect(onSelect).toHaveBeenCalledWith("september")
+})
+
+it("does not show archived periods for an inverted date window and can clear it",async()=>{
+  vi.stubGlobal("fetch",vi.fn(async()=>new Response(JSON.stringify({periods:[
+    {id:"archive",name:"September",startDate:"2025-09-01",endDate:"2025-09-30",submissionDeadline:"2025-10-02T17:00:00.000Z"},
+  ]}))))
+  render(<TimesheetPeriodLanding entries={[]} onSelect={vi.fn()}/> )
+  await screen.findByRole("navigation",{name:"Available timesheet periods"})
+  const list=screen.getByRole("navigation",{name:"Available timesheet periods"})
+  await screen.findByRole("button",{name:/September/})
+  await userEvent.selectOptions(within(list).getByRole("combobox",{name:"Filter timesheet periods"}),"archived")
+  await userEvent.type(within(list).getByLabelText("Periods from date"),"2025-10-01")
+  await userEvent.type(within(list).getByLabelText("Periods through date"),"2025-09-01")
+  expect(within(list).getByRole("alert")).toHaveTextContent("start date must be on or before")
+  expect(within(list).queryByRole("button",{name:/September/})).not.toBeInTheDocument()
+  await userEvent.click(within(list).getByRole("button",{name:"Clear date range"}))
+  expect(within(list).getByRole("button",{name:/September/})).toBeVisible()
+})
+
 it("offers a combined saved-timesheets view when no period is selected",async()=>{
   const onSelect=vi.fn()
   vi.stubGlobal("fetch",vi.fn(async()=>new Response(JSON.stringify({periods:[]}))))

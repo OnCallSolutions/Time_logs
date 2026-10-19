@@ -13,9 +13,10 @@ import { directReviewAccess } from "@/lib/review-access"
 import { createReviewRequests, listReviewRequests } from "@/lib/review-requests"
 import { encryptedMessageSchema, validateEnvelope } from "@/lib/message-envelope"
 import { getAuditContext } from "@/lib/audit"
+import { withOperationalCapture } from "@/lib/api-outcome-capture"
 
 /** @returns Promise<Response> with active reviewer choices and the caller's own grants. */
-export async function GET(): Promise<Response> {
+async function getReviewRequests(): Promise<Response> {
   try {
     const email = (await auth())?.user?.email, access = await getEffectivePermissions(email)
     if (!email || !["manager", "admin"].includes(access.role ?? "")) return Response.json({ error: "Forbidden." }, { status: 403 })
@@ -36,7 +37,7 @@ export async function GET(): Promise<Response> {
  * @param request - Selected IDs/revisions, active recipient, message UUID and ciphertext.
  * @returns Promise<Response> with the number of grants, or a non-mutating failure.
  */
-export async function POST(request: Request): Promise<Response> {
+async function createReviewRequest(request: Request): Promise<Response> {
   try {
     const email = (await auth())?.user?.email, access = await getEffectivePermissions(email)
     if (!email || !["manager", "admin"].includes(access.role ?? "") || !access.permissions.request_review_help || !access.permissions.delegate_permissions || !access.permissions.send_messages) return Response.json({ error: "Review-delegation and messaging rights are required." }, { status: 403 })
@@ -58,3 +59,6 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ count, messageId: input.messageId, expiresInHours: 48 }, { status: 201 })
   } catch (error) { return Response.json({ error: error instanceof z.ZodError || error instanceof SyntaxError ? "Invalid reviewer request." : "Reviewer request could not be confirmed. Refresh before retrying." }, { status: error instanceof z.ZodError || error instanceof SyntaxError ? 400 : 503 }) }
 }
+
+export const GET=withOperationalCapture("/api/review-requests","GET",getReviewRequests)
+export const POST=withOperationalCapture("/api/review-requests","POST",createReviewRequest)
