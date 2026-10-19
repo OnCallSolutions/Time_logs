@@ -3,7 +3,7 @@ import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { getAuditContext } from "@/lib/audit"
 import { persistenceFailureDetails } from "@/lib/persistence-diagnostics"
-import { createTimesheetExtensionRequest, listTimesheetExtensionRequests } from "@/lib/db"
+import { createTimesheetExtensionRequest, listTimesheetExtensionRequests, listTimesheetPeriods } from "@/lib/db"
 import { resolveAccountManagerReviewer } from "@/lib/submission-reviewer"
 
 export const runtime="nodejs"
@@ -29,7 +29,10 @@ export async function POST(request:Request){
     if((access.role!=="employee"&&access.role!=="contractor")||!access.permissions.submit_entries)return Response.json({error:"Only patrons with submission access can request an extension."},{status:403})
     const input=z.object({periodId:z.string().uuid(),reason:z.string().trim().min(5).max(1000),requestedUntil:z.string().datetime({offset:true})}).strict().parse(await request.json())
     const until=Date.parse(input.requestedUntil)
-    if(until<=Date.now()||until>Date.now()+90*86_400_000)return Response.json({error:"Choose an extension deadline within the next 90 days."},{status:400})
+    const period=(await listTimesheetPeriods()).find(candidate=>candidate.id===input.periodId)
+    if(!period)return Response.json({error:"Select a configured timesheet period."},{status:400})
+    const hardCap=Date.parse(period.submissionDeadline)+period.managerGraceDays*86_400_000
+    if(until<=Date.now()||until<=Date.parse(period.submissionDeadline)||until>hardCap)return Response.json({error:`The requested deadline must be after the hard deadline and no later than ${new Date(hardCap).toLocaleString()}.`},{status:400})
     const reviewer=await resolveAccountManagerReviewer(email)
     if(!reviewer)return Response.json({error:"No active account manager is currently authorized to review extension requests. Contact your administrator."},{status:409})
     const created=await createTimesheetExtensionRequest({ownerEmail:email,periodId:input.periodId,assignedTo:reviewer.email,reason:input.reason,requestedUntil:input.requestedUntil},getAuditContext(request))

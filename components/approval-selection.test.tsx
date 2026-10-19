@@ -1,72 +1,74 @@
-/**
- * Tests explicit selected approval confirmation and independent reviewer UI.
- * Server requests use synthetic records and do not mutate live timesheets.
- */
 import { render,screen,waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach,expect,it,vi } from "vitest"
 import { ApprovalSelection } from "./approval-selection"
 import type { TimeEntry } from "@/lib/types"
-const entry:TimeEntry={id:"123e4567-e89b-42d3-a456-426614174000",ownerEmail:"supplier@example.com",contractor:"Supplier",date:"2026-10-09",hours:4,project:"Project",description:"Work",status:"submitted"}
-afterEach(()=>vi.unstubAllGlobals())
-it("excludes the current manager's records from selection",()=>{
-  render(<ApprovalSelection entries={[entry,{...entry,id:"own",ownerEmail:"manager@example.com",contractor:"Manager"}]} email="manager@example.com" canReview canAI onUpdated={()=>{}}/>)
-  expect(screen.getByRole("checkbox",{name:"Select Supplier 2026-10-09"})).toBeVisible()
-  expect(screen.queryByRole("checkbox",{name:"Select Manager 2026-10-09"})).not.toBeInTheDocument()
+
+const first:TimeEntry={id:"123e4567-e89b-42d3-a456-426614174000",ownerEmail:"supplier@example.com",contractor:"Supplier",date:"2026-10-09",hours:4,project:"Project",description:"Work",status:"submitted",revision:"first-revision"}
+const second:TimeEntry={...first,id:"223e4567-e89b-42d3-a456-426614174000",date:"2026-10-10",hours:2,project:"Project B",description:"More work",revision:"second-revision"}
+const props={email:"manager@example.com",canReview:true,canAI:false,onUpdated:vi.fn()}
+afterEach(()=>{vi.unstubAllGlobals();vi.clearAllMocks()})
+
+it("groups submitted entries into a complete person-period timesheet",()=>{
+  render(<ApprovalSelection entries={[first,second,{...first,id:"323e4567-e89b-42d3-a456-426614174000",ownerEmail:"manager@example.com",contractor:"Manager"}]} {...props}/> )
+  expect(screen.getByRole("checkbox",{name:/Select timesheet Supplier/})).toBeVisible()
+  expect(screen.queryByRole("checkbox",{name:/Select timesheet Manager/})).not.toBeInTheDocument()
+  expect(screen.getByText(/1 timesheet visible · 1 awaiting · 0 selected \(0 entries\)/)).toBeVisible()
 })
-it("does not approve selected records until the confirmation command",async()=>{
-  const request=vi.fn(async()=>new Response(JSON.stringify({entry:{...entry,status:"approved"}})))
-  vi.stubGlobal("fetch",request);const updated=vi.fn()
-  render(<ApprovalSelection entries={[entry]} email="manager@example.com" canReview canAI onUpdated={updated}/>);const user=userEvent.setup()
-  await user.click(screen.getByRole("checkbox"))
-  await user.click(screen.getByRole("button",{name:"Review selected (1)"}))
-  expect(request).not.toHaveBeenCalled()
-  await user.click(screen.getByRole("button",{name:"Confirm 1 approvals"}))
-  await waitFor(()=>expect(updated).toHaveBeenCalledWith(expect.objectContaining({status:"approved"})))
+
+it("approves every submitted entry in the selected timesheet",async()=>{
+  const updated=vi.fn()
+  const request=vi.fn(async(url:unknown,init?:RequestInit)=>String(url).includes("timesheet-periods")?Response.json({periods:[]}):Response.json({entries:[{...first,status:"approved"},{...second,status:"approved"}]}))
+  vi.stubGlobal("fetch",request)
+  render(<ApprovalSelection entries={[first,second]} {...props} onUpdated={updated}/> )
+  const user=userEvent.setup()
+  await user.click(screen.getByRole("checkbox",{name:/Select timesheet Supplier/}))
+  await user.click(screen.getByRole("button",{name:"Review 1 timesheet"}))
+  expect(request.mock.calls.some(([url])=>!String(url).includes("timesheet-periods"))).toBe(false)
+  await user.click(screen.getByRole("button",{name:"Approve selected timesheets"}))
+  await waitFor(()=>expect(updated).toHaveBeenCalledTimes(2))
+  const decision=request.mock.calls.find(([url])=>!String(url).includes("timesheet-periods"))
+  expect(JSON.parse(decision?.[1]?.body as string)).toMatchObject({status:"approved",batchEntries:[{id:first.id,revision:"first-revision"},{id:second.id,revision:"second-revision"}]})
 })
-it("selects only visible eligible rows after searching",async()=>{
-  render(<ApprovalSelection entries={[entry,{...entry,id:"other",contractor:"Other supplier"}]} email="manager@example.com" canReview canAI onUpdated={()=>{}}/>);const user=userEvent.setup()
-  await user.type(screen.getByRole("textbox",{name:"Search review queue"}),"Other")
-  expect(screen.queryByRole("checkbox",{name:"Select Supplier 2026-10-09"})).not.toBeInTheDocument()
-  await user.click(screen.getByRole("button",{name:"Select all eligible (up to 50)"}))
-  expect(screen.getByRole("button",{name:"Review selected (1)"})).toBeEnabled()
+
+it("returns the whole timesheet but marks only the selected entry rejected",async()=>{
+  const updated=vi.fn()
+  const request=vi.fn(async(url:unknown,_init?:RequestInit)=>String(url).includes("timesheet-periods")?Response.json({periods:[]}):Response.json({entries:[{...first,status:"rejected"},{...second,status:"draft"}]}))
+  vi.stubGlobal("fetch",request)
+  render(<ApprovalSelection entries={[first,second]} {...props} onUpdated={updated}/> )
+  const user=userEvent.setup()
+  await user.click(screen.getByRole("checkbox",{name:/Select timesheet Supplier/}))
+  await user.click(screen.getByRole("button",{name:"Review 1 timesheet"}))
+  await user.click(screen.getByRole("button",{name:"Return one timesheet"}))
+  await user.click(screen.getByRole("radio",{name:/Mark Project 2026-10-09 as rejected/}))
+  await user.type(screen.getByLabelText("Timesheet return reason"),"Correct the hours")
+  expect(request.mock.calls.some(([url])=>!String(url).includes("timesheet-periods"))).toBe(false)
+  await user.click(screen.getByRole("button",{name:"Return timesheet"}))
+  await waitFor(()=>expect(updated).toHaveBeenCalledTimes(2))
+  const decision=request.mock.calls.find(([url])=>!String(url).includes("timesheet-periods"))
+  expect(String(decision?.[0])).toContain(first.id)
+  expect(JSON.parse(decision?.[1]?.body as string)).toMatchObject({status:"rejected",reviewNote:"Correct the hours",expectedRevision:"first-revision",batchEntries:[{id:first.id,revision:"first-revision"},{id:second.id,revision:"second-revision"}]})
 })
-it("rejects selected records only after an explicit reason and confirmation",async()=>{
-  const request=vi.fn(async(_url:unknown,_init?:RequestInit)=>Response.json({entry:{...entry,status:"rejected"}}));vi.stubGlobal("fetch",request)
-  render(<ApprovalSelection entries={[{...entry,revision:"original"}]} email="manager@example.com" canReview canAI onUpdated={()=>{}}/> )
-  await userEvent.click(screen.getByRole("checkbox"));await userEvent.click(screen.getByRole("button",{name:"Review selected (1)"}))
-  await userEvent.click(screen.getByRole("button",{name:"Return selected for correction"}))
-  expect(screen.getByRole("button",{name:"Confirm 1 rejections"})).toBeDisabled()
-  await userEvent.type(screen.getByLabelText("Selected rejection reason"),"Correct the hours")
-  expect(request).not.toHaveBeenCalled()
-  await userEvent.click(screen.getByRole("button",{name:"Confirm 1 rejections"}))
-  await waitFor(()=>expect(request).toHaveBeenCalledOnce())
-  expect(JSON.parse(request.mock.calls[0][1]?.body as string)).toMatchObject({status:"rejected",reviewNote:"Correct the hours",expectedRevision:"original"})
-})
-it("does not silently replace the confirmed revision when evidence refreshes",async()=>{
-  const request=vi.fn();vi.stubGlobal("fetch",request)
-  const props={email:"manager@example.com",canReview:true,canAI:true,onUpdated:()=>{}}
-  const {rerender}=render(<ApprovalSelection {...props} entries={[{...entry,revision:"original"}]}/> )
-  await userEvent.click(screen.getByRole("checkbox"));await userEvent.click(screen.getByRole("button",{name:"Review selected (1)"}))
-  rerender(<ApprovalSelection {...props} entries={[{...entry,revision:"changed",hours:9}]}/> )
-  expect(screen.getByRole("button",{name:"Confirm 1 approvals"})).toBeDisabled()
+
+it("requires a fresh review when any entry changes after confirmation opened",async()=>{
+  const {rerender}=render(<ApprovalSelection entries={[first,second]} {...props}/> )
+  const user=userEvent.setup()
+  await user.click(screen.getByRole("checkbox",{name:/Select timesheet Supplier/}))
+  await user.click(screen.getByRole("button",{name:"Review 1 timesheet"}))
+  rerender(<ApprovalSelection entries={[first,{...second,revision:"changed-revision",hours:9}]} {...props}/> )
   expect(screen.getByRole("alert")).toHaveTextContent("Evidence changed")
-  expect(request).not.toHaveBeenCalled()
+  expect(screen.getByRole("button",{name:"Approve selected timesheets"})).toBeDisabled()
 })
-it("retains the rejection reason and reference after an unconfirmed save",async()=>{
-  vi.stubGlobal("fetch",vi.fn(async()=>Response.json({error:"Save not confirmed",reference:"safe-reference"},{status:503})))
-  render(<ApprovalSelection entries={[entry]} email="manager@example.com" canReview canAI onUpdated={()=>{}}/> )
-  await userEvent.click(screen.getByRole("checkbox"));await userEvent.click(screen.getByRole("button",{name:"Review selected (1)"}));await userEvent.click(screen.getByRole("button",{name:"Return selected for correction"}))
-  await userEvent.type(screen.getByLabelText("Selected rejection reason"),"Please correct")
-  await userEvent.click(screen.getByRole("button",{name:"Confirm 1 rejections"}))
-  expect(await screen.findByRole("alert")).toHaveTextContent("safe-reference")
-  expect(screen.getByLabelText("Selected rejection reason")).toHaveValue("Please correct")
-})
-it("does not offer approval without forwarding rights while leaving rejection available",async()=>{
-  render(<ApprovalSelection entries={[{...entry,approvalEligible:false}]} email="manager@example.com" canReview canAI onUpdated={()=>{}}/> )
-  await userEvent.click(screen.getByRole("checkbox"));await userEvent.click(screen.getByRole("button",{name:"Review selected (1)"}))
-  expect(screen.getByRole("button",{name:"Confirm 1 approvals"})).toBeDisabled()
-  await userEvent.click(screen.getByRole("button",{name:"Return selected for correction"}))
-  await userEvent.type(screen.getByLabelText("Selected rejection reason"),"Needs correction")
-  expect(screen.getByRole("button",{name:"Confirm 1 rejections"})).toBeEnabled()
+
+it("blocks approval if forwarding capability is missing while allowing return",async()=>{
+  render(<ApprovalSelection entries={[{...first,approvalEligible:false}]} {...props}/> )
+  const user=userEvent.setup()
+  await user.click(screen.getByRole("checkbox",{name:/Select timesheet Supplier/}))
+  await user.click(screen.getByRole("button",{name:"Review 1 timesheet"}))
+  expect(screen.getByRole("button",{name:"Approve selected timesheets"})).toBeDisabled()
+  await user.click(screen.getByRole("button",{name:"Return one timesheet"}))
+  expect(screen.getByRole("button",{name:"Return timesheet"})).toBeDisabled()
+  await user.click(screen.getByRole("radio",{name:/Mark Project 2026-10-09 as rejected/}))
+  await user.type(screen.getByLabelText("Timesheet return reason"),"Needs correction")
+  expect(screen.getByRole("button",{name:"Return timesheet"})).toBeEnabled()
 })

@@ -150,6 +150,7 @@ export type AuditAction =
   | "entry_recalled"
   | "entry_approved"
   | "entry_rejected"
+  | "timesheet_returned"
   | "submission_deadline_updated"
   | "timesheet_period_created"
   | "entry_deleted"
@@ -180,7 +181,7 @@ export type AuditEvent = {
   occurredAt: string
 }
 
-export type TimesheetPeriod = { id:string; name:string; startDate:string; endDate:string; submissionDeadline:string; managerGraceDays:number; reminderDays:number; createdBy:string; createdAt:string }
+export type TimesheetPeriod = { id:string; name:string; startDate:string; endDate:string; submissionDeadline:string; managerSubmissionDeadline?:string; accountApprovalDeadline?:string; exceptionResolutionDeadline?:string; timezone?:string; managerGraceDays:number; reminderDays:number; createdBy:string; createdAt:string }
 export type TimeProject = { id:string; name:string; description:string; active:boolean; createdBy:string; createdAt:string; updatedAt:string }
 export type EntryRejectionRecord={id:string;actorEmail:string;entryId:string|null;contractor:string;ownerEmail:string|null;project:string;workDate:string|null;hours:number|null;reason:string;rejectedAt:string}
 
@@ -208,6 +209,7 @@ const timesheetPeriodsSchemaReady = createDatabaseInitializer()
 const projectsSchemaReady = createDatabaseInitializer()
 const entryRejectionArchiveSchemaReady = createDatabaseInitializer()
 const submissionExtensionsSchemaReady = createDatabaseInitializer()
+const patronActivityAcknowledgementSchemaReady = createDatabaseInitializer()
 
 /**
  * Maps a database row into the client-facing time entry shape.
@@ -456,6 +458,20 @@ export function ensureAuditEventsTable() {
   })
 }
 
+/** Stores per-patron acknowledgments for their own account activity items. */
+export function ensurePatronActivityAcknowledgementsTable() {
+  return patronActivityAcknowledgementSchemaReady(async () => {
+    await sql`
+      CREATE TABLE IF NOT EXISTS patron_activity_acknowledgements (
+        event_id uuid NOT NULL REFERENCES audit_events(id) ON DELETE CASCADE,
+        patron_email text NOT NULL,
+        acknowledged_at timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (event_id, patron_email)
+      )
+    `
+  })
+}
+
 /** Creates a dedicated, durable store for human rejection decisions and reasons. */
 export function ensureEntryRejectionArchiveTable(){
   return entryRejectionArchiveSchemaReady(async()=>{
@@ -502,6 +518,11 @@ export function ensureTimesheetPeriodsTable() {
       created_at timestamptz NOT NULL DEFAULT now(),
       CHECK(start_date <= end_date)
     )`
+    await sql`ALTER TABLE timesheet_periods ADD COLUMN IF NOT EXISTS manager_submission_deadline timestamptz`
+    await sql`ALTER TABLE timesheet_periods ADD COLUMN IF NOT EXISTS account_approval_deadline timestamptz`
+    await sql`ALTER TABLE timesheet_periods ADD COLUMN IF NOT EXISTS exception_resolution_deadline timestamptz`
+    await sql`ALTER TABLE timesheet_periods ADD COLUMN IF NOT EXISTS timezone text NOT NULL DEFAULT 'America/New_York'`
+    await sql`UPDATE timesheet_periods SET manager_submission_deadline=submission_deadline+interval '2 days',account_approval_deadline=submission_deadline+interval '3 days',exception_resolution_deadline=date_trunc('day',submission_deadline+interval '4 days')+interval '12 hours' WHERE manager_submission_deadline IS NULL OR account_approval_deadline IS NULL OR exception_resolution_deadline IS NULL`
     await sql`CREATE INDEX IF NOT EXISTS timesheet_periods_dates_idx ON timesheet_periods(start_date,end_date)`
   })
 }
@@ -552,7 +573,9 @@ export async function createTimesheetExtensionRequest(input:{ownerEmail:string;p
   const rows=await sql`WITH created AS (
     INSERT INTO timesheet_extension_requests(requester_email,period_id,assigned_to,reason,requested_until)
     SELECT lower(${input.ownerEmail}),p.id,lower(${input.assignedTo}),${input.reason}::text,${input.requestedUntil}::timestamptz
-    FROM timesheet_periods p WHERE p.id=${input.periodId}::uuid AND ${input.requestedUntil}::timestamptz>p.submission_deadline
+    FROM timesheet_periods p WHERE p.id=${input.periodId}::uuid
+      AND ${input.requestedUntil}::timestamptz>p.submission_deadline
+      AND ${input.requestedUntil}::timestamptz<=p.submission_deadline+(p.manager_grace_days*interval '1 day')
       AND EXISTS(SELECT 1 FROM time_entries e WHERE lower(e.owner_email)=lower(${input.ownerEmail}) AND e.work_date BETWEEN p.start_date AND p.end_date AND e.status IN ('draft','rejected') AND e.payout_eligible_at IS NULL)
     ON CONFLICT DO NOTHING RETURNING *
   ), audited AS (
@@ -566,8 +589,11 @@ export async function createTimesheetExtensionRequest(input:{ownerEmail:string;p
 export async function decideTimesheetExtensionRequest(id:string,reviewerEmail:string,decision:"approved"|"denied",managerNote:string,context:AuditContext):Promise<TimesheetExtensionRequest|null>{
   await ensureSubmissionExtensionsTable();await ensureAuditEventsTable()
   const rows=await sql`WITH changed AS (
-    UPDATE timesheet_extension_requests SET status=${decision},reviewed_by=lower(${reviewerEmail}),reviewed_at=now(),manager_note=${managerNote}::text,approved_until=CASE WHEN ${decision}='approved' THEN requested_until ELSE NULL END,updated_at=now()
-    WHERE id=${id}::uuid AND status='pending' AND lower(assigned_to)=lower(${reviewerEmail}) RETURNING *
+    UPDATE timesheet_extension_requests r SET status=${decision},reviewed_by=lower(${reviewerEmail}),reviewed_at=now(),manager_note=${managerNote}::text,approved_until=CASE WHEN ${decision}='approved' THEN r.requested_until ELSE NULL END,updated_at=now()
+    FROM timesheet_periods p
+    WHERE r.period_id=p.id AND r.id=${id}::uuid AND r.status='pending' AND lower(r.assigned_to)=lower(${reviewerEmail})
+      AND (${decision}<>'approved' OR (r.requested_until>p.submission_deadline AND r.requested_until<=p.submission_deadline+(p.manager_grace_days*interval '1 day')))
+    RETURNING r.*
   ), audited AS (
     INSERT INTO audit_events(actor_email,action,target_type,target_id,metadata,ip_address,user_agent,request_method,request_path,request_id)
     SELECT lower(${reviewerEmail}),CASE WHEN ${decision}='approved' THEN 'timesheet_extension_approved' ELSE 'timesheet_extension_denied' END,'timesheet_extension_request',id::text,jsonb_build_object('periodId',period_id,'requesterEmail',requester_email,'approvedUntil',approved_until,'hasManagerNote',length(manager_note)>0),${context.ipAddress}::text,${context.userAgent}::text,${context.requestMethod}::text,${context.requestPath}::text,${context.requestId}::text FROM changed RETURNING target_id
@@ -728,9 +754,11 @@ export async function setTimeProjectActive(id:string,active:boolean,actor:string
 export async function listTimesheetPeriods():Promise<TimesheetPeriod[]> {
   await ensureTimesheetPeriodsTable()
   const rows=await sql`SELECT id,name,start_date::text AS start_date,end_date::text AS end_date,
-    submission_deadline::text AS submission_deadline,manager_grace_days,reminder_days,created_by,created_at::text AS created_at
+    submission_deadline::text AS submission_deadline,manager_submission_deadline::text AS manager_submission_deadline,
+    account_approval_deadline::text AS account_approval_deadline,exception_resolution_deadline::text AS exception_resolution_deadline,timezone,
+    manager_grace_days,reminder_days,created_by,created_at::text AS created_at
     FROM timesheet_periods ORDER BY start_date DESC LIMIT 100`
-  return rows.map(row=>({id:String(row.id),name:String(row.name),startDate:String(row.start_date),endDate:String(row.end_date),submissionDeadline:new Date(String(row.submission_deadline)).toISOString(),managerGraceDays:Number(row.manager_grace_days),reminderDays:Number(row.reminder_days),createdBy:String(row.created_by),createdAt:new Date(String(row.created_at)).toISOString()}))
+  return rows.map(row=>({id:String(row.id),name:String(row.name),startDate:String(row.start_date),endDate:String(row.end_date),submissionDeadline:new Date(String(row.submission_deadline)).toISOString(),managerSubmissionDeadline:row.manager_submission_deadline?new Date(String(row.manager_submission_deadline)).toISOString():undefined,accountApprovalDeadline:row.account_approval_deadline?new Date(String(row.account_approval_deadline)).toISOString():undefined,exceptionResolutionDeadline:row.exception_resolution_deadline?new Date(String(row.exception_resolution_deadline)).toISOString():undefined,timezone:String(row.timezone??"America/New_York"),managerGraceDays:Number(row.manager_grace_days),reminderDays:Number(row.reminder_days),createdBy:String(row.created_by),createdAt:new Date(String(row.created_at)).toISOString()}))
 }
 
 /** Checks archive status using the database calendar, so server timezone cannot change edit rights. */
@@ -748,68 +776,97 @@ export async function isTimesheetDateArchived(workDate:string):Promise<boolean> 
 }
 
 /** Creates a non-overlapping period and immutable audit row in one statement. */
-export async function createTimesheetPeriod(input:{name:string;startDate:string;endDate:string;submissionDeadline:string;managerGraceDays:number;reminderDays:number},actor:string,context:AuditContext):Promise<TimesheetPeriod|null>{
+export async function createTimesheetPeriod(input:{name:string;startDate:string;endDate:string;submissionDeadline:string;managerSubmissionDeadline?:string;accountApprovalDeadline?:string;exceptionResolutionDeadline?:string;timezone?:string;managerGraceDays:number;reminderDays:number},actor:string,context:AuditContext):Promise<TimesheetPeriod|null>{
   await ensureTimesheetPeriodsTable();await ensureAuditEventsTable()
   const rows=await sql`WITH lock AS (SELECT pg_advisory_xact_lock(hashtext('tanovo-timesheet-periods'))), saved AS (
-    INSERT INTO timesheet_periods(name,start_date,end_date,submission_deadline,manager_grace_days,reminder_days,created_by)
-    SELECT ${input.name},${input.startDate}::date,${input.endDate}::date,${input.submissionDeadline}::timestamptz,${input.managerGraceDays},${input.reminderDays},${actor.toLowerCase()}
+    INSERT INTO timesheet_periods(name,start_date,end_date,submission_deadline,manager_submission_deadline,account_approval_deadline,exception_resolution_deadline,timezone,manager_grace_days,reminder_days,created_by)
+    SELECT ${input.name},${input.startDate}::date,${input.endDate}::date,${input.submissionDeadline}::timestamptz,
+      COALESCE(${input.managerSubmissionDeadline??null}::timestamptz,${input.submissionDeadline}::timestamptz+interval '2 days'),
+      COALESCE(${input.accountApprovalDeadline??null}::timestamptz,${input.submissionDeadline}::timestamptz+interval '3 days'),
+      COALESCE(${input.exceptionResolutionDeadline??null}::timestamptz,date_trunc('day',${input.submissionDeadline}::timestamptz+interval '4 days')+interval '12 hours'),
+      ${input.timezone??"America/New_York"},${input.managerGraceDays},${input.reminderDays},${actor.toLowerCase()}
     FROM lock WHERE ${input.endDate}::date >= CURRENT_DATE AND NOT EXISTS(SELECT 1 FROM timesheet_periods WHERE start_date <= ${input.endDate}::date AND end_date >= ${input.startDate}::date)
     RETURNING *
   ), audited AS (
     INSERT INTO audit_events(actor_email,action,target_type,target_id,metadata,ip_address,user_agent,request_method,request_path,request_id)
     SELECT created_by,'timesheet_period_created','timesheet_period',id::text,
-      jsonb_build_object('name',name,'startDate',start_date,'endDate',end_date,'submissionDeadline',submission_deadline,'managerGraceDays',manager_grace_days,'reminderDays',reminder_days),
+      jsonb_build_object('name',name,'startDate',start_date,'endDate',end_date,'submissionDeadline',submission_deadline,'managerSubmissionDeadline',manager_submission_deadline,'accountApprovalDeadline',account_approval_deadline,'exceptionResolutionDeadline',exception_resolution_deadline,'timezone',timezone,'managerGraceDays',manager_grace_days,'reminderDays',reminder_days),
       ${context.ipAddress},${context.userAgent},${context.requestMethod},${context.requestPath},${context.requestId} FROM saved RETURNING target_id
   ) SELECT id,name,start_date::text AS start_date,end_date::text AS end_date,submission_deadline::text AS submission_deadline,
+      manager_submission_deadline::text AS manager_submission_deadline,account_approval_deadline::text AS account_approval_deadline,exception_resolution_deadline::text AS exception_resolution_deadline,timezone,
       manager_grace_days,reminder_days,created_by,created_at::text AS created_at FROM saved WHERE EXISTS(SELECT 1 FROM audited)`
   const row=rows[0]
-  return row?{id:String(row.id),name:String(row.name),startDate:String(row.start_date),endDate:String(row.end_date),submissionDeadline:new Date(String(row.submission_deadline)).toISOString(),managerGraceDays:Number(row.manager_grace_days),reminderDays:Number(row.reminder_days),createdBy:String(row.created_by),createdAt:new Date(String(row.created_at)).toISOString()}:null
+  return row?{id:String(row.id),name:String(row.name),startDate:String(row.start_date),endDate:String(row.end_date),submissionDeadline:new Date(String(row.submission_deadline)).toISOString(),managerSubmissionDeadline:new Date(String(row.manager_submission_deadline)).toISOString(),accountApprovalDeadline:new Date(String(row.account_approval_deadline)).toISOString(),exceptionResolutionDeadline:new Date(String(row.exception_resolution_deadline)).toISOString(),timezone:String(row.timezone),managerGraceDays:Number(row.manager_grace_days),reminderDays:Number(row.reminder_days),createdBy:String(row.created_by),createdAt:new Date(String(row.created_at)).toISOString()}:null
 }
 
-/** Creates a default four-week successor after the latest period expires, unless one was explicitly configured. */
+function deadlineInTimezone(date:Date,hour:number,timezone:string):string{
+  const year=date.getUTCFullYear(),month=date.getUTCMonth()+1,day=date.getUTCDate()
+  const nominal=Date.UTC(year,month-1,day,hour,0,0)
+  const parts=new Intl.DateTimeFormat("en-CA",{timeZone:timezone,year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).formatToParts(new Date(nominal))
+  const get=(type:Intl.DateTimeFormatPartTypes)=>Number(parts.find(part=>part.type===type)?.value)
+  const wall=Date.UTC(get("year"),get("month")-1,get("day"),get("hour"),get("minute"))
+  return new Date(nominal+(nominal-wall)).toISOString()
+}
+
+/** Creates a successor matching the latest period's duration unless the next period was configured. */
 export async function ensureDefaultUpcomingTimesheetPeriod(context:AuditContext):Promise<TimesheetPeriod|null>{
   const periods=await listTimesheetPeriods()
   if(!periods.length)return null
   const latest=[...periods].sort((a,b)=>b.endDate.localeCompare(a.endDate))[0]
   const today=new Date().toISOString().slice(0,10)
   if(latest.endDate>=today||periods.some(period=>period.startDate>latest.endDate))return null
+  const periodLengthDays=Math.max(1,Math.round((Date.parse(`${latest.endDate}T00:00:00.000Z`)-Date.parse(`${latest.startDate}T00:00:00.000Z`))/86_400_000)+1)
   const date=new Date(`${latest.endDate}T00:00:00.000Z`)
   date.setUTCDate(date.getUTCDate()+1)
   const tomorrow=new Date(`${today}T00:00:00.000Z`)
   const daysSinceExpiration=Math.floor((tomorrow.getTime()-new Date(`${latest.endDate}T00:00:00.000Z`).getTime())/86400000)
   const candidate=daysSinceExpiration<=7?date:tomorrow
-  candidate.setUTCDate(candidate.getUTCDate()+((6-candidate.getUTCDay()+7)%7))
+  if(daysSinceExpiration>7){
+    const targetWeekday=new Date(`${latest.startDate}T00:00:00.000Z`).getUTCDay()
+    candidate.setUTCDate(candidate.getUTCDate()+((targetWeekday-candidate.getUTCDay()+7)%7))
+  }
   const startDate=candidate.toISOString().slice(0,10)
-  const end=new Date(candidate);end.setUTCDate(end.getUTCDate()+27)
+  const end=new Date(candidate);end.setUTCDate(end.getUTCDate()+periodLengthDays-1)
   const endDate=end.toISOString().slice(0,10)
+  const endWeekday=end.getUTCDay()
+  const daysUntilNextMonday=(8-endWeekday)%7||7
+  const workerDue=new Date(end);workerDue.setUTCDate(workerDue.getUTCDate()+daysUntilNextMonday)
+  const managerDue=new Date(workerDue);managerDue.setUTCDate(managerDue.getUTCDate()+2)
+  const accountsDue=new Date(workerDue);accountsDue.setUTCDate(accountsDue.getUTCDate()+3)
+  const issuesDue=new Date(workerDue);issuesDue.setUTCDate(issuesDue.getUTCDate()+4)
   const format=(value:Date)=>new Intl.DateTimeFormat("en",{month:"short",day:"numeric",timeZone:"UTC"}).format(value)
   const name=`${format(candidate)} – ${format(end)} ${end.getUTCFullYear()}`
-  return createTimesheetPeriod({name,startDate,endDate,submissionDeadline:`${endDate}T23:59:00.000Z`,managerGraceDays:3,reminderDays:3},"system@tanovo-time.local",context)
+  return createTimesheetPeriod({name,startDate,endDate,submissionDeadline:deadlineInTimezone(workerDue,17,"America/New_York"),managerSubmissionDeadline:deadlineInTimezone(managerDue,17,"America/New_York"),accountApprovalDeadline:deadlineInTimezone(accountsDue,17,"America/New_York"),exceptionResolutionDeadline:deadlineInTimezone(issuesDue,12,"America/New_York"),timezone:"America/New_York",managerGraceDays:2,reminderDays:3},"system@tanovo-time.local",context)
 }
 
 /** Updates a submission window and audits the before/after values atomically. */
-export async function updateTimesheetPeriod(id:string,input:{name:string;startDate:string;endDate:string;submissionDeadline:string;managerGraceDays:number;reminderDays:number},actor:string,reason:string,context:AuditContext):Promise<TimesheetPeriod|null>{
+export async function updateTimesheetPeriod(id:string,input:{name:string;startDate:string;endDate:string;submissionDeadline:string;managerSubmissionDeadline?:string;accountApprovalDeadline?:string;exceptionResolutionDeadline?:string;timezone?:string;managerGraceDays:number;reminderDays:number},actor:string,reason:string,context:AuditContext):Promise<TimesheetPeriod|null>{
   await ensureTimesheetPeriodsTable();await ensureAuditEventsTable()
   const rows=await sql`WITH lock AS (SELECT pg_advisory_xact_lock(hashtext('tanovo-timesheet-periods'))), before AS (
     SELECT p.* FROM timesheet_periods p CROSS JOIN lock WHERE p.id=${id}::uuid FOR UPDATE
   ), saved AS (
     UPDATE timesheet_periods p SET name=${input.name},start_date=${input.startDate}::date,end_date=${input.endDate}::date,
-      submission_deadline=${input.submissionDeadline}::timestamptz,manager_grace_days=${input.managerGraceDays},reminder_days=${input.reminderDays}
+      submission_deadline=${input.submissionDeadline}::timestamptz,
+      manager_submission_deadline=COALESCE(${input.managerSubmissionDeadline??null}::timestamptz,${input.submissionDeadline}::timestamptz+interval '2 days'),
+      account_approval_deadline=COALESCE(${input.accountApprovalDeadline??null}::timestamptz,${input.submissionDeadline}::timestamptz+interval '3 days'),
+      exception_resolution_deadline=COALESCE(${input.exceptionResolutionDeadline??null}::timestamptz,date_trunc('day',${input.submissionDeadline}::timestamptz+interval '4 days')+interval '12 hours'),
+      timezone=${input.timezone??"America/New_York"},manager_grace_days=${input.managerGraceDays},reminder_days=${input.reminderDays}
     FROM before b WHERE p.id=b.id AND b.end_date>=CURRENT_DATE AND ${input.endDate}::date>=CURRENT_DATE AND NOT EXISTS(SELECT 1 FROM timesheet_periods other
       WHERE other.id<>p.id AND other.start_date<=${input.endDate}::date AND other.end_date>=${input.startDate}::date)
     RETURNING p.*
   ), audited AS (
     INSERT INTO audit_events(actor_email,action,target_type,target_id,metadata,ip_address,user_agent,request_method,request_path,request_id)
     SELECT ${actor.toLowerCase()},'timesheet_period_updated','timesheet_period',saved.id::text,
-      jsonb_build_object('reason',${reason}::text,'before',jsonb_build_object('name',before.name,'startDate',before.start_date,'endDate',before.end_date,'submissionDeadline',before.submission_deadline,'managerGraceDays',before.manager_grace_days,'reminderDays',before.reminder_days),
-        'after',jsonb_build_object('name',saved.name,'startDate',saved.start_date,'endDate',saved.end_date,'submissionDeadline',saved.submission_deadline,'managerGraceDays',saved.manager_grace_days,'reminderDays',saved.reminder_days)),
+      jsonb_build_object('reason',${reason}::text,'before',jsonb_build_object('name',before.name,'startDate',before.start_date,'endDate',before.end_date,'submissionDeadline',before.submission_deadline,'managerSubmissionDeadline',before.manager_submission_deadline,'accountApprovalDeadline',before.account_approval_deadline,'exceptionResolutionDeadline',before.exception_resolution_deadline,'timezone',before.timezone,'managerGraceDays',before.manager_grace_days,'reminderDays',before.reminder_days),
+        'after',jsonb_build_object('name',saved.name,'startDate',saved.start_date,'endDate',saved.end_date,'submissionDeadline',saved.submission_deadline,'managerSubmissionDeadline',saved.manager_submission_deadline,'accountApprovalDeadline',saved.account_approval_deadline,'exceptionResolutionDeadline',saved.exception_resolution_deadline,'timezone',saved.timezone,'managerGraceDays',saved.manager_grace_days,'reminderDays',saved.reminder_days)),
       ${context.ipAddress},${context.userAgent},${context.requestMethod},${context.requestPath},${context.requestId}
     FROM saved JOIN before ON before.id=saved.id RETURNING target_id
   ) SELECT saved.id,saved.name,saved.start_date::text AS start_date,saved.end_date::text AS end_date,
-      saved.submission_deadline::text AS submission_deadline,saved.manager_grace_days,saved.reminder_days,saved.created_by,saved.created_at::text AS created_at
+      saved.submission_deadline::text AS submission_deadline,saved.manager_submission_deadline::text AS manager_submission_deadline,saved.account_approval_deadline::text AS account_approval_deadline,
+      saved.exception_resolution_deadline::text AS exception_resolution_deadline,saved.timezone,saved.manager_grace_days,saved.reminder_days,saved.created_by,saved.created_at::text AS created_at
     FROM saved WHERE EXISTS(SELECT 1 FROM audited)`
   const row=rows[0]
-  return row?{id:String(row.id),name:String(row.name),startDate:String(row.start_date),endDate:String(row.end_date),submissionDeadline:new Date(String(row.submission_deadline)).toISOString(),managerGraceDays:Number(row.manager_grace_days),reminderDays:Number(row.reminder_days),createdBy:String(row.created_by),createdAt:new Date(String(row.created_at)).toISOString()}:null
+  return row?{id:String(row.id),name:String(row.name),startDate:String(row.start_date),endDate:String(row.end_date),submissionDeadline:new Date(String(row.submission_deadline)).toISOString(),managerSubmissionDeadline:new Date(String(row.manager_submission_deadline)).toISOString(),accountApprovalDeadline:new Date(String(row.account_approval_deadline)).toISOString(),exceptionResolutionDeadline:new Date(String(row.exception_resolution_deadline)).toISOString(),timezone:String(row.timezone),managerGraceDays:Number(row.manager_grace_days),reminderDays:Number(row.reminder_days),createdBy:String(row.created_by),createdAt:new Date(String(row.created_at)).toISOString()}:null
 }
 
 /** @returns Current hard submission boundary as ISO text, or null when not configured. */
@@ -1100,10 +1157,15 @@ export async function listAuditEventPage(options:{limit?:number;beforeAt?:string
 export async function listPatronAccountActivity(email: string, limit = 100) {
   await ensureAuditEventsTable()
   await ensureTimeEntriesTable()
+  await ensurePatronActivityAcknowledgementsTable()
   const safeLimit = Math.min(Math.max(limit, 1), 100)
   const rows = await sql`
-    SELECT event.id,event.action,event.target_type,event.target_id,event.occurred_at::text AS occurred_at
+    SELECT event.id,event.action,event.target_type,event.target_id,event.occurred_at::text AS occurred_at,
+      (event.action IN ('entry_rejected','timesheet_returned')) AS requires_attention,
+      (ack.event_id IS NOT NULL) AS acknowledged
     FROM audit_events event
+    LEFT JOIN patron_activity_acknowledgements ack
+      ON ack.event_id=event.id AND lower(ack.patron_email)=lower(${email})
     WHERE lower(event.actor_email) <> lower(${email})
       AND (
         (event.target_type IN ('managed_user_access','account_lifecycle') AND lower(event.target_id)=lower(${email}))
@@ -1116,13 +1178,56 @@ export async function listPatronAccountActivity(email: string, limit = 100) {
     ORDER BY event.occurred_at DESC
     LIMIT ${safeLimit}
   `
-  return (rows as Array<{id:string;action:string;target_type:string;target_id:string|null;occurred_at:string}>).map(row=>({
+  return (rows as Array<{id:string;action:string;target_type:string;target_id:string|null;occurred_at:string;requires_attention:boolean;acknowledged:boolean}>).map(row=>({
     id:row.id,
     action:row.action,
     targetType:row.target_type,
     targetId:row.target_id,
     occurredAt:row.occurred_at,
+    requiresAttention:row.requires_attention,
+    acknowledged:row.acknowledged,
   }))
+}
+
+/** Acknowledges an activity item only if it is visible in this patron's feed. */
+export async function acknowledgePatronAccountActivity(email: string, eventId: string) {
+  await ensureAuditEventsTable()
+  await ensureTimeEntriesTable()
+  await ensurePatronActivityAcknowledgementsTable()
+  const rows = await sql`
+    INSERT INTO patron_activity_acknowledgements(event_id,patron_email)
+    SELECT event.id,lower(${email})
+    FROM audit_events event
+    WHERE event.id=${eventId}::uuid
+      AND lower(event.actor_email)<>lower(${email})
+      AND (
+        (event.target_type IN ('managed_user_access','account_lifecycle') AND lower(event.target_id)=lower(${email}))
+        OR (event.target_type='temporary_assignment' AND lower(event.metadata->>'email')=lower(${email}))
+        OR (event.target_type='time_entry' AND EXISTS (
+          SELECT 1 FROM time_entries entry
+          WHERE entry.id::text=event.target_id AND lower(entry.owner_email)=lower(${email})
+        ))
+      )
+    ON CONFLICT(event_id,patron_email) DO NOTHING
+    RETURNING event_id
+  `
+  if ((rows as Array<{event_id:string}>).length) return true
+  const existing = await sql`
+    SELECT 1 FROM patron_activity_acknowledgements ack
+    JOIN audit_events event ON event.id=ack.event_id
+    WHERE ack.event_id=${eventId}::uuid AND lower(ack.patron_email)=lower(${email})
+      AND lower(event.actor_email)<>lower(${email})
+      AND (
+        (event.target_type IN ('managed_user_access','account_lifecycle') AND lower(event.target_id)=lower(${email}))
+        OR (event.target_type='temporary_assignment' AND lower(event.metadata->>'email')=lower(${email}))
+        OR (event.target_type='time_entry' AND EXISTS (
+          SELECT 1 FROM time_entries entry
+          WHERE entry.id::text=event.target_id AND lower(entry.owner_email)=lower(${email})
+        ))
+      )
+    LIMIT 1
+  `
+  return existing.length > 0
 }
 
 /**
@@ -1634,6 +1739,7 @@ export async function updateTimeEntryWithAudit(
   reviewerEmail: string | undefined,
   expectedRevision: string,
   audit: { actorEmail: string; action: AuditAction; metadata: Record<string, unknown>; context: AuditContext },
+  allowSelfApproval = false,
 ): Promise<TimeEntry | null> {
   await ensureTimeEntriesTable()
   await ensureAuditEventsTable()
@@ -1654,8 +1760,8 @@ export async function updateTimeEntryWithAudit(
       AND (${includeAll} OR lower(owner_email) = lower(${ownerEmail}))
       AND updated_at = ${expectedRevision}::timestamptz
       AND payout_eligible_at IS NULL
-      AND (${patch.status ?? null} NOT IN ('approved','rejected') OR ${patch.status ?? null} IS NULL OR (status='submitted' AND lower(owner_email)<>lower(${ownerEmail}) AND ${reviewerEmail ?? null}::text IS NOT NULL))
-      AND (lower(owner_email)<>lower(${ownerEmail}) OR status IN ('draft','rejected') OR (status='submitted' AND ${patch.status ?? null}='draft' AND ${patch.contractor===undefined&&patch.date===undefined&&patch.hours===undefined&&patch.project===undefined&&patch.description===undefined}))
+      AND (${patch.status ?? null} NOT IN ('approved','rejected') OR ${patch.status ?? null} IS NULL OR (status='submitted' AND lower(owner_email)<>lower(${ownerEmail}) AND ${reviewerEmail ?? null}::text IS NOT NULL) OR (${allowSelfApproval} AND ${patch.status ?? null}='approved' AND status='submitted' AND lower(owner_email)=lower(${ownerEmail}) AND ${reviewerEmail ?? null}::text IS NOT NULL))
+      AND (lower(owner_email)<>lower(${ownerEmail}) OR status IN ('draft','rejected') OR (status='submitted' AND ${patch.status ?? null}='draft' AND ${patch.contractor===undefined&&patch.date===undefined&&patch.hours===undefined&&patch.project===undefined&&patch.description===undefined}) OR (${allowSelfApproval} AND status='submitted' AND ${patch.status ?? null}='approved'))
     RETURNING *
   ), audited AS (
     INSERT INTO audit_events(actor_email,action,target_type,target_id,metadata,ip_address,user_agent,request_method,request_path,request_id)

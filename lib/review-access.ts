@@ -22,8 +22,8 @@ export type ReviewActor = { role: UserRole | null; permissions: Permissions }
  */
 export function directReviewAccess(entry: TimeEntry, email: string, access: ReviewActor, ownerRole: UserRole | null) {
   const own = entry.ownerEmail?.toLowerCase() === email.toLowerCase()
-  if (own) return { visible: true, reviewable: false }
   const { role, permissions: rights } = access
+  if (own) return { visible: true, reviewable: role === "account_manager" && ownerRole === "account_manager" && rights.review_entries && entry.status === "submitted" }
   const otherManager = !!entry.reviewManagerEmail && entry.reviewManagerEmail.toLowerCase() !== email.toLowerCase()
   let visible = !!rights.view_team
   if (role === "manager") visible = entry.status === "submitted" && (ownerRole === "manager" ? rights.view_manager_entries : (rights.view_team && (!otherManager || rights.view_other_manager_entries)))

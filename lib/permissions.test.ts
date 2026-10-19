@@ -29,10 +29,10 @@ it("gives account managers read-only access to all timesheets by default and all
   expect(resolvePermissions("admin").view_all_timesheets).toBe(true)
   expect(resolvePermissions("contractor").view_all_timesheets).toBe(false)
 })
-it("enables account-manager operational review by default and lets admins revoke it",()=>{
+it("lets account managers manage their own entries and review the final queue",()=>{
   expect(resolvePermissions("account_manager").review_entries).toBe(true)
   expect(resolvePermissions("account_manager",{review_entries:false}).review_entries).toBe(false)
-  expect(resolvePermissions("account_manager")).toMatchObject({create_entries:false,edit_entries:false,delete_entries:false,submit_entries:false})
+  expect(resolvePermissions("account_manager")).toMatchObject({create_entries:true,edit_entries:true,delete_entries:false,submit_entries:true})
 })
 it("gives account managers final-approval access but keeps AI and payout rights separate",()=>{
   expect(resolvePermissions("account_manager")).toMatchObject({view_accounts:true,review_accounts:true,ai_accounts:false,authorize_payouts:false})

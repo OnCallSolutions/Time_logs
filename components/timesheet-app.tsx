@@ -795,7 +795,7 @@ export function TimesheetApp({
   }
 
   const totalHours = entries.reduce((s, e) => s + (Number(e.hours) || 0), 0)
-  const pendingEntries = entries.filter((entry) => entry.status === "submitted"&&entry.reviewEligible!==false&&entry.ownerEmail?.toLowerCase()!==userEmail?.toLowerCase())
+  const pendingEntries = entries.filter((entry) => entry.status === "submitted"&&entry.reviewEligible!==false&&(role==="account_manager"||entry.ownerEmail?.toLowerCase()!==userEmail?.toLowerCase()))
   const approvedEntries = entries.filter((entry) => entry.status === "approved")
   const rejectedEntries = entries.filter((entry) => entry.status === "rejected")
   const draftEntries = entries.filter((entry) => entry.status === "draft")
@@ -945,9 +945,9 @@ export function TimesheetApp({
         <EntriesLog
           stateKey={`${userEmail?.toLowerCase()??"user"}:${view}`}
           refreshKey={entriesRefresh}
-          showPatronBulkActions={role==="employee"||role==="contractor"}
+          showPatronBulkActions={role==="employee"||role==="contractor"||role==="account_manager"}
           userEmail={userEmail ?? undefined}
-          submissionDestination={role==="manager"?"account_manager":"manager"}
+          submissionDestination={role==="account_manager"?"self":role==="manager"?"account_manager":"manager"}
           canRequestReview={role==="manager"&&permissions.request_review_help&&permissions.delegate_permissions&&permissions.send_messages}
           onRequestReview={setReviewerHelp}
           entries={view==="personal"?entries.filter(entry=>entry.ownerEmail?.toLowerCase()===userEmail?.toLowerCase()&&(personalStatus==="all"||entry.status===personalStatus)):(role === "employee" || role === "contractor") && personalStatus !== "all" ? entries.filter(entry => entry.status === personalStatus) : entries}
@@ -956,7 +956,7 @@ export function TimesheetApp({
           onDelete={deleteEntry}
           onClear={clearEntries}
           canClear={view!=="personal"&&canClearVisibleEntries}
-          canReview={view!=="personal"&&canReviewEntries}
+          canReview={false}
           canSubmit={canSubmitEntries}
           readOnlyArchivedForOwner={role==="employee"||role==="contractor"}
           canSubmitOthers={role==="manager"&&view==="log"}
@@ -986,28 +986,10 @@ export function TimesheetApp({
               Submitted time will appear here for manager review.
             </p>
           </div>
+        ) : canReviewEntries ? (
+          <ApprovalSelection entries={pendingEntries} email={userEmail??""} canReview={canReviewEntries} canAI={canAIReview} allowSelfApproval={role==="account_manager"} finalApprover={role==="account_manager"} onUpdated={entry=>{entryReadEpoch.current++;setEntries(previous=>previous.map(current=>current.id===entry.id?entry:current))}}/>
         ) : (
-          <EntriesLog
-          stateKey={`${userEmail?.toLowerCase()??"user"}:approvals`}
-          userEmail={userEmail ?? undefined}
-          submissionDestination={role==="manager"?"account_manager":"manager"}
-          canRequestReview={role==="manager"&&permissions.request_review_help&&permissions.delegate_permissions&&permissions.send_messages}
-          onRequestReview={setReviewerHelp}
-            entries={pendingEntries}
-            onUpdate={updateEntry}
-            onStatusChange={changeEntryStatus}
-            onDelete={deleteEntry}
-            onClear={clearEntries}
-            canClear={false}
-            canReview={canReviewEntries}
-            canSubmit={false}
-            canExport={permissions.export_entries}
-            canEdit={permissions.edit_entries}
-            canDelete={permissions.delete_entries}
-            deleteOwnOnly={role==="manager"}
-            description="Approve or reject submitted time after review."
-            title="Pending approvals"
-          />
+          <p className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm">You can view these submitted timesheets but do not have the approval permission needed to decide them.</p>
         )
         }
         </section>
@@ -1202,6 +1184,10 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
   const [adminTimesheetTool,setAdminTimesheetTool]=useState<"periods"|"entries"|null>(null)
   const [reviewQueueOpen,setReviewQueueOpen]=useState(false)
   const [adminPeriodSelection,setAdminPeriodSelection]=useState("current")
+  const [adminPeriodSearch,setAdminPeriodSearch]=useState("")
+  const [adminPeriodStateFilter,setAdminPeriodStateFilter]=useState("all")
+  const [snapshotProjectSearch,setSnapshotProjectSearch]=useState("")
+  const [snapshotManagerSearch,setSnapshotManagerSearch]=useState("")
   const [adminPeriods,setAdminPeriods]=useState<Array<{id:string;name:string;startDate:string;endDate:string}>>([])
   const [adminPeriodsLoading,setAdminPeriodsLoading]=useState(false)
   const [adminPeriodsError,setAdminPeriodsError]=useState("")
@@ -1618,6 +1604,12 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
   const activeManagerCount=users.filter(user=>user.role==="manager"&&user.accessStatus==="active").length
   const adminPeriodToday=new Date().toLocaleDateString("en-CA")
   const sortedAdminPeriods=[...adminPeriods].sort((a,b)=>b.startDate.localeCompare(a.startDate))
+  const visibleAdminPeriods=sortedAdminPeriods.filter(period=>{
+    const current=period.startDate<=adminPeriodToday&&period.endDate>=adminPeriodToday
+    const upcoming=period.startDate>adminPeriodToday
+    const matchesState=adminPeriodStateFilter==="all"||adminPeriodStateFilter==="current"&&current||adminPeriodStateFilter==="upcoming"&&upcoming||adminPeriodStateFilter==="archived"&&period.endDate<adminPeriodToday
+    return matchesState&&(!adminPeriodSearch.trim()||`${period.name} ${period.startDate} ${period.endDate}`.toLowerCase().includes(adminPeriodSearch.trim().toLowerCase()))
+  })
   const activeAdminPeriod=sortedAdminPeriods.find(period=>period.startDate<=adminPeriodToday&&period.endDate>=adminPeriodToday)
   const selectedAdminPeriod=adminPeriodSelection==="all"
     ? null
@@ -1637,6 +1629,19 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
     rejected:selectedPeriodEntries.filter(entry=>entry.status==="rejected").length,
   }
   const selectedPeriodRecent=[...selectedPeriodEntries].sort((a,b)=>b.date.localeCompare(a.date))
+  const selectedProjectSnapshot=[...selectedPeriodEntries.reduce((projects,entry)=>{
+    const project=entry.project||"No project"
+    const summary=projects.get(project)||{entries:0,hours:0,latestDate:entry.date}
+    summary.entries+=1;summary.hours+=Number(entry.hours)||0
+    if(entry.date>summary.latestDate)summary.latestDate=entry.date
+    projects.set(project,summary);return projects
+  },new Map<string,{entries:number;hours:number;latestDate:string}>())].sort((a,b)=>b[1].latestDate.localeCompare(a[1].latestDate)||a[0].localeCompare(b[0]))
+  const selectedReviewManagers=[...selectedPeriodEntries.reduce((managers,entry)=>{
+    const name=entry.reviewManagerName||entry.reviewManagerEmail||"Manager not assigned"
+    managers.set(name,(managers.get(name)||0)+1);return managers
+  },new Map<string,number>())].sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]))
+  const visibleProjectSnapshot=selectedProjectSnapshot.filter(([project])=>project.toLowerCase().includes(snapshotProjectSearch.trim().toLowerCase()))
+  const visibleReviewManagers=selectedReviewManagers.filter(([manager])=>manager.toLowerCase().includes(snapshotManagerSearch.trim().toLowerCase()))
 
   return (
     <div style={rightsOnly?undefined:{minHeight:"calc(100dvh - 13rem)"}} className="tech-surface flex min-h-0 min-w-0 flex-1 flex-col gap-2.5 bg-white text-slate-950">
@@ -1721,9 +1726,11 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
           <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[minmax(15rem,0.72fr)_minmax(0,1.28fr)]">
             <nav aria-label="Timesheet periods" className="min-h-0 overflow-auto rounded-lg border border-sky-200 bg-sky-50/40 p-2">
               <h3 className="px-2 py-1 text-xs font-semibold uppercase text-sky-950">Period archive</h3>
+              <div className="mt-1 grid gap-1.5 sm:grid-cols-[minmax(0,1fr)_10rem]"><label className="sr-only" htmlFor="admin-period-search">Search periods</label><input id="admin-period-search" type="search" value={adminPeriodSearch} onChange={event=>setAdminPeriodSearch(event.target.value)} placeholder="Search periods" className="h-8 min-w-0 border border-slate-300 bg-white px-2 text-xs"/><label className="sr-only" htmlFor="admin-period-state">Filter periods</label><select id="admin-period-state" value={adminPeriodStateFilter} onChange={event=>setAdminPeriodStateFilter(event.target.value)} className="h-8 border border-slate-300 bg-white px-2 text-xs"><option value="all">All period states</option><option value="current">Current</option><option value="upcoming">Upcoming</option><option value="archived">Archived</option></select></div>
               {adminPeriodsLoading?<p role="status" className="px-2 py-3 text-sm text-slate-600">Loading periods…</p>:adminPeriodsError?<p role="alert" className="px-2 py-3 text-sm text-red-800">{adminPeriodsError}</p>:<div className="mt-1 space-y-1">
                 <button type="button" aria-pressed={adminPeriodSelection==="all"} onClick={()=>setAdminPeriodSelection("all")} className={`flex w-full items-center justify-between rounded-md border-l-2 px-2.5 py-2 text-left transition ${adminPeriodSelection==="all"?"border-blue-600 bg-blue-100":"border-blue-400 bg-white hover:bg-blue-50"}`}><span><span className="block text-sm font-semibold text-blue-950">All periods</span><span className="text-[11px] text-slate-600">Every saved source entry</span></span><span className="text-xs tabular-nums text-blue-900">{entries.length}</span></button>
-                {sortedAdminPeriods.map(period=>{const current=period.startDate<=adminPeriodToday&&period.endDate>=adminPeriodToday;const upcoming=period.startDate>adminPeriodToday;const count=entries.filter(entry=>entry.date>=period.startDate&&entry.date<=period.endDate).length;const selected=selectedAdminPeriod?.id===period.id;return <button key={period.id} type="button" aria-pressed={selected} onClick={()=>setAdminPeriodSelection(period.id)} className={`flex w-full items-center justify-between gap-3 rounded-md border-l-2 px-2.5 py-2 text-left transition ${selected?"border-orange-600 bg-orange-100":current?"border-emerald-500 bg-emerald-50 hover:bg-emerald-100":upcoming?"border-sky-400 bg-white hover:bg-sky-50":"border-orange-400 bg-white hover:bg-orange-50"}`}><span className="min-w-0"><span className="block truncate text-sm font-semibold text-slate-950">{period.name}{current?" · Current":upcoming?" · Upcoming":" · Archived"}</span><span className="block text-[11px] text-slate-600">{period.startDate} – {period.endDate}</span></span><span className="shrink-0 text-xs tabular-nums text-slate-700">{count} {count===1?"sheet":"sheets"}</span></button>})}
+                {visibleAdminPeriods.map(period=>{const current=period.startDate<=adminPeriodToday&&period.endDate>=adminPeriodToday;const upcoming=period.startDate>adminPeriodToday;const count=entries.filter(entry=>entry.date>=period.startDate&&entry.date<=period.endDate).length;const selected=selectedAdminPeriod?.id===period.id;return <button key={period.id} type="button" aria-pressed={selected} onClick={()=>setAdminPeriodSelection(period.id)} className={`flex w-full items-center justify-between gap-3 rounded-md border-l-2 px-2.5 py-2 text-left transition ${selected?"border-orange-600 bg-orange-100":current?"border-emerald-500 bg-emerald-50 hover:bg-emerald-100":upcoming?"border-sky-400 bg-white hover:bg-sky-50":"border-orange-400 bg-white hover:bg-orange-50"}`}><span className="min-w-0"><span className="block truncate text-sm font-semibold text-slate-950">{period.name}{current?" · Current":upcoming?" · Upcoming":" · Archived"}</span><span className="block text-[11px] text-slate-600">{period.startDate} – {period.endDate}</span></span><span className="shrink-0 text-xs tabular-nums text-slate-700">{count} {count===1?"sheet":"sheets"}</span></button>})}
+                {!visibleAdminPeriods.length&&<p className="px-2 py-3 text-xs text-slate-600">No periods match these filters.</p>}
                 {!adminPeriods.length&&<p className="px-2 py-3 text-xs text-slate-600">No periods configured. All saved timesheets remain available above.</p>}
               </div>}
             </nav>
@@ -1731,7 +1738,22 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
               <header className="flex flex-wrap items-center justify-between gap-3 border-b border-orange-200 px-4 py-3"><div className="min-w-0"><p className="text-[11px] font-semibold uppercase text-orange-800">{selectedAdminPeriod?(selectedAdminPeriod.id===activeAdminPeriod?.id?"Current period":"Selected period"):"Timesheet overview"}</p><h3 className="truncate text-lg font-semibold text-slate-950">{selectedAdminPeriod?.name??"All periods"}</h3><p className="text-xs text-slate-600">{selectedAdminPeriod?`${selectedAdminPeriod.startDate} – ${selectedAdminPeriod.endDate}`:"Every saved source entry across all periods"}</p></div><Button size="sm" onClick={()=>{setAdminPeriodSelection(selectedAdminPeriod?.id??"all");setAdminTimesheetTool("entries")}}><Layers3 className="size-4"/>Open timesheets<ChevronRight className="size-4"/></Button></header>
               <div className="grid grid-cols-2 gap-px border-b border-slate-200 bg-slate-200 sm:grid-cols-4"><div className="bg-white/90 px-3 py-2"><p className="text-[11px] text-slate-600">Entries</p><p className="text-lg font-semibold tabular-nums">{selectedPeriodEntries.length}</p></div><div className="bg-white/90 px-3 py-2"><p className="text-[11px] text-slate-600">Hours</p><p className="text-lg font-semibold tabular-nums">{selectedPeriodHours.toLocaleString(undefined,{maximumFractionDigits:2})}h</p></div><div className="bg-white/90 px-3 py-2"><p className="text-[11px] text-slate-600">People</p><p className="text-lg font-semibold tabular-nums">{selectedPeriodPeople}</p></div><div className="bg-white/90 px-3 py-2"><p className="text-[11px] text-slate-600">Projects</p><p className="text-lg font-semibold tabular-nums">{selectedPeriodProjects}</p></div></div>
               <div className="flex flex-wrap gap-x-4 gap-y-1 border-b border-slate-200 px-4 py-2 text-xs"><span className="text-orange-900">{selectedPeriodStatuses.draft} drafts</span><span className="text-sky-900">{selectedPeriodStatuses.submitted} awaiting review</span><span className="text-emerald-900">{selectedPeriodStatuses.approved} approved</span><span className="text-red-800">{selectedPeriodStatuses.rejected} returned</span></div>
-              <div className="min-h-0 flex-1 overflow-auto"><div className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-2"><h4 className="text-xs font-semibold text-slate-800">Latest entries</h4><span className="text-[11px] text-slate-600">Showing {selectedPeriodRecent.length} of {selectedPeriodEntries.length}</span></div>{selectedPeriodRecent.length?<ul className="divide-y divide-slate-200">{selectedPeriodRecent.map(entry=><li key={entry.id} className="grid min-w-0 grid-cols-[5.5rem_minmax(0,1fr)_auto] items-center gap-3 px-4 py-2 text-xs"><time dateTime={entry.date} className="tabular-nums text-slate-600">{entry.date}</time><span className="min-w-0"><span className="block truncate font-medium text-slate-900" title={entry.project}>{entry.project||"No project"}</span><span className="block truncate text-[11px] text-slate-600" title={entry.description}>{entry.description||"No description"}</span></span><span className="flex items-center gap-2"><span className="tabular-nums">{Number(entry.hours||0).toLocaleString(undefined,{maximumFractionDigits:2})}h</span><span className="rounded-full bg-slate-100 px-2 py-0.5 capitalize text-slate-700">{entry.status}</span></span></li>)}</ul>:<p className="px-4 py-5 text-sm text-slate-600">No time entries have been recorded for this period yet.</p>}</div>
+              <div className="min-h-0 flex-1 overflow-auto">
+                <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-2"><h4 className="text-xs font-semibold text-slate-800">Latest entries</h4><span className="text-[11px] text-slate-600">Showing {selectedPeriodRecent.length} of {selectedPeriodEntries.length}</span></div>
+                {selectedPeriodRecent.length?<ul className="divide-y divide-slate-200">{selectedPeriodRecent.map(entry=><li key={entry.id} className="grid min-w-0 grid-cols-[5.5rem_minmax(0,1fr)_auto] items-center gap-3 px-4 py-2 text-xs"><time dateTime={entry.date} className="tabular-nums text-slate-600">{entry.date}</time><span className="min-w-0"><span className="block truncate font-medium text-slate-900" title={entry.project}>{entry.project||"No project"}</span><span className="block truncate text-[11px] text-slate-600" title={entry.description}>{entry.description||"No description"}</span></span><span className="flex items-center gap-2"><span className="tabular-nums">{Number(entry.hours||0).toLocaleString(undefined,{maximumFractionDigits:2})}h</span><span className="rounded-full bg-slate-100 px-2 py-0.5 capitalize text-slate-700">{entry.status}</span></span></li>)}</ul>:<p className="px-4 py-5 text-sm text-slate-600">No time entries have been recorded for this period yet.</p>}
+                <div className="grid min-w-0 gap-3 border-t border-slate-200 p-3 xl:grid-cols-2">
+                  <section aria-label="Recent projects snapshot" className="min-w-0 border border-emerald-200 bg-white/90">
+                    <header className="flex items-center justify-between gap-2 border-b border-emerald-100 bg-emerald-50/70 px-3 py-2"><h4 className="text-xs font-semibold text-emerald-950">Recent projects</h4><span className="text-[10px] text-slate-600">{selectedProjectSnapshot.length} in period</span></header>
+                    <label className="block border-b border-emerald-100 px-2 py-1"><span className="sr-only">Search recent projects</span><input type="search" value={snapshotProjectSearch} onChange={event=>setSnapshotProjectSearch(event.target.value)} placeholder="Search projects" className="h-7 w-full bg-transparent px-1 text-xs outline-none"/></label>
+                    {visibleProjectSnapshot.length?<ul className="max-h-48 divide-y divide-slate-100 overflow-y-auto">{visibleProjectSnapshot.map(([project,summary])=><li key={project} className="flex min-w-0 items-center justify-between gap-3 px-3 py-2 text-xs"><span className="min-w-0"><span className="block truncate font-medium text-slate-950" title={project}>{project}</span><span className="text-[10px] text-slate-600">Latest activity {summary.latestDate}</span></span><span className="shrink-0 text-right tabular-nums text-slate-700">{summary.entries} {summary.entries===1?"entry":"entries"} · {summary.hours.toLocaleString(undefined,{maximumFractionDigits:2})}h</span></li>)}</ul>:<p className="px-3 py-3 text-xs text-slate-600">No matching projects.</p>}
+                  </section>
+                  <section aria-label="Review managers" className="min-w-0 border border-blue-200 bg-white/90">
+                    <header className="flex items-center justify-between gap-2 border-b border-blue-100 bg-blue-50/70 px-3 py-2"><h4 className="text-xs font-semibold text-blue-950">Review managers</h4><span className="text-[10px] text-slate-600">{selectedReviewManagers.length} assigned</span></header>
+                    <label className="block border-b border-blue-100 px-2 py-1"><span className="sr-only">Search review managers</span><input type="search" value={snapshotManagerSearch} onChange={event=>setSnapshotManagerSearch(event.target.value)} placeholder="Search managers" className="h-7 w-full bg-transparent px-1 text-xs outline-none"/></label>
+                    {visibleReviewManagers.length?<ul className="max-h-48 divide-y divide-slate-100 overflow-y-auto">{visibleReviewManagers.map(([manager,count])=><li key={manager} className="flex min-w-0 items-center justify-between gap-3 px-3 py-2 text-xs"><span className="min-w-0 truncate font-medium text-slate-950" title={manager}>{manager}</span><span className="shrink-0 tabular-nums text-slate-700">{count} {count===1?"entry":"entries"}</span></li>)}</ul>:<p className="px-3 py-3 text-xs text-slate-600">No matching managers.</p>}
+                  </section>
+                </div>
+              </div>
             </section>
           </div>
         </section>
@@ -1739,7 +1761,7 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
       {!rightsOnly&&adminTimesheetTool==="periods"&&<WindowSurface title="Timesheet period settings" onBack={()=>setAdminTimesheetTool(null)}><section className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-white p-2 sm:p-3"><header className="mb-2 shrink-0 border-l-4 border-orange-500 bg-orange-50 px-3 py-2"><h2 className="font-semibold text-orange-950">Timesheet periods and submission windows</h2><p className="text-xs text-orange-900">Create a new period or edit and save an existing window. When a period's dates take effect, it becomes the current empty timesheet view for everyone; prior periods remain available in Timesheets archives.</p></header><SubmissionDeadlineSettings defaultOpen/></section></WindowSurface>}
       {!rightsOnly&&adminTimesheetTool==="entries"&&<WindowSurface title="Timesheet view" onBack={()=>setAdminTimesheetTool(null)}><section className="flex min-h-0 w-full flex-col gap-1 overflow-hidden bg-white p-2 sm:p-3">
         <header className="flex flex-wrap items-center justify-between gap-2 border-b border-green-200 bg-green-50 px-3 py-1.5"><div className="flex min-w-0 flex-wrap items-baseline gap-x-2"><h2 className="font-semibold text-green-950">Raw timesheet entries</h2><p className="text-xs text-green-900">Search, filter, group, review, and export time records.</p></div><div className="flex flex-wrap gap-1">{canCreateEntries&&<Button variant="outline" size="icon-sm" aria-label="Log time" title="Log time" onClick={onOpenEntryCapture}><Pencil className="size-4"/></Button>}<Button variant="outline" size="icon-sm" aria-label="Refresh entries" title="Refresh entries" onClick={onRefreshEntries}><Activity className="size-4"/></Button></div></header>
-        <EntriesLog stateKey={`admin-timesheets:${userEmail.toLowerCase()}`} userEmail={userEmail} entries={entries} onUpdate={onEntryUpdate} onStatusChange={onEntryStatusChange} onDelete={onEntryDelete} onClear={onEntryClear} canEdit={canEditEntries} canDelete={canDeleteEntries} canClear={canClearEntries} canReview={canReviewEntries} canSubmit={canSubmitEntries} canSubmitOthers canExport={canExportEntries} periodView initialPeriodSelection={adminPeriodSelection} hideHeader periodToolbarCenter={(canReviewEntries||canAIReview)&&<Button type="button" variant="outline" size="sm" aria-label="Review queue" title="Open the full review queue" className="h-8 w-full max-w-2xl justify-center border-orange-300 bg-orange-50/70 text-orange-950 hover:bg-orange-100" onClick={()=>setReviewQueueOpen(true)}><CheckCircle2 className="size-4 text-orange-700"/>Review queue<span className="rounded-full bg-white px-1.5 py-0.5 text-[10px] tabular-nums">{pendingEntries.length} awaiting</span></Button>} title="Raw timesheet entries" description="Search, filter, group, review, and export time records."/>
+        <EntriesLog stateKey={`admin-timesheets:${userEmail.toLowerCase()}`} userEmail={userEmail} entries={entries} onUpdate={onEntryUpdate} onStatusChange={onEntryStatusChange} onDelete={onEntryDelete} onClear={onEntryClear} canEdit={canEditEntries} canDelete={canDeleteEntries} canClear={canClearEntries} canReview={false} canSubmit={canSubmitEntries} canSubmitOthers canExport={canExportEntries} periodView initialPeriodSelection={adminPeriodSelection} hideHeader periodToolbarCenter={(canReviewEntries||canAIReview)&&<Button type="button" variant="outline" size="sm" aria-label="Review queue" title="Open the full review queue" className="h-8 w-full max-w-2xl justify-center border-orange-300 bg-orange-50/70 text-orange-950 hover:bg-orange-100" onClick={()=>setReviewQueueOpen(true)}><CheckCircle2 className="size-4 text-orange-700"/>Review queue<span className="rounded-full bg-white px-1.5 py-0.5 text-[10px] tabular-nums">{pendingEntries.length} awaiting</span></Button>} title="Raw timesheet entries" description="Search, filter, group, review, and export time records."/>
       </section></WindowSurface>}
       {!rightsOnly&&adminTimesheetTool==="entries"&&reviewQueueOpen&&<WindowSurface title="Review queue" onBack={()=>setReviewQueueOpen(false)}><section className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-white"><header className="shrink-0 border-b border-orange-200 bg-orange-50 px-4 py-3"><h2 className="font-semibold text-orange-950">Timesheets awaiting review</h2><p className="text-xs text-orange-900">{pendingEntries.length} awaiting · AI suggestions are advisory; a person confirms every action.</p></header><div className="min-h-0 flex-1 overflow-auto p-3 sm:p-5"><ApprovalSelection entries={pendingEntries} email={userEmail} canReview={canReviewEntries} canAI={canAIReview} onUpdated={onApprovalUpdated}/></div></section></WindowSurface>}
       {!rightsOnly&&adminReportOpen&&<WindowSurface title="Analytics reports" onBack={()=>setAdminReportOpen(false)}><section className="min-h-0 w-full overflow-auto bg-white p-4 sm:p-6">{reportContent}</section></WindowSurface>}

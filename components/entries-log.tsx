@@ -148,7 +148,7 @@ export function EntriesLog({
   stateKey,
 }: {
   userEmail?: string
-  submissionDestination?: "manager" | "account_manager"
+  submissionDestination?: "manager" | "account_manager" | "self"
   canRequestReview?: boolean
   onRequestReview?: (entries: TimeEntry[]) => void
   canEdit?: boolean
@@ -257,7 +257,7 @@ export function EntriesLog({
   if (entries.length === 0) {
     return (
       <div className="border-y border-border bg-card/50">
-      {periodView?<div className="grid min-w-0 grid-cols-1 items-center gap-1 border-b border-indigo-300 bg-indigo-100/80 px-2.5 py-1.5 md:grid-cols-[minmax(0,1fr)_minmax(16rem,42rem)_minmax(0,1fr)]"><span role="status" className={`text-left text-xs font-semibold ${submissionClosed?"text-red-950":"text-orange-950"}`}>{deadlineMessage}</span>{periodToolbarCenter&&<div className="min-w-0 md:col-start-2 md:justify-self-center">{periodToolbarCenter}</div>}</div>:canSubmit&&<p role="status" className={`border-b px-4 py-2 text-xs ${submissionClosed?"border-red-200 bg-red-50 text-red-900":"border-orange-200 bg-orange-50/70 text-orange-950"}`}>{deadlineMessage}</p>}
+      {periodView?<div className="timesheet-period-toolbar-container min-w-0 border-b border-indigo-300 bg-indigo-100/80 px-2.5 py-1.5"><div className="timesheet-period-toolbar items-center gap-1"><span role="status" className={`timesheet-period-deadline text-left text-xs font-semibold ${submissionClosed?"text-red-950":"text-orange-950"}`}>{deadlineMessage}</span>{periodToolbarCenter&&<div className="timesheet-period-center min-w-0">{periodToolbarCenter}</div>}</div></div>:canSubmit&&<p role="status" className={`border-b px-4 py-2 text-xs ${submissionClosed?"border-red-200 bg-red-50 text-red-900":"border-orange-200 bg-orange-50/70 text-orange-950"}`}>{deadlineMessage}</p>}
       <div className="flex min-h-56 flex-col items-center justify-center px-6 py-10 text-center">
         {!hideHeader&&<div className="mb-6 w-full max-w-3xl text-left">
           <h2 className="text-sm font-semibold">{title}</h2>
@@ -383,15 +383,16 @@ export function EntriesLog({
           </div>}
         </div>
       </div>}
-      {periodView&&<div className="grid min-w-0 grid-cols-1 items-center gap-1 border-b border-indigo-300 bg-indigo-100/80 px-2.5 py-1.5 md:grid-cols-[minmax(0,1fr)_minmax(16rem,42rem)_minmax(0,1fr)]">
-        <span role="status" className={`text-left text-xs font-semibold ${submissionClosed?"text-red-950":"text-orange-950"}`}>{deadlineMessage}</span>
-        {(periodToolbarCenter||(showPatronBulkActions&&canSubmit))&&<div className="min-w-0 md:col-start-2 md:justify-self-center">{periodToolbarCenter??<div aria-label="Bulk timesheet submission" className="flex min-w-0 flex-wrap items-center justify-center gap-1.5">
+      {periodView&&<div className="timesheet-period-toolbar-container min-w-0 border-b border-indigo-300 bg-indigo-100/80 px-2.5 py-1.5">
+        <div className="timesheet-period-toolbar items-center gap-1">
+        <span role="status" className={`timesheet-period-deadline text-left text-xs font-semibold ${submissionClosed?"text-red-950":"text-orange-950"}`}>{deadlineMessage}</span>
+        {(periodToolbarCenter||(showPatronBulkActions&&canSubmit))&&<div className="timesheet-period-center min-w-0">{periodToolbarCenter??<div aria-label="Bulk timesheet submission" className="flex min-w-0 flex-wrap items-center justify-center gap-1.5">
           <Button size="sm" variant="outline" className="h-8 whitespace-nowrap" disabled={!eligible.length} onClick={()=>setSelectedIds(eligible.map(entry=>entry.id))}>Select eligible ({eligible.length})</Button>
           <Button size="sm" variant="ghost" className="h-8 whitespace-nowrap" disabled={!selected.length} onClick={()=>setSelectedIds([])}>Clear ({selected.length})</Button>
           <SubmissionActions entries={submissions.filter(entry=>selectedIdSet.has(entry.id))} openRequest={submissionRequest} destination={submissionDestination} onStatusChange={onStatusChange} onSubmitted={id=>setSelectedIds(previous=>previous.filter(current=>current!==id))}/>
         </div>}</div>}
-        <div className="flex min-w-0 flex-wrap items-center justify-end gap-2 md:col-start-3 md:justify-self-end">
-        <label className="flex items-center gap-2 text-xs font-bold text-indigo-950">Timesheet period
+        <div className="timesheet-period-selector">
+        <label className="timesheet-period-label text-xs font-bold text-indigo-950"><span>Timesheet period</span>
           <select aria-label="Timesheet period" value={periodSelection} onChange={event=>setPeriodSelection(event.target.value)} disabled={!periodsLoaded||periods.length===0} className="h-8 max-w-full rounded-md border-2 border-indigo-500 bg-white px-2 text-xs font-semibold text-indigo-950 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-700">
             <option value="current">Current period{activePeriod?` · ${activePeriod.name}`:""}</option>
             <option value="archived">Archived periods · all</option>
@@ -401,6 +402,7 @@ export function EntriesLog({
           </select>
         </label>
         <span role="status" className="text-right text-xs font-semibold text-indigo-950">{!periodsLoaded?"Loading period history…":periods.length===0?"No periods are configured; showing all saved timesheets.":periodSelection==="current"&&!activePeriod?"No period is active today. Select an archived or upcoming period.":periodSelection==="archived"?"Archived entries remain stored and can be retrieved by period.":`Showing ${periodEntries.length} entries for ${periodSelection==="current"?activePeriod?.name??"the current period":periodSelection==="all"?"all periods":periodSelection==="unassigned"?"dates outside configured periods":periods.find(period=>period.id===periodSelection)?.name??"the selected period"}.`}</span>
+        </div>
         </div>
       </div>}
       {canSubmit&&!periodView&&<p role="status" className={`border-b px-3 py-1.5 text-right text-xs font-semibold ${submissionClosed?"border-red-300 bg-red-100 text-red-950":"border-orange-300 bg-orange-100 text-orange-950"}`}>{deadlineMessage}</p>}

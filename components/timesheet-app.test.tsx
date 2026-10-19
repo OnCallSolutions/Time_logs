@@ -505,6 +505,7 @@ describe("TimesheetApp admin directory", () => {
       contractor:"Taylor",
       project:`Period project ${index}`,
       description:`Period work ${index}`,
+      reviewManagerName:`Review manager ${index}`,
     }))
     mockTimesheetFetch(entries)
     const user=userEvent.setup()
@@ -513,8 +514,42 @@ describe("TimesheetApp admin directory", () => {
     await user.click(within(commands).getByRole("button",{name:"Timesheets"}))
     const period=await screen.findByRole("region",{name:"Selected timesheet period"})
     expect(within(period).getByText("Showing 12 of 12")).toBeVisible()
-    for(const index of entries.keys()) expect(within(period).getByText(`Period project ${index}`)).toBeInTheDocument()
+    for(const index of entries.keys()) expect(within(period).getAllByText(`Period project ${index}`)).toHaveLength(2)
+    const projects=within(period).getByRole("region",{name:"Recent projects snapshot"})
+    const managers=within(period).getByRole("region",{name:"Review managers"})
+    for(const index of entries.keys()){
+      expect(within(projects).getByText(`Period project ${index}`)).toBeInTheDocument()
+      expect(within(managers).getByText(`Review manager ${index}`)).toBeInTheDocument()
+    }
+    expect(projects.querySelector("ul")).toHaveClass("overflow-y-auto")
+    expect(managers.querySelector("ul")).toHaveClass("overflow-y-auto")
     expect(period.querySelector("div.overflow-auto")).toBeInTheDocument()
+  })
+
+  it("refreshes project and manager snapshots when the left-side period selection changes",async()=>{
+    const fetchMock=mockTimesheetFetch([
+      {id:"oct-entry",date:"2026-10-10",hours:2,status:"approved",contractor:"Taylor",project:"October project",description:"October work",reviewManagerName:"October manager"},
+      {id:"sep-entry",date:"2026-09-10",hours:3,status:"submitted",contractor:"Jordan",project:"September project",description:"September work",reviewManagerName:"September manager"},
+    ])
+    const baseImplementation=fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation(async(input,init)=>String(input)==="/tanovo-time/api/timesheet-periods"
+      ?jsonResponse({periods:[
+        {id:"period-october",name:"October 2026",startDate:"2026-10-01",endDate:"2026-10-31",submissionDeadline:"2026-11-02T17:00:00.000Z",managerGraceDays:3,reminderDays:3},
+        {id:"period-september",name:"September 2026",startDate:"2026-09-01",endDate:"2026-09-30",submissionDeadline:"2026-10-02T17:00:00.000Z",managerGraceDays:3,reminderDays:3},
+      ]})
+      :baseImplementation(input,init))
+    const user=userEvent.setup()
+    render(<TimesheetApp role="admin" userEmail="admin@example.com" userName="Admin User"/>)
+    await user.click(within(await screen.findByRole("navigation",{name:"Admin dashboard commands"})).getByRole("button",{name:"Timesheets"}))
+    const period=await screen.findByRole("region",{name:"Selected timesheet period"})
+    expect(within(period).getByRole("region",{name:"Recent projects snapshot"})).toHaveTextContent("October project")
+    expect(within(period).getByRole("region",{name:"Review managers"})).toHaveTextContent("October manager")
+    await user.click(within(screen.getByRole("navigation",{name:"Timesheet periods"})).getByRole("button",{name:/September 2026/}))
+    expect(within(period).getByRole("heading",{name:"September 2026"})).toBeVisible()
+    expect(within(period).getByRole("region",{name:"Recent projects snapshot"})).toHaveTextContent("September project")
+    expect(within(period).getByRole("region",{name:"Recent projects snapshot"})).not.toHaveTextContent("October project")
+    expect(within(period).getByRole("region",{name:"Review managers"})).toHaveTextContent("September manager")
+    expect(within(period).getByRole("region",{name:"Review managers"})).not.toHaveTextContent("October manager")
   })
 
   it("opens the floating assistant over the workspace and focuses its composer", async () => {

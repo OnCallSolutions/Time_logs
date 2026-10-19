@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Activity, CalendarClock, CheckCircle2, ChevronRight, Clock3, Pencil, RefreshCw, Timer } from "lucide-react"
+import { Activity, CalendarClock, CheckCircle2, ChevronRight, Clock3, Pencil, RefreshCw, Search, Timer } from "lucide-react"
 import { apiPath } from "@/lib/paths"
 import type { TimeEntry, UserRole } from "@/lib/types"
 import { Button } from "@/components/ui/button"
@@ -13,6 +13,10 @@ export function TimesheetPeriodLanding({entries,onSelect,onLogTime,onRefresh,onR
   const [periods,setPeriods]=useState<Period[]>([])
   const [loading,setLoading]=useState(true)
   const [error,setError]=useState("")
+  const [periodSearch,setPeriodSearch]=useState("")
+  const [periodFilter,setPeriodFilter]=useState("all")
+  const [projectSearch,setProjectSearch]=useState("")
+  const [managerSearch,setManagerSearch]=useState("")
   const now=new Date()
   const today=[now.getFullYear(),String(now.getMonth()+1).padStart(2,"0"),String(now.getDate()).padStart(2,"0")].join("-")
   useEffect(()=>{
@@ -43,11 +47,23 @@ export function TimesheetPeriodLanding({entries,onSelect,onLogTime,onRefresh,onR
   const projectPreview=[...featuredEntries.reduce((projects,entry)=>{
     const summary=projects.get(entry.project)??{hours:0,entries:0}
     summary.hours+=Number(entry.hours)||0;summary.entries+=1;projects.set(entry.project,summary);return projects
-  },new Map<string,{hours:number;entries:number}>())].sort((a,b)=>b[1].hours-a[1].hours||a[0].localeCompare(b[0])).slice(0,4)
+  },new Map<string,{hours:number;entries:number}>())].sort((a,b)=>b[1].hours-a[1].hours||a[0].localeCompare(b[0]))
   const managerPreview=[...featuredEntries.reduce((managers,entry)=>{
     const name=entry.reviewManagerName||entry.reviewManagerEmail||"Manager not assigned"
     managers.set(name,(managers.get(name)??0)+1);return managers
-  },new Map<string,number>())].sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0])).slice(0,4)
+  },new Map<string,number>())].sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]))
+  const normalizedPeriodSearch=periodSearch.trim().toLowerCase()
+  const matchingPeriods=ordered.filter(period=>{
+    const isCurrent=period.startDate<=today&&period.endDate>=today
+    const isUpcoming=period.startDate>today
+    const matchesState=periodFilter==="all"||periodFilter==="current"&&isCurrent||periodFilter==="upcoming"&&isUpcoming||periodFilter==="archived"&&period.endDate<today
+    return matchesState&&(!normalizedPeriodSearch||`${period.name} ${period.startDate} ${period.endDate}`.toLowerCase().includes(normalizedPeriodSearch))
+  })
+  const matchingCurrent=matchingPeriods.filter(period=>period.startDate<=today&&period.endDate>=today)
+  const matchingUpcoming=matchingPeriods.filter(period=>period.startDate>today)
+  const matchingArchived=matchingPeriods.filter(period=>period.endDate<today)
+  const matchingProjects=projectPreview.filter(([project])=>project.toLowerCase().includes(projectSearch.trim().toLowerCase()))
+  const matchingManagers=managerPreview.filter(([manager])=>manager.toLowerCase().includes(managerSearch.trim().toLowerCase()))
   const openAll=()=>onSelect("all")
   return <section aria-label="Timesheet periods" className="flex min-h-0 min-w-0 w-full flex-1 flex-col gap-2">
     <header className="flex flex-wrap items-center justify-between gap-2 border-b border-sky-200 bg-gradient-to-r from-sky-50 via-white to-emerald-50 px-3 py-2">
@@ -58,12 +74,13 @@ export function TimesheetPeriodLanding({entries,onSelect,onLogTime,onRefresh,onR
     {error&&<p role="alert" className="border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>}
     {loading?<p role="status" className="px-2 py-4 text-sm text-slate-600">Loading period archive…</p>:<div className="grid min-h-0 flex-1 grid-rows-[minmax(8rem,0.4fr)_minmax(0,1fr)] gap-2 lg:grid-cols-[minmax(15rem,0.72fr)_minmax(0,1.28fr)] lg:grid-rows-1">
       <nav aria-label="Available timesheet periods" className="min-h-0 max-h-[calc(100dvh-14rem)] overflow-auto border border-sky-200 bg-sky-50/30 p-2 lg:max-h-none">
+        <div className="mb-2 grid gap-1.5"><label className="relative"><Search className="pointer-events-none absolute left-2 top-2 size-3.5 text-slate-500"/><input type="search" aria-label="Search timesheet periods" value={periodSearch} onChange={event=>setPeriodSearch(event.target.value)} placeholder="Search periods" className="h-8 w-full border border-slate-300 bg-white pl-7 pr-2 text-xs"/></label><select aria-label="Filter timesheet periods" value={periodFilter} onChange={event=>setPeriodFilter(event.target.value)} className="h-8 border border-slate-300 bg-white px-2 text-xs"><option value="all">All periods</option><option value="current">Current</option><option value="upcoming">Upcoming</option><option value="archived">Archived</option></select></div>
         <button type="button" onClick={openAll} className="mb-2 flex w-full items-center justify-between rounded-md border-l-2 border-blue-500 bg-blue-50 px-2.5 py-2 text-left transition hover:bg-blue-100"><span><span className="block text-xs font-semibold text-blue-950">All saved periods</span><span className="block text-[10px] text-blue-800">Combined view · all matching entries</span></span><span className="text-xs tabular-nums text-blue-950">{entries.length}</span></button>
         {!periods.length?<p className="px-2 py-3 text-xs text-slate-600">No time periods are configured. Open all saved timesheets to view existing entries.</p>:<>
-          {current.length>0&&<PeriodGroup title="Current period" periods={current} today={today} onSelect={onSelect} dueLabel={dueLabel} periodEntries={periodEntries}/>}
-          {upcoming.length>0&&<PeriodGroup title="Upcoming periods" periods={upcoming} today={today} onSelect={onSelect} dueLabel={dueLabel} periodEntries={periodEntries}/>}
-          {archived.length>0&&<PeriodGroup title="Archived periods" periods={archived} today={today} onSelect={onSelect} dueLabel={dueLabel} periodEntries={periodEntries}/>}
-          {!current.length&&!upcoming.length&&!archived.length&&<p className="px-2 py-3 text-xs text-slate-600">No periods are available.</p>}
+          {matchingCurrent.length>0&&<PeriodGroup title="Current period" periods={matchingCurrent} today={today} onSelect={onSelect} dueLabel={dueLabel} periodEntries={periodEntries}/>}
+          {matchingUpcoming.length>0&&<PeriodGroup title="Upcoming periods" periods={matchingUpcoming} today={today} onSelect={onSelect} dueLabel={dueLabel} periodEntries={periodEntries}/>}
+          {matchingArchived.length>0&&<PeriodGroup title="Archived periods" periods={matchingArchived} today={today} onSelect={onSelect} dueLabel={dueLabel} periodEntries={periodEntries}/>}
+          {!matchingPeriods.length&&<p className="px-2 py-3 text-xs text-slate-600">No timesheet periods match these filters.</p>}
         </>}
       </nav>
       <section aria-label="Period overview" className="flex min-h-0 min-w-0 flex-col overflow-y-auto border border-emerald-200 bg-gradient-to-br from-emerald-50/70 via-white to-orange-50/60 p-2.5 sm:p-3">
@@ -99,11 +116,13 @@ export function TimesheetPeriodLanding({entries,onSelect,onLogTime,onRefresh,onR
           {accountManagerView&&<section aria-label="Project and manager preview" className="mt-2 grid min-w-0 gap-2 sm:grid-cols-2">
             <div className="min-w-0 border border-emerald-200 bg-white/80">
               <h4 className="border-b border-emerald-100 px-2 py-1 text-[11px] font-semibold text-emerald-950">Projects in this period</h4>
-              {projectPreview.length?<ul className="divide-y divide-slate-100">{projectPreview.map(([project,summary])=><li key={project} className="flex min-w-0 items-center justify-between gap-2 px-2 py-1 text-[11px]"><span className="min-w-0 truncate font-medium" title={project}>{project}</span><span className="shrink-0 tabular-nums text-slate-700">{summary.entries} entries · {summary.hours.toLocaleString(undefined,{maximumFractionDigits:2})}h</span></li>)}</ul>:<p className="px-2 py-2 text-[11px] text-slate-600">No projects have time recorded.</p>}
+              <label className="relative block border-b border-emerald-100 px-2 py-1"><Search className="pointer-events-none absolute left-3 top-2 size-3 text-slate-500"/><input type="search" aria-label="Search projects in period" value={projectSearch} onChange={event=>setProjectSearch(event.target.value)} placeholder="Search projects" className="h-6 w-full pl-6 text-[10px] outline-none"/></label>
+              {matchingProjects.length?<ul className="max-h-48 divide-y divide-slate-100 overflow-y-auto">{matchingProjects.map(([project,summary])=><li key={project} className="flex min-w-0 items-center justify-between gap-2 px-2 py-1 text-[11px]"><span className="min-w-0 truncate font-medium" title={project}>{project}</span><span className="shrink-0 tabular-nums text-slate-700">{summary.entries} entries · {summary.hours.toLocaleString(undefined,{maximumFractionDigits:2})}h</span></li>)}</ul>:<p className="px-2 py-2 text-[11px] text-slate-600">No matching projects.</p>}
             </div>
             <div className="min-w-0 border border-blue-200 bg-white/80">
               <h4 className="border-b border-blue-100 px-2 py-1 text-[11px] font-semibold text-blue-950">Review managers</h4>
-              {managerPreview.length?<ul className="divide-y divide-slate-100">{managerPreview.map(([manager,count])=><li key={manager} className="flex min-w-0 items-center justify-between gap-2 px-2 py-1 text-[11px]"><span className="min-w-0 truncate font-medium" title={manager}>{manager}</span><span className="shrink-0 tabular-nums text-slate-700">{count} {count===1?"entry":"entries"}</span></li>)}</ul>:<p className="px-2 py-2 text-[11px] text-slate-600">No manager assignments recorded.</p>}
+              <label className="relative block border-b border-blue-100 px-2 py-1"><Search className="pointer-events-none absolute left-3 top-2 size-3 text-slate-500"/><input type="search" aria-label="Search review managers in period" value={managerSearch} onChange={event=>setManagerSearch(event.target.value)} placeholder="Search managers" className="h-6 w-full pl-6 text-[10px] outline-none"/></label>
+              {matchingManagers.length?<ul className="max-h-48 divide-y divide-slate-100 overflow-y-auto">{matchingManagers.map(([manager,count])=><li key={manager} className="flex min-w-0 items-center justify-between gap-2 px-2 py-1 text-[11px]"><span className="min-w-0 truncate font-medium" title={manager}>{manager}</span><span className="shrink-0 tabular-nums text-slate-700">{count} {count===1?"entry":"entries"}</span></li>)}</ul>:<p className="px-2 py-2 text-[11px] text-slate-600">No matching managers.</p>}
             </div>
           </section>}
           <p className="mt-auto pt-3 text-xs text-slate-600"><CheckCircle2 className="mr-1 inline size-3.5 text-emerald-700"/>Choose any period on the left to open its searchable raw timesheets and approval controls. Archived periods remain read-only.</p>

@@ -7,17 +7,17 @@ vi.mock("@/lib/account-identities",()=>({listAccountIdentities:vi.fn(async()=>[]
 vi.mock("@/auth",()=>({auth:vi.fn()}))
 vi.mock("@/lib/effective-permissions",()=>({getEffectivePermissions:vi.fn()}))
 vi.mock("@/lib/access",()=>({getEffectiveUserRole:vi.fn()}))
-vi.mock("@/lib/db",()=>({getTimeEntry:vi.fn(),getTimesheetSubmissionDeadline:vi.fn(async()=>null),hasActiveTimesheetExtension:vi.fn(async()=>false),isTimesheetDateArchived:vi.fn(async()=>false),updateTimeEntryWithAudit:vi.fn(),submitTimeEntryWithAudit:vi.fn(),rejectSubmittedEntry:vi.fn(),deleteTimeEntry:vi.fn(),recordAuditEvent:vi.fn()}))
+vi.mock("@/lib/db",()=>({getTimeEntry:vi.fn(),listTimeEntries:vi.fn(async()=>[]),listTimesheetPeriods:vi.fn(async()=>[]),getTimesheetSubmissionDeadline:vi.fn(async()=>null),hasActiveTimesheetExtension:vi.fn(async()=>false),isTimesheetDateArchived:vi.fn(async()=>false),updateTimeEntryWithAudit:vi.fn(),submitTimeEntryWithAudit:vi.fn(),rejectSubmittedEntry:vi.fn(),deleteTimeEntry:vi.fn(),recordAuditEvent:vi.fn()}))
 vi.mock("@/lib/review-requests",()=>({listReviewRequests:vi.fn(async()=>[])}))
-vi.mock("@/lib/account-handoffs",()=>({approveAndForward:vi.fn()}))
+vi.mock("@/lib/account-handoffs",()=>({approveAndForward:vi.fn(),decideTimesheetBatch:vi.fn()}))
 vi.mock("@/lib/submission-reviewer",()=>({resolveSubmissionReviewer:vi.fn()}))
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { getEffectiveUserRole } from "@/lib/access"
-import { getTimeEntry,getTimesheetSubmissionDeadline,hasActiveTimesheetExtension,isTimesheetDateArchived,updateTimeEntryWithAudit,submitTimeEntryWithAudit,deleteTimeEntry,rejectSubmittedEntry } from "@/lib/db"
+import { getTimeEntry,listTimeEntries,listTimesheetPeriods,getTimesheetSubmissionDeadline,hasActiveTimesheetExtension,isTimesheetDateArchived,updateTimeEntryWithAudit,submitTimeEntryWithAudit,deleteTimeEntry,rejectSubmittedEntry } from "@/lib/db"
 import { resolvePermissions } from "@/lib/permissions"
 import { PATCH,DELETE } from "./route"
-import { approveAndForward } from "@/lib/account-handoffs"
+import { approveAndForward,decideTimesheetBatch } from "@/lib/account-handoffs"
 import { listAccountIdentities } from "@/lib/account-identities"
 import { resolveSubmissionReviewer } from "@/lib/submission-reviewer"
 beforeEach(()=>{
@@ -25,8 +25,11 @@ beforeEach(()=>{
   vi.mocked(getEffectiveUserRole).mockResolvedValue("manager")
   vi.mocked(auth).mockResolvedValue({user:{email:"manager@example.com"}} as never)
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"manager",permissions:resolvePermissions("manager")})
-  vi.mocked(getTimeEntry).mockResolvedValue({id:"entry",ownerEmail:"manager@example.com",status:"submitted"} as never)
+  vi.mocked(getTimeEntry).mockResolvedValue({id:"entry",ownerEmail:"manager@example.com",date:"2026-10-15",status:"submitted",revision:"original"} as never)
   vi.mocked(approveAndForward).mockResolvedValue({id:"entry",status:"approved"} as never)
+  vi.mocked(decideTimesheetBatch).mockResolvedValue([{id:"entry",status:"approved"} as never])
+  vi.mocked(listTimeEntries).mockResolvedValue([{id:"entry",ownerEmail:"manager@example.com",date:"2026-10-15",status:"submitted",revision:"original"} as never])
+  vi.mocked(listTimesheetPeriods).mockResolvedValue([])
   vi.mocked(resolveSubmissionReviewer).mockResolvedValue({email:"manager@example.com",displayName:"Morgan Manager",assignment:"added_by_manager"})
   vi.mocked(listAccountIdentities).mockImplementation(async emails=>emails?.length?[{email:emails[0]}] as never:[] as never)
 })
@@ -71,17 +74,15 @@ it("confirms a submission by reading back when the write response fails after co
   expect((await response.json()).entry.status).toBe("submitted")
   expect(getTimeEntry).toHaveBeenCalledTimes(2)
 })
-it("confirms a rejection by reading back when the write response fails after commit",async()=>{
+it("records a rejection for one entry while returning the complete timesheet",async()=>{
   vi.mocked(getEffectiveUserRole).mockResolvedValue("contractor")
-  vi.mocked(getTimeEntry)
-    .mockResolvedValueOnce({id:"entry",ownerEmail:"contractor@example.com",reviewManagerEmail:"manager@example.com",status:"submitted",revision:"original"} as never)
-    .mockResolvedValueOnce({id:"entry",ownerEmail:"contractor@example.com",reviewManagerEmail:"manager@example.com",status:"rejected",reviewedBy:"manager@example.com",reviewNote:"Missing details"} as never)
-  vi.mocked(rejectSubmittedEntry).mockRejectedValue(new Error("response lost"))
-
-  const response=await PATCH(new Request("http://localhost/api/entries/entry",{method:"PATCH",body:JSON.stringify({status:"rejected",reviewNote:"Missing details",expectedRevision:"original"})}),{params:Promise.resolve({id:"entry"})})
+  vi.mocked(getTimeEntry).mockResolvedValue({id:"entry",ownerEmail:"contractor@example.com",reviewManagerEmail:"manager@example.com",date:"2026-10-15",status:"submitted",revision:"first"} as never)
+  vi.mocked(listTimeEntries).mockResolvedValue([{id:"entry",ownerEmail:"contractor@example.com",reviewManagerEmail:"manager@example.com",date:"2026-10-15",status:"submitted",revision:"first"},{id:"sibling",ownerEmail:"contractor@example.com",reviewManagerEmail:"manager@example.com",date:"2026-10-16",status:"submitted",revision:"second"}] as never)
+  vi.mocked(decideTimesheetBatch).mockResolvedValue([{id:"entry",status:"rejected"},{id:"sibling",status:"draft"}] as never)
+  const response=await PATCH(new Request("http://localhost/api/entries/entry",{method:"PATCH",body:JSON.stringify({status:"rejected",reviewNote:"Missing details",expectedRevision:"first"})}),{params:Promise.resolve({id:"entry"})})
   expect(response.status).toBe(200)
-  expect((await response.json()).entry.status).toBe("rejected")
-  expect(getTimeEntry).toHaveBeenCalledTimes(2)
+  expect((await response.json()).entries.map((entry: {status:string})=>entry.status)).toEqual(["rejected","draft"])
+  expect(decideTimesheetBatch).toHaveBeenCalledWith(expect.objectContaining({selection:[{id:"entry",revision:"first"},{id:"sibling",revision:"second"}],rejectedEntryId:"entry"}),"manager@example.com","rejected","contractor",false,"Missing details",expect.anything())
 })
 it("keeps the failure response when a read-back cannot confirm the requested write",async()=>{
   vi.mocked(auth).mockResolvedValue({user:{email:"contractor@example.com"}} as never)
@@ -105,7 +106,7 @@ it("lets an owner recall submitted evidence before approval",async()=>{
   const response=await PATCH(new Request("http://localhost/api/entries/entry",{method:"PATCH",body:JSON.stringify({status:"draft",expectedRevision:"current"})}),{params:Promise.resolve({id:"entry"})})
   expect(response.status).toBe(200)
   expect((await response.json()).entry.status).toBe("draft")
-  expect(updateTimeEntryWithAudit).toHaveBeenCalledWith("contractor@example.com","entry",expect.objectContaining({status:"draft"}),false,undefined,"current",expect.objectContaining({actorEmail:"contractor@example.com",action:"entry_recalled"}))
+  expect(updateTimeEntryWithAudit).toHaveBeenCalledWith("contractor@example.com","entry",expect.objectContaining({status:"draft"}),false,undefined,"current",expect.objectContaining({actorEmail:"contractor@example.com",action:"entry_recalled"}),false)
 })
 it("does not allow an owner to recall after approval",async()=>{
   vi.mocked(auth).mockResolvedValue({user:{email:"contractor@example.com"}} as never)
@@ -161,14 +162,16 @@ it("rejects manager-to-manager approval",async()=>{
 it("does not let an administrator approve a manager timesheet through broad admin rights",async()=>{
   vi.mocked(auth).mockResolvedValue({user:{email:"admin@example.com"}} as never)
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"admin",permissions:resolvePermissions("admin",{view_manager_entries:true,review_manager_entries:true})})
-  vi.mocked(getTimeEntry).mockResolvedValue({id:"entry",ownerEmail:"other@example.com",status:"submitted",revision:"original"} as never)
+  vi.mocked(getTimeEntry).mockResolvedValue({id:"entry",ownerEmail:"other@example.com",date:"2026-10-15",status:"submitted",revision:"original"} as never)
+  vi.mocked(listTimeEntries).mockResolvedValue([{id:"entry",ownerEmail:"other@example.com",date:"2026-10-15",status:"submitted",revision:"original"} as never])
   const response=await PATCH(new Request("http://localhost/api/entries/entry",{method:"PATCH",body:JSON.stringify({status:"approved",expectedRevision:"original"})}),{params:Promise.resolve({id:"entry"})})
   expect(response.status).toBe(403)
   expect(updateTimeEntryWithAudit).not.toHaveBeenCalled()
 })
 it("permits an explicitly authorized account manager to review manager work",async()=>{
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"account_manager",permissions:resolvePermissions("account_manager",{review_manager_entries:true})})
-  vi.mocked(getTimeEntry).mockResolvedValue({id:"entry",ownerEmail:"other@example.com",status:"submitted",revision:"original"} as never)
+  vi.mocked(getTimeEntry).mockResolvedValue({id:"entry",ownerEmail:"other@example.com",date:"2026-10-15",status:"submitted",revision:"original"} as never)
+  vi.mocked(listTimeEntries).mockResolvedValue([{id:"entry",ownerEmail:"other@example.com",date:"2026-10-15",status:"submitted",revision:"original"} as never])
   vi.mocked(updateTimeEntryWithAudit).mockResolvedValue({id:"entry",status:"approved"} as never)
   const response=await PATCH(new Request("http://localhost/api/entries/entry",{method:"PATCH",body:JSON.stringify({status:"approved"})}),{params:Promise.resolve({id:"entry"})})
   expect(response.status).toBe(200)
@@ -177,11 +180,12 @@ it("lets the assigned account manager approve employee work under their authenti
   vi.mocked(auth).mockResolvedValue({user:{email:"accounts@example.com"}} as never)
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"account_manager",permissions:resolvePermissions("account_manager")})
   vi.mocked(getEffectiveUserRole).mockResolvedValue("employee")
-  vi.mocked(getTimeEntry).mockResolvedValue({id:"entry",ownerEmail:"employee@example.com",reviewManagerEmail:"accounts@example.com",status:"submitted",revision:"original"} as never)
-  vi.mocked(approveAndForward).mockResolvedValue({id:"entry",ownerEmail:"employee@example.com",status:"approved"} as never)
+  vi.mocked(getTimeEntry).mockResolvedValue({id:"entry",ownerEmail:"employee@example.com",reviewManagerEmail:"accounts@example.com",date:"2026-10-15",status:"submitted",revision:"original"} as never)
+  vi.mocked(listTimeEntries).mockResolvedValue([{id:"entry",ownerEmail:"employee@example.com",reviewManagerEmail:"accounts@example.com",date:"2026-10-15",status:"submitted",revision:"original"} as never])
+  vi.mocked(decideTimesheetBatch).mockResolvedValue([{id:"entry",ownerEmail:"employee@example.com",status:"approved"} as never])
   const response=await PATCH(new Request("http://localhost/api/entries/entry",{method:"PATCH",body:JSON.stringify({status:"approved",expectedRevision:"original"})}),{params:Promise.resolve({id:"entry"})})
   expect(response.status).toBe(200)
-  expect(approveAndForward).toHaveBeenCalledWith("entry","accounts@example.com","original","employee",expect.anything())
+  expect(decideTimesheetBatch).toHaveBeenCalledWith(expect.objectContaining({ownerEmail:"employee@example.com",selection:[{id:"entry",revision:"original"}]}),"accounts@example.com","approved","employee",true,"",expect.anything())
 })
 it("blocks self-approval even for a reviewer with team access",async()=>{
   const response=await PATCH(new Request("http://localhost/api/entries/entry",{method:"PATCH",body:JSON.stringify({status:"approved"})}),{params:Promise.resolve({id:"entry"})})
@@ -231,19 +235,20 @@ it("rejects revision-only patches without touching evidence",async()=>{
 })
 it("returns conflict when the expected evidence revision no longer matches",async()=>{
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"account_manager",permissions:resolvePermissions("account_manager",{review_manager_entries:true})})
-  vi.mocked(getTimeEntry).mockResolvedValue({id:"entry",ownerEmail:"other@example.com",status:"submitted"} as never)
+  vi.mocked(getTimeEntry).mockResolvedValue({id:"entry",ownerEmail:"other@example.com",date:"2026-10-15",status:"submitted",revision:"actual"} as never)
   vi.mocked(updateTimeEntryWithAudit).mockResolvedValue(null)
   vi.mocked(approveAndForward).mockResolvedValue(null)
   const revision="2026-10-10 00:00:00.123456+00"
   const response=await PATCH(new Request("http://localhost/api/entries/entry",{method:"PATCH",body:JSON.stringify({status:"approved",expectedRevision:revision})}),{params:Promise.resolve({id:"entry"})})
   expect(response.status).toBe(409)
-  expect(approveAndForward).toHaveBeenCalledWith("entry","manager@example.com",revision,"manager",expect.anything())
+  expect(decideTimesheetBatch).not.toHaveBeenCalled()
 })
 
 it("does not approve or forward timesheets without a registered owner identity",async()=>{
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"account_manager",permissions:resolvePermissions("account_manager",{review_manager_entries:true,view_manager_entries:true})})
   vi.mocked(getEffectiveUserRole).mockResolvedValue("manager")
-  vi.mocked(getTimeEntry).mockResolvedValue({id:"entry",ownerEmail:"unknown@example.com",status:"submitted"} as never)
+  vi.mocked(getTimeEntry).mockResolvedValue({id:"entry",ownerEmail:"unknown@example.com",date:"2026-10-15",status:"submitted",revision:"original"} as never)
+  vi.mocked(listTimeEntries).mockResolvedValue([{id:"entry",ownerEmail:"unknown@example.com",date:"2026-10-15",status:"submitted",revision:"original"} as never])
   vi.mocked(listAccountIdentities).mockResolvedValue([])
   const response=await PATCH(new Request("http://localhost/api/entries/entry",{method:"PATCH",body:JSON.stringify({status:"approved"})}),{params:Promise.resolve({id:"entry"})})
   expect(response.status).toBe(409)
@@ -253,14 +258,13 @@ it("does not approve or forward timesheets without a registered owner identity",
 it.each(["approved","rejected"] as const)("persists an independent contractor decision: %s",async status=>{
   const revision="2026-10-15 00:00:00.123456+00"
   vi.mocked(getEffectiveUserRole).mockResolvedValue("contractor")
-  vi.mocked(getTimeEntry).mockResolvedValue({id:"entry",ownerEmail:"contractor@example.com",status:"submitted",revision} as never)
-  vi.mocked(updateTimeEntryWithAudit).mockResolvedValue({id:"entry",status,reviewNote:"Checked evidence",revision:"next"} as never)
-  vi.mocked(rejectSubmittedEntry).mockResolvedValue({id:"entry",status,reviewNote:"Checked evidence",revision:"next"} as never)
+  vi.mocked(getTimeEntry).mockResolvedValue({id:"entry",ownerEmail:"contractor@example.com",reviewManagerEmail:"manager@example.com",date:"2026-10-15",status:"submitted",revision} as never)
+  vi.mocked(listTimeEntries).mockResolvedValue([{id:"entry",ownerEmail:"contractor@example.com",reviewManagerEmail:"manager@example.com",date:"2026-10-15",status:"submitted",revision} as never])
+  vi.mocked(decideTimesheetBatch).mockResolvedValue([{id:"entry",status,reviewNote:"Checked evidence",revision:"next"} as never])
   const response=await PATCH(new Request("http://localhost/api/entries/entry",{method:"PATCH",body:JSON.stringify({status,reviewNote:"Checked evidence",expectedRevision:revision})}),{params:Promise.resolve({id:"entry"})})
   expect(response.status).toBe(200)
   expect((await response.json()).entry.status).toBe(status)
-  if(status==="approved")expect(approveAndForward).toHaveBeenCalledWith("entry","manager@example.com",revision,"contractor",expect.anything())
-  else expect(rejectSubmittedEntry).toHaveBeenCalledWith("entry","manager@example.com",revision,"Checked evidence",expect.anything())
+  expect(decideTimesheetBatch).toHaveBeenCalledOnce()
 })
 
 it("requires a reason before independent rejection reaches persistence",async()=>{
@@ -279,9 +283,8 @@ it("prevents view-only cross-manager access from recalling another person's subm
 })
 it("returns a conflict instead of success when rejection evidence is stale",async()=>{
   vi.mocked(getEffectiveUserRole).mockResolvedValue("contractor")
-  vi.mocked(getTimeEntry).mockResolvedValue({id:"entry",ownerEmail:"contractor@example.com",status:"submitted",revision:"current"} as never)
-  vi.mocked(rejectSubmittedEntry).mockResolvedValue(null)
+  vi.mocked(getTimeEntry).mockResolvedValue({id:"entry",ownerEmail:"contractor@example.com",reviewManagerEmail:"manager@example.com",date:"2026-10-15",status:"submitted",revision:"current"} as never)
   const response=await PATCH(new Request("http://localhost/api/entries/entry",{method:"PATCH",body:JSON.stringify({status:"rejected",reviewNote:"Reason",expectedRevision:"stale"})}),{params:Promise.resolve({id:"entry"})})
   expect(response.status).toBe(409)
-  expect(rejectSubmittedEntry).toHaveBeenCalledWith("entry","manager@example.com","stale","Reason",expect.anything())
+  expect(decideTimesheetBatch).not.toHaveBeenCalled()
 })

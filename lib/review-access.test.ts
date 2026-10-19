@@ -46,6 +46,11 @@ it("lets account managers view all periods without expanding their approval auth
 it("never permits self-review despite every cross-manager right",()=>{
   expect(directReviewAccess(entry,"owner@example.com",{role:"manager",permissions:resolvePermissions("manager",{view_manager_entries:true,review_manager_entries:true,view_other_manager_entries:true,review_other_manager_entries:true})},"manager")).toEqual({visible:true,reviewable:false})
 })
+it("lets business account managers review their own submitted timesheets",()=>{
+  expect(directReviewAccess({...entry,ownerEmail:"accounts@example.com"},"accounts@example.com",{role:"account_manager",permissions:resolvePermissions("account_manager")},"account_manager")).toEqual({visible:true,reviewable:true})
+  expect(directReviewAccess({...entry,ownerEmail:"accounts@example.com",status:"draft"},"accounts@example.com",{role:"account_manager",permissions:resolvePermissions("account_manager")},"account_manager")).toEqual({visible:true,reviewable:false})
+  expect(directReviewAccess({...entry,ownerEmail:"accounts@example.com"},"accounts@example.com",{role:"account_manager",permissions:resolvePermissions("account_manager",{review_entries:false})},"account_manager")).toEqual({visible:true,reviewable:false})
+})
 it("honors an active exact-revision request without global cross-manager rights",async()=>{
   vi.mocked(listReviewRequests).mockResolvedValue([{entry_id:"one",sender_email:"primary@example.com",source_revision:"original"}] as never)
   expect(await createReviewAccess("helper@example.com",{role:"manager",permissions:resolvePermissions("manager")})(entry)).toEqual({visible:true,reviewable:true})

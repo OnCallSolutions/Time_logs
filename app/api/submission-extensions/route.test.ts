@@ -3,11 +3,11 @@ vi.mock("@/auth",()=>({auth:vi.fn()}))
 vi.mock("@/lib/effective-permissions",()=>({getEffectivePermissions:vi.fn()}))
 vi.mock("@/lib/audit",()=>({getAuditContext:vi.fn(()=>({ipAddress:null,userAgent:null,requestMethod:"POST",requestPath:"/api/submission-extensions",requestId:null}))}))
 vi.mock("@/lib/persistence-diagnostics",()=>({persistenceFailureDetails:vi.fn(()=>({}))}))
-vi.mock("@/lib/db",()=>({createTimesheetExtensionRequest:vi.fn(),listTimesheetExtensionRequests:vi.fn(),decideTimesheetExtensionRequest:vi.fn()}))
+vi.mock("@/lib/db",()=>({createTimesheetExtensionRequest:vi.fn(),listTimesheetExtensionRequests:vi.fn(),listTimesheetPeriods:vi.fn(),decideTimesheetExtensionRequest:vi.fn()}))
 vi.mock("@/lib/submission-reviewer",()=>({resolveAccountManagerReviewer:vi.fn()}))
 import {auth} from "@/auth"
 import {getEffectivePermissions} from "@/lib/effective-permissions"
-import {createTimesheetExtensionRequest,listTimesheetExtensionRequests,decideTimesheetExtensionRequest} from "@/lib/db"
+import {createTimesheetExtensionRequest,listTimesheetExtensionRequests,listTimesheetPeriods,decideTimesheetExtensionRequest} from "@/lib/db"
 import {resolveAccountManagerReviewer} from "@/lib/submission-reviewer"
 import {GET,POST} from "./route"
 import {PATCH} from "./[id]/route"
@@ -18,6 +18,7 @@ beforeEach(()=>{
   vi.mocked(auth).mockResolvedValue({user:{email:"patron@example.com"}} as never)
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"contractor",permissions:{submit_entries:true}} as never)
   vi.mocked(resolveAccountManagerReviewer).mockResolvedValue({email:"accounts@example.com",displayName:"Accounts",assignment:"available_manager"})
+  vi.mocked(listTimesheetPeriods).mockResolvedValue([{id:input.periodId,name:"October",startDate:"2026-10-01",endDate:"2026-10-31",submissionDeadline:new Date(Date.now()+86_400_000).toISOString(),managerGraceDays:10,reminderDays:3,createdBy:"accounts@example.com",createdAt:new Date().toISOString()}])
   vi.mocked(createTimesheetExtensionRequest).mockResolvedValue({id:"request",requesterEmail:"patron@example.com",requesterName:"Patron",periodId:input.periodId,periodName:"October",assignedTo:"accounts@example.com",reason:input.reason,requestedUntil:input.requestedUntil,status:"pending",reviewedBy:null,reviewedAt:null,managerNote:"",approvedUntil:null,createdAt:input.requestedUntil})
   vi.mocked(listTimesheetExtensionRequests).mockResolvedValue([])
   vi.mocked(decideTimesheetExtensionRequest).mockResolvedValue(null)
@@ -39,6 +40,13 @@ it("denies requests from roles without patron submission access",async()=>{
 it("requires an active authorized account manager to receive the request",async()=>{
   vi.mocked(resolveAccountManagerReviewer).mockResolvedValue(null)
   expect((await POST(new Request("http://localhost/api/submission-extensions",{method:"POST",body:JSON.stringify(input)}))).status).toBe(409)
+  expect(createTimesheetExtensionRequest).not.toHaveBeenCalled()
+})
+
+it("rejects extension requests beyond the account-manager-configured grace limit",async()=>{
+  vi.mocked(listTimesheetPeriods).mockResolvedValue([{id:input.periodId,name:"October",startDate:"2026-10-01",endDate:"2026-10-31",submissionDeadline:new Date(Date.now()+86_400_000).toISOString(),managerGraceDays:2,reminderDays:3,createdBy:"accounts@example.com",createdAt:new Date().toISOString()}])
+  const response=await POST(new Request("http://localhost/api/submission-extensions",{method:"POST",body:JSON.stringify({...input,requestedUntil:new Date(Date.now()+7*86_400_000).toISOString()})}))
+  expect(response.status).toBe(400)
   expect(createTimesheetExtensionRequest).not.toHaveBeenCalled()
 })
 

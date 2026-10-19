@@ -13,9 +13,21 @@ const periodSchema = z.object({
   startDate: z.string().date(),
   endDate: z.string().date(),
   submissionDeadline: z.string().datetime({ offset: true }),
+  managerSubmissionDeadline: z.string().datetime({offset:true}).optional(),
+  accountApprovalDeadline: z.string().datetime({offset:true}).optional(),
+  exceptionResolutionDeadline: z.string().datetime({offset:true}).optional(),
+  timezone: z.string().trim().min(3).max(80).default("America/New_York"),
   managerGraceDays: z.number().int().min(0).max(30),
   reminderDays: z.number().int().min(1).max(30),
 }).strict()
+
+function deadlineOrderIsValid(input:{submissionDeadline:string;managerSubmissionDeadline?:string;accountApprovalDeadline?:string;exceptionResolutionDeadline?:string}){
+  const worker=Date.parse(input.submissionDeadline)
+  const manager=Date.parse(input.managerSubmissionDeadline??new Date(worker+2*86_400_000).toISOString())
+  const accounts=Date.parse(input.accountApprovalDeadline??new Date(worker+3*86_400_000).toISOString())
+  const resolution=Date.parse(input.exceptionResolutionDeadline??new Date(worker+4*86_400_000).toISOString())
+  return worker<manager&&manager<accounts&&accounts<=resolution
+}
 
 export async function GET(request:Request) {
   try {
@@ -37,6 +49,7 @@ export async function POST(req: Request) {
     if (!access.permissions.manage_timesheet_periods) return Response.json({ error: "You are not authorized to configure timesheet periods." }, { status: 403 })
     const input = periodSchema.parse(await req.json())
     if (input.startDate > input.endDate) return Response.json({ error: "The period start must be on or before its end." }, { status: 400 })
+    if(!deadlineOrderIsValid(input))return Response.json({error:"Deadlines must run in order: employee/contractor, manager, account approval, then issue resolution."},{status:400})
     if (input.endDate < new Date().toISOString().slice(0,10)) return Response.json({ error: "Past periods are archived. New periods must include today or a future date." }, { status: 400 })
     if (Date.parse(input.submissionDeadline) <= Date.now()) return Response.json({ error: "Choose a future submission deadline." }, { status: 400 })
     const period = await createTimesheetPeriod(input, email, getAuditContext(req))
@@ -58,6 +71,7 @@ export async function PATCH(req: Request) {
     if (!access.permissions.manage_timesheet_periods) return Response.json({ error: "You are not authorized to change timesheet periods." }, { status: 403 })
     const input = z.object({ id:z.string().uuid(), ...periodSchema.shape, reason:z.string().trim().min(5).max(500) }).strict().parse(await req.json())
     if (input.startDate > input.endDate) return Response.json({ error: "The period start must be on or before its end." }, { status: 400 })
+    if(!deadlineOrderIsValid(input))return Response.json({error:"Deadlines must run in order: employee/contractor, manager, account approval, then issue resolution."},{status:400})
     if (input.endDate < new Date().toISOString().slice(0,10)) return Response.json({ error: "Past periods are archived and cannot be edited." }, { status: 409 })
     const { id, reason, ...period }=input
     const saved=await updateTimesheetPeriod(id,period,email,reason,getAuditContext(req))

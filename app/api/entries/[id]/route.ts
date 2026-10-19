@@ -11,7 +11,7 @@ import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { getEffectiveUserRole } from "@/lib/access"
 import { canReviewRole } from "@/lib/review-policy"
 import { createReviewAccess } from "@/lib/review-access"
-import { approveAndForward } from "@/lib/account-handoffs"
+import { decideTimesheetBatch } from "@/lib/account-handoffs"
 import { listAccountIdentities } from "@/lib/account-identities"
 import { resolveSubmissionReviewer } from "@/lib/submission-reviewer"
 import { persistenceFailureDetails } from "@/lib/persistence-diagnostics"
@@ -24,13 +24,14 @@ import {
   deleteTimeEntry,
   getTimeEntry,
   recordAuditEvent,
-  rejectSubmittedEntry,
   updateTimeEntryWithAudit,
   submitTimeEntryWithAudit,
   getTimesheetSubmissionDeadline,
   listTimeProjects,
   isTimesheetDateArchived,
   hasActiveTimesheetExtension,
+  listTimeEntries,
+  listTimesheetPeriods,
 } from "@/lib/db"
 import type { EntryStatus, TimeEntry } from "@/lib/types"
 
@@ -47,8 +48,9 @@ const patchSchema = z
     reviewNote: z.string().trim().max(500).optional(),
     expectedRevision: z.string().min(1).max(100).optional(),
     reviewManagerEmail: z.string().email().nullable().optional(),
+    batchEntries:z.array(z.object({id:z.string().uuid(),revision:z.string().min(1).max(100)}).strict()).min(1).max(100).optional(),
   })
-  .refine((patch) => Object.keys(patch).some(key=>key!=="expectedRevision"), {
+  .refine((patch) => Object.keys(patch).some(key=>key!=="expectedRevision"&&key!=="batchEntries"), {
     message: "At least one field is required.",
   })
 
@@ -226,14 +228,16 @@ export async function PATCH(
     if(patch.status==="submitted"){
       if((access.role==="contractor"||access.role==="employee")&&current.ownerEmail?.toLowerCase()!==access.email.toLowerCase())return Response.json({error:"Only the account owner can route a personal timesheet for review."},{status:403})
       const submitterEmail=current.ownerEmail??access.email
-      const reviewer=await resolveSubmissionReviewer(submitterEmail)
+      const selfAccountManager=current.ownerEmail?.toLowerCase()===access.email.toLowerCase()&&access.role==="account_manager"
+      const reviewer=selfAccountManager?{email:access.email}:await resolveSubmissionReviewer(submitterEmail)
       if(!reviewer)return Response.json({error:"No active manager currently has both team-view and approval rights. Ask an administrator to assign a reviewer before submitting."},{status:400})
       if(patch.reviewManagerEmail&&patch.reviewManagerEmail.toLowerCase()!==reviewer.email)return Response.json({error:"Reviewing manager is assigned by the company and cannot be changed during submission."},{status:403})
       patch={...patch,reviewManagerEmail:reviewer.email}
     }
 
+    const selfAccountManagerApproval=access.role==="account_manager"&&current.ownerEmail?.toLowerCase()===access.email.toLowerCase()&&patch.status==="approved"
     if (patch.status === "approved" || patch.status === "rejected") {
-      if(current.ownerEmail?.toLowerCase()===access.email.toLowerCase())return Response.json({error:"Your own entries require another authorized reviewer."},{status:403})
+      if(current.ownerEmail?.toLowerCase()===access.email.toLowerCase()&&!selfAccountManagerApproval)return Response.json({error:"You may self-approve business account manager entries, but cannot reject your own entries."},{status:403})
       if(!scope.reviewable)return Response.json({error:"An explicit independent-review right or active scoped request is required."},{status:403})
       if(hasEntryFieldPatch(patch))return Response.json({error:"Review decisions cannot change submitted evidence."},{status:400})
     }
@@ -256,7 +260,7 @@ export async function PATCH(
     const statusError = validateStatusChange(
       current,
       patch.status,
-      access.canReview && current.ownerEmail?.toLowerCase()!==access.email.toLowerCase(),
+      access.canReview && (current.ownerEmail?.toLowerCase()!==access.email.toLowerCase()||selfAccountManagerApproval),
       patch.reviewNote,
     )
     if (statusError) {
@@ -266,16 +270,32 @@ export async function PATCH(
       )
     }
 
-    if(patch.status==="approved"){
-      if(access.role!=="account_manager"&&!access.permissions.send_to_accounts)return Response.json({error:"Approval requires permission to forward evidence to business accounts."},{status:403})
-      const ownerIdentity=current.ownerEmail?(await listAccountIdentities([current.ownerEmail]))[0]:null
-      if(!ownerIdentity)return Response.json({error:"Only a registered account can be approved into the business-accounts workflow."},{status:409})
-      const ownerRole=current.ownerEmail?await getEffectiveUserRole(current.ownerEmail):null
-      const revision=patch.expectedRevision??current.revision
-      if(!revision)return Response.json({error:"Refresh this entry before approving."},{status:409})
-      const forwarded=await approveAndForward(id,access.email,revision,ownerRole??"contractor",getAuditContext(req))
-      if(!forwarded)return Response.json({error:"Evidence changed. Refresh before approving."},{status:409})
-      return Response.json({entry:forwarded})
+    if(patch.status==="approved"||patch.status==="rejected"){
+      if(patch.expectedRevision&&patch.expectedRevision!==current.revision)return Response.json({error:"Evidence changed. Refresh the complete timesheet before deciding."},{status:409})
+      if(!current.ownerEmail)return Response.json({error:"Timesheet owner is unavailable."},{status:409})
+      if(patch.status==="approved"&&!selfAccountManagerApproval&&access.role!=="account_manager"&&!access.permissions.send_to_accounts)return Response.json({error:"Approval requires permission to forward evidence to business accounts."},{status:403})
+      const periods=await listTimesheetPeriods()
+      const period=periods.find(item=>current.date>=item.startDate&&current.date<=item.endDate)
+      const [year,month]=current.date.slice(0,7).split("-").map(Number)
+      const startDate=period?.startDate??`${current.date.slice(0,7)}-01`
+      const endDate=period?.endDate??new Date(Date.UTC(year,month,0)).toISOString().slice(0,10)
+      const visibleEntries=await listTimeEntries(access.email,access.includeAll)
+      const batch=visibleEntries.filter(entry=>entry.status==="submitted"&&entry.ownerEmail?.toLowerCase()===current.ownerEmail!.toLowerCase()&&entry.date>=startDate&&entry.date<=endDate)
+      if(!batch.some(entry=>entry.id===id))return Response.json({error:"The selected entry is not in an awaiting timesheet."},{status:409})
+      const batchScopes=await Promise.all(batch.map(entry=>createReviewAccess(access.email,access)(entry)))
+      if(batchScopes.some(item=>!item.visible||!item.reviewable))return Response.json({error:"Every entry in this timesheet must be in your review scope before deciding the batch."},{status:403})
+      const selection=batch.map(entry=>({id:entry.id,revision:entry.revision??""}))
+      if(selection.some(item=>!item.revision))return Response.json({error:"Refresh the timesheet before reviewing it."},{status:409})
+      if(patch.batchEntries){
+        const supplied=new Map(patch.batchEntries.map(item=>[item.id,item.revision]))
+        if(supplied.size!==selection.length||selection.some(item=>supplied.get(item.id)!==item.revision))return Response.json({error:"The timesheet changed. Refresh the complete timesheet before deciding."},{status:409})
+      }
+      if(patch.status==="rejected"&&!patch.reviewNote?.trim())return Response.json({error:"A rejection reason is required."},{status:400})
+      if(patch.status==="approved"&&!selfAccountManagerApproval&&!((await listAccountIdentities([current.ownerEmail]))[0]))return Response.json({error:"Only a registered account can be approved into the business-accounts workflow."},{status:409})
+      const ownerRole=await getEffectiveUserRole(current.ownerEmail)
+      const updated=await decideTimesheetBatch({ownerEmail:current.ownerEmail,startDate,endDate,selection,rejectedEntryId:patch.status==="rejected"?id:undefined},access.email,patch.status,ownerRole??"contractor",access.role==="account_manager",patch.reviewNote?.trim()??"",getAuditContext(req))
+      if(updated.length!==selection.length)return Response.json({error:"The timesheet changed while it was being reviewed. Refresh before deciding."},{status:409})
+      return Response.json({entry:updated.find(entry=>entry.id===id),entries:updated})
     }
     const revision=patch.expectedRevision??current.revision
     if(!revision)return Response.json({error:"Refresh this timesheet before saving a status or editing it."},{status:409})
@@ -328,27 +348,6 @@ export async function PATCH(
       }
       return Response.json({entry:submitted})
     }
-    if(patch.status==="rejected"){
-      const reason=patch.reviewNote!.trim()
-      let rejected: TimeEntry | null
-      try {
-        rejected=await rejectSubmittedEntry(id,access.email,revision,reason,getAuditContext(req))
-      } catch (writeError) {
-        try {
-          const persisted=await getTimeEntry(access.email,id,access.includeAll)
-          if(persisted?.status==="rejected"&&persisted.ownerEmail?.toLowerCase()===current.ownerEmail?.toLowerCase()&&
-            persisted.reviewedBy?.toLowerCase()===access.email.toLowerCase()&&persisted.reviewNote===reason){
-            console.warn("[entries] rejection confirmed after persistence error",{id,...persistenceFailureDetails(writeError)})
-            return Response.json({entry:persisted})
-          }
-        } catch (readError) {
-          console.warn("[entries] rejection read-back failed",{id,...persistenceFailureDetails(readError)})
-        }
-        throw writeError
-      }
-      if(!rejected)return Response.json({error:"Evidence changed or was already reviewed. Refresh before rejecting."},{status:409})
-      return Response.json({entry:rejected})
-    }
     const entry = await updateTimeEntryWithAudit(
       access.email,
       id,
@@ -366,6 +365,7 @@ export async function PATCH(
         },
         context: getAuditContext(req),
       },
+      selfAccountManagerApproval,
     )
 
     if (!entry) {

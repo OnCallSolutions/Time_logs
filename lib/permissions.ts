@@ -31,6 +31,9 @@ export const permissionLabels = {
   accept_review_requests: "Accept scoped review requests from authorized managers",
   authorize_payouts: "Authorize timesheet payout eligibility (no payment transfer)",
   manage_timesheet_periods: "Configure timesheet periods and submission windows",
+  manage_timesheet_reminders: "Configure and send timesheet reminders",
+  view_submission_compliance: "Track expected and missing timesheet submissions",
+  mandate_previous_period: "Require a contractor or employee to submit a prior-period timesheet",
   view_personal_reports: "View reports for own timesheets",
 } as const
 export type Permission = keyof typeof permissionLabels
@@ -50,17 +53,16 @@ export function resolvePermissions(role: UserRole | null, overrides: PermissionO
   const personal = role === "employee" || role === "contractor"
   const defaults: Permissions = {create_entries:!!role,create_projects:elevated,manage_projects:elevated||role==="account_manager",edit_entries:!!role,delete_entries:!!role,
     submit_entries:personal||role==="manager"||role==="admin",review_entries:elevated||role==="account_manager",view_team:elevated,view_all_timesheets:role==="admin"||role==="account_manager",view_reports:elevated,export_entries:elevated||role==="account_manager",ai_review:elevated,
-    delegate_permissions:elevated,send_messages:!!role,send_to_accounts:elevated,view_accounts:role==="admin"||role==="account_manager",review_accounts:role==="admin"||role==="account_manager",ai_accounts:role==="admin",review_manager_entries:false,view_manager_entries:role==="account_manager",view_other_manager_entries:false,review_other_manager_entries:false,request_review_help:elevated,accept_review_requests:role==="manager",authorize_payouts:false,manage_timesheet_periods:role==="admin"||role==="account_manager",view_personal_reports:!!role}
+    delegate_permissions:elevated,send_messages:!!role,send_to_accounts:elevated,view_accounts:role==="admin"||role==="account_manager",review_accounts:role==="admin"||role==="account_manager",ai_accounts:role==="admin",review_manager_entries:false,view_manager_entries:role==="account_manager",view_other_manager_entries:false,review_other_manager_entries:false,request_review_help:elevated,accept_review_requests:role==="manager",authorize_payouts:false,manage_timesheet_periods:role==="admin"||role==="account_manager",manage_timesheet_reminders:role==="admin"||role==="account_manager",view_submission_compliance:role==="admin"||role==="account_manager",mandate_previous_period:role==="admin"||role==="manager",view_personal_reports:!!role}
   for (const key of Object.keys(permissionLabels) as Permission[]) {
     if (role && typeof overrides[key] === "boolean") defaults[key] = overrides[key]!
   }
-  // Business-account actors cannot create or edit timesheets. Operational review
-  // is separately permission-gated so admins can disable the manager-review lane.
+  // Business-account actors may manage their own timesheets and review the final queue.
   if (role === "account_manager") {
-    defaults.create_entries = false
-    defaults.edit_entries = false
+    defaults.create_entries = true
+    defaults.edit_entries = true
     defaults.delete_entries = false
-    defaults.submit_entries = false
+    defaults.submit_entries = true
     defaults.ai_review = false
     defaults.delegate_permissions = false
   }

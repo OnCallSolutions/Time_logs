@@ -38,7 +38,7 @@ it("allows account managers with the period-management right to create periods",
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"account_manager",permissions:{manage_timesheet_periods:true}} as never)
   const response=await POST(new Request("http://localhost/api/timesheet-periods",{method:"POST",body:JSON.stringify(payload)}))
   expect(response.status).toBe(201)
-  expect(createTimesheetPeriod).toHaveBeenCalledWith(payload,"admin@example.com",expect.anything())
+  expect(createTimesheetPeriod).toHaveBeenCalledWith(expect.objectContaining({...payload,timezone:"America/New_York"}),"admin@example.com",expect.anything())
 })
 it("does not allow account managers whose period-management right was revoked",async()=>{
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"account_manager",permissions:{manage_timesheet_periods:false}} as never)
@@ -49,7 +49,7 @@ it("does not allow account managers whose period-management right was revoked",a
 it("creates a valid non-overlapping period with manager grace and reminder lead",async()=>{
   const response=await POST(new Request("http://localhost/api/timesheet-periods",{method:"POST",body:JSON.stringify(payload)}))
   expect(response.status).toBe(201)
-  expect(createTimesheetPeriod).toHaveBeenCalledWith(payload,"admin@example.com",expect.anything())
+  expect(createTimesheetPeriod).toHaveBeenCalledWith(expect.objectContaining({...payload,timezone:"America/New_York"}),"admin@example.com",expect.anything())
 })
 it("rejects inverted date ranges",async()=>{
   const response=await POST(new Request("http://localhost/api/timesheet-periods",{method:"POST",body:JSON.stringify({...payload,startDate:"2026-11-01",endDate:"2026-10-01"})}))

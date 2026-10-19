@@ -5,7 +5,7 @@
  */
 import "server-only"
 import { neon } from "@neondatabase/serverless"
-import { ensureTimeEntriesTable, ensureAuditEventsTable } from "./db"
+import { ensureTimeEntriesTable, ensureAuditEventsTable, ensureEntryRejectionArchiveTable } from "./db"
 import type { AuditContext } from "./audit"
 import type { TimeEntry } from "./types"
 import { createDatabaseInitializer } from "./database-initializer"
@@ -134,6 +134,52 @@ export async function approveAndForward(id:string,actor:string,revision:string,c
     reviewed_by AS "reviewedBy",reviewed_at::text AS "reviewedAt",review_note AS "reviewNote",review_manager_email AS "reviewManagerEmail",updated_at::text AS revision,false AS "reviewEligible",false AS "payoutEligible"
     FROM changed WHERE EXISTS(SELECT 1 FROM audited)`
   return rows.length?rows[0] as unknown as TimeEntry:null
+}
+
+/** Approves or returns every submitted entry in one person's configured timesheet period. */
+export async function decideTimesheetBatch(input:{ownerEmail:string;startDate:string;endDate:string;selection:{id:string;revision:string}[];rejectedEntryId?:string},actor:string,decision:"approved"|"rejected",category:string,finalAccountDecision:boolean,note:string,context:AuditContext):Promise<TimeEntry[]>{
+  if(!input.selection.length||input.selection.length>100||new Set(input.selection.map(row=>row.id)).size!==input.selection.length)return []
+  await ensureHandoffs();await ensureAuditEventsTable();if(decision==="rejected")await ensureEntryRejectionArchiveTable()
+  const badEntryId=input.rejectedEntryId??null
+  const rows=await sql`WITH requested AS (
+    SELECT * FROM jsonb_to_recordset(${JSON.stringify(input.selection)}::jsonb) AS r(id uuid,revision text)
+  ), batch AS MATERIALIZED (
+    SELECT e.* FROM time_entries e WHERE lower(e.owner_email)=lower(${input.ownerEmail}) AND e.status='submitted'
+      AND e.work_date BETWEEN ${input.startDate}::date AND ${input.endDate}::date AND e.payout_eligible_at IS NULL
+  ), locked AS MATERIALIZED (
+    SELECT b.*,r.revision AS expected_revision FROM batch b LEFT JOIN requested r ON r.id=b.id ORDER BY b.id FOR UPDATE OF b
+  ), valid AS (
+    SELECT count(*)=${input.selection.length} AND count(expected_revision)=${input.selection.length}
+      AND count(*) FILTER(WHERE updated_at=expected_revision::timestamptz)=${input.selection.length} AS ok FROM locked
+  ), changed AS (
+    UPDATE time_entries e SET status=CASE WHEN ${decision}='approved' THEN 'approved' WHEN e.id=${badEntryId}::uuid THEN 'rejected' ELSE 'draft' END,
+      reviewed_by=CASE WHEN ${decision}='approved' OR e.id=${badEntryId}::uuid THEN ${actor.toLowerCase()} ELSE NULL END,
+      reviewed_at=CASE WHEN ${decision}='approved' OR e.id=${badEntryId}::uuid THEN now() ELSE NULL END,
+      review_note=CASE WHEN ${decision}='rejected' AND e.id=${badEntryId}::uuid THEN ${note} ELSE NULL END,
+      review_manager_email=CASE WHEN ${decision}='rejected' AND e.id<>${badEntryId}::uuid THEN NULL ELSE e.review_manager_email END,
+      updated_at=now()
+    FROM locked l CROSS JOIN valid v WHERE v.ok AND e.id=l.id AND l.expected_revision IS NOT NULL
+      AND e.updated_at=l.expected_revision::timestamptz AND e.status='submitted' RETURNING e.*
+  ), forwarded AS (
+    INSERT INTO account_handoffs(entry_id,assigned_to,handed_by,source_updated_at,evidence)
+    SELECT id,'business_accounts',${actor.toLowerCase()},updated_at,
+      jsonb_build_object('contractor',contractor,'ownerEmail',owner_email,'workerCategory',${category}::text,'date',work_date,'hours',hours,'project',project,'description',description,'reviewedBy',reviewed_by,'reviewedAt',reviewed_at)
+    FROM changed WHERE ${decision}='approved' AND NOT ${finalAccountDecision} RETURNING id,entry_id
+  ), archived AS (
+    INSERT INTO entry_rejection_archive(actor_email,entry_id,contractor,owner_email,project,work_date,hours,reason,rejected_at)
+    SELECT ${actor.toLowerCase()},id,contractor,owner_email,project,work_date,hours,review_note,reviewed_at FROM changed
+    WHERE ${decision}='rejected' AND id=${badEntryId}::uuid RETURNING entry_id
+  ), audited AS (
+    INSERT INTO audit_events(actor_email,action,target_type,target_id,metadata,ip_address,user_agent,request_method,request_path,request_id)
+    SELECT ${actor.toLowerCase()},CASE WHEN ${decision}='approved' THEN 'entry_approved' WHEN id=${badEntryId}::uuid THEN 'entry_rejected' ELSE 'timesheet_returned' END,
+      'time_entry',changed.id::text,jsonb_build_object('timesheetDecision',${decision}::text,'batchEntryCount',${input.selection.length},'markedRejected',changed.id=${badEntryId}::uuid,'handoffId',forwarded.id),
+      ${context.ipAddress},${context.userAgent},${context.requestMethod},${context.requestPath},${context.requestId}
+    FROM changed LEFT JOIN forwarded ON forwarded.entry_id=changed.id
+    WHERE ${decision}<>'rejected' OR changed.id<>${badEntryId}::uuid OR EXISTS(SELECT 1 FROM archived WHERE archived.entry_id=changed.id) RETURNING target_id
+  )
+  SELECT id,owner_email,contractor_number,review_manager_email,payout_eligible_at,contractor,work_date,hours,project,description,status,reviewed_by,reviewed_at,review_note,updated_at::text AS updated_at
+  FROM changed WHERE EXISTS(SELECT 1 FROM audited) ORDER BY work_date,id`
+  return rows.map(row=>({id:String(row.id),ownerEmail:row.owner_email?String(row.owner_email):undefined,contractorNumber:row.contractor_number?String(row.contractor_number):undefined,reviewManagerEmail:row.review_manager_email?String(row.review_manager_email):null,payoutEligible:!!row.payout_eligible_at,contractor:String(row.contractor),date:String(row.work_date).slice(0,10),hours:Number(row.hours),project:String(row.project),description:String(row.description),status:String(row.status) as TimeEntry["status"],reviewedBy:row.reviewed_by?String(row.reviewed_by):null,reviewedAt:row.reviewed_at?new Date(String(row.reviewed_at)).toISOString():null,reviewNote:row.review_note?String(row.review_note):null,revision:new Date(String(row.updated_at)).toISOString(),reviewEligible:false}))
 }
 
 export type AccountBatchAction = "return_manager" | "return_submitter" | "authorize_eligibility"

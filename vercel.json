@@ -12,7 +12,7 @@
     },
     {
       "path": "/tanovo-time/api/timesheet-period-reminders?scheduled=1",
-      "schedule": "0 6 * * *"
+      "schedule": "*/5 * * * *"
     }
   ]
 }

@@ -162,6 +162,87 @@
   }
 }
 
+.timesheet-period-toolbar-container {
+  container-type: inline-size;
+}
+
+.timesheet-period-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+}
+
+.timesheet-period-deadline,
+.timesheet-period-center,
+.timesheet-period-selector {
+  min-width: 0;
+}
+
+.timesheet-period-selector {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.timesheet-period-label {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.timesheet-period-label > span {
+  white-space: nowrap;
+}
+
+.timesheet-period-label > select {
+  width: 100%;
+  min-width: 0;
+}
+
+@container (min-width: 48rem) {
+  .timesheet-period-toolbar {
+    grid-template-columns: minmax(0, 1fr) minmax(20rem, 42rem);
+  }
+
+  .timesheet-period-deadline {
+    grid-column: 1;
+  }
+
+  .timesheet-period-center {
+    grid-column: 1 / -1;
+    justify-self: center;
+  }
+
+  .timesheet-period-selector {
+    grid-column: 2;
+    justify-self: end;
+  }
+}
+
+@container (min-width: 80rem) {
+  .timesheet-period-toolbar {
+    grid-template-columns: minmax(0, 1fr) minmax(16rem, 42rem) minmax(20rem, 1fr);
+  }
+
+  .timesheet-period-center {
+    grid-column: 2;
+  }
+
+  .timesheet-period-selector {
+    grid-column: 3;
+  }
+}
+
+@container (max-width: 28rem) {
+  .timesheet-period-label {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

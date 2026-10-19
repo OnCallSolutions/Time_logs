@@ -23,7 +23,7 @@ type Advice = { entryId: string; revision: string; readiness: "ready" | "needs_a
  * @returns JSX.Element containing manual/AI controls and the confirmation window.
  */
 export function SubmissionActions({ entries, destination = "manager", onStatusChange, onSubmitted, openRequest = 0 }: {
-  entries: TimeEntry[]; destination?: "manager" | "account_manager"; onStatusChange: EntryTransition; onSubmitted: (id: string) => void;
+  entries: TimeEntry[]; destination?: "manager" | "account_manager" | "self"; onStatusChange: EntryTransition; onSubmitted: (id: string) => void;
   openRequest?: number;
 }) {
   const [open, setOpen] = useState(false)
@@ -46,7 +46,7 @@ export function SubmissionActions({ entries, destination = "manager", onStatusCh
     return()=>abort.abort()
   },[open,destination])
   const analyzing = busy && mode === "ai" && advice.length === 0
-  const target = destination === "account_manager" ? "Account-manager review" : "Manager review"
+  const target = destination === "self" ? "Submit for your final approval" : destination === "account_manager" ? "Account-manager review" : "Manager review"
   const totalHours = snapshot.reduce((sum, entry) => sum + entry.hours, 0)
   const currentEntries = new Map(entries.map(entry => [entry.id, entry]))
   const adviceById = new Map(advice.map(item => [item.entryId, item]))
@@ -123,8 +123,8 @@ export function SubmissionActions({ entries, destination = "manager", onStatusCh
 
   return <>
     <Button size="sm" variant="outline" disabled={!entries.length || busy} onClick={prepareManual}><Send className="size-4" />Submit selected ({entries.length})</Button>
-    <Button size="sm" disabled={!entries.length || busy} onClick={() => void analyze()}><Sparkles className="size-4" />AI prepare selected ({entries.length})</Button>
-    {!open && completed > 0 && <p role="status" className="text-sm text-green-800">{completed} entries submitted for review.</p>}
+    {destination!=="self"&&<Button size="sm" disabled={!entries.length || busy} onClick={() => void analyze()}><Sparkles className="size-4" />AI prepare selected ({entries.length})</Button>}
+    {!open && completed > 0 && <p role="status" className="text-sm text-green-800">{completed} {destination === "self" ? "entries submitted for your approval." : "entries submitted for review."}</p>}
     {open && <WindowSurface title={mode === "ai" ? "AI submission preparation" : "Confirm submission"} disabled={busy && !analyzing} onBack={close}>
       <section className="flex max-h-full min-h-0 w-full flex-col overflow-y-auto bg-white">
         <header className="shrink-0 border-b px-4 py-3"><h2 className="font-semibold">{target}</h2><p className="text-sm text-muted-foreground">{snapshot.length} remaining / {totalHours.toLocaleString()}h / {completed} submitted</p></header>

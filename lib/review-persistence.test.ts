@@ -12,7 +12,7 @@ vi.mock("@neondatabase/serverless",()=>({neon:()=>async(strings:TemplateStringsA
   queries.push({text:strings.reduce((text,part,index)=>text+part+(index<values.length?`$${index+1}`:""),""),values});return[]
 }}))
 import {approveAndForward} from "./account-handoffs"
-import {rejectSubmittedEntry,submitTimeEntryWithAudit,updateTimeEntryWithAudit} from "./db"
+import {createTimesheetExtensionRequest,decideTimesheetExtensionRequest,rejectSubmittedEntry,submitTimeEntryWithAudit,updateTimeEntryWithAudit} from "./db"
 const id="00000000-0000-4000-8000-000000000000",actor="reviewer@example.invalid",revision="2000-01-01T00:00:00Z",context={ipAddress:null,userAgent:null,requestMethod:"PATCH",requestPath:"/api/entries/test",requestId:null}
 beforeEach(()=>{queries.length=0})
 it("binds approval, business handoff and audit to unchanged independently owned submitted evidence",async()=>{
@@ -54,4 +54,14 @@ it("types an omitted reviewer parameter in the audited status-update guard",asyn
   await updateTimeEntryWithAudit("owner@example.invalid",id,{status:"approved"},false,undefined,revision,{actorEmail:actor,action:"entry_approved",metadata:{},context})
   const update=queries.find(query=>query.text.includes("WITH changed AS")&&query.text.includes("UPDATE time_entries"))!
   expect(update.text).toMatch(/status='submitted' AND lower\(owner_email\)<>lower\(\$\d+\) AND \$\d+::text IS NOT NULL/)
+})
+it("bounds extension requests and approval grants by the account-manager-configured grace window",async()=>{
+  await createTimesheetExtensionRequest({ownerEmail:"owner@example.invalid",periodId:id,assignedTo:actor,reason:"A documented delay",requestedUntil:"2099-01-01T00:00:00.000Z"},context)
+  await decideTimesheetExtensionRequest(id,actor,"approved","",context)
+  const statements=queries.map(query=>query.text)
+  const create=queries.find(query=>query.text.includes("INSERT INTO timesheet_extension_requests"))!
+  const approve=queries.find(query=>query.text.includes("UPDATE timesheet_extension_requests"))!
+  expect(create.text).toContain("p.manager_grace_days*interval '1 day'")
+  expect(approve.text).toContain("r.requested_until<=p.submission_deadline+(p.manager_grace_days*interval '1 day')")
+  expect(statements.some(statement=>statement.includes("INSERT INTO audit_events"))).toBe(true)
 })
