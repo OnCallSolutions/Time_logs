@@ -42,7 +42,7 @@ it("allows a contractor with messaging rights to send an encrypted individual me
   try {
     const response=await POST(request("POST",{recipient:"recipient@example.com",audience:"individual",encrypted}))
     expect(response.status).toBe(201)
-    expect(sendMessage).toHaveBeenCalledWith("employee@example.com","recipient@example.com","[Encrypted message]",encrypted)
+    expect(sendMessage).toHaveBeenCalledWith("employee@example.com","recipient@example.com","[Encrypted message]",encrypted,undefined)
   } finally {validate.mockRestore()}
 })
 it("does not allow a contractor to send a group announcement even with direct-message rights",async()=>{
@@ -151,4 +151,19 @@ it("validates a manager-only broadcast against exactly the selected active roles
     expect(response.status).toBe(201)
     expect(validate).toHaveBeenCalledWith(encrypted,"employee@example.com","employee@example.com",null,["employee@example.com","lead@example.com"])
   } finally {validate.mockRestore()}
+})
+it("accepts a future scheduled group announcement and passes its delivery time to storage",async()=>{
+  vi.mocked(getEffectivePermissions).mockResolvedValue({role:"manager",permissions:resolvePermissions("manager")})
+  vi.mocked(actorRoster).mockResolvedValue([{email:"staff@example.com",role:"employee",accessStatus:"active",displayName:""}] as never)
+  vi.mocked(sendMessage).mockResolvedValue(messageId)
+  const validate=vi.spyOn(envelopes,"validateEnvelope").mockResolvedValue(true)
+  const encrypted={version:1,nonce:"AAAAAAAAAAAAAAAA",ciphertext:"A".repeat(24),sender:"employee@example.com",author:"employee@example.com",recipient:null,token:messageId,signature:"AAAA",keys:{}}
+  const scheduledAt=new Date(Date.now()+24*60*60_000).toISOString()
+  try{
+    const response=await POST(request("POST",{recipient:null,audience:"employee",encrypted,scheduledAt}))
+    const result=await response.json()
+    expect(result).toMatchObject({id:messageId,scheduledAt,recipientCount:1})
+    expect(response.status).toBe(201)
+    expect(sendMessage).toHaveBeenCalledWith("employee@example.com",null,"[Encrypted message]",encrypted,scheduledAt)
+  }finally{validate.mockRestore()}
 })

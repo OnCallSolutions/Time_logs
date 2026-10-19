@@ -30,16 +30,16 @@ async function ensureHistory(): Promise<void> {
  */
 export async function historyPage(owner: string, before: { date: string; id: string } | null, receivesBroadcast: boolean): Promise<AppMessage[]> {
   await ensureHistory()
-  return await sql`SELECT m.id,m.sender_email,m.recipient_email,m.body,to_char(m.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS created_at,m.edited_at,m.deleted_at,m.encrypted_payload,m.priority,
+  return await sql`SELECT m.id,m.sender_email,m.recipient_email,m.body,to_char(COALESCE(m.scheduled_at,m.created_at) AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS created_at,m.edited_at,m.deleted_at,m.encrypted_payload,m.priority,
     r.delivered_at,CASE WHEN m.sender_email=${owner.toLowerCase()} THEN r.read_receipt_at ELSE r.read_at END AS read_at,(SELECT count(*)::int FROM app_message_receipts WHERE message_id=m.id) AS delivered_count,
     (SELECT count(*)::int FROM app_message_receipts WHERE message_id=m.id AND read_receipt_at IS NOT NULL) AS read_count
     FROM app_messages m LEFT JOIN app_message_receipts r ON r.message_id=m.id
       AND r.recipient_email=CASE WHEN m.sender_email=${owner.toLowerCase()} AND m.recipient_email IS NOT NULL THEN m.recipient_email ELSE ${owner.toLowerCase()} END
-    WHERE (m.sender_email=${owner.toLowerCase()} OR m.recipient_email=${owner.toLowerCase()} OR (m.recipient_email IS NULL AND
+    WHERE COALESCE(m.scheduled_at,m.created_at)<=NOW() AND (m.sender_email=${owner.toLowerCase()} OR m.recipient_email=${owner.toLowerCase()} OR (m.recipient_email IS NULL AND
       (m.encrypted_payload->'keys' ? ${owner.toLowerCase()} OR (${receivesBroadcast} AND m.encrypted_payload IS NULL))))
     AND NOT EXISTS(SELECT 1 FROM app_message_hidden_for h WHERE h.message_id=m.id AND h.account_email=${owner.toLowerCase()})
-    AND (${before === null} OR (m.created_at,m.id)<(${before?.date ?? "9999-01-01"}::timestamptz,${before?.id ?? "ffffffff-ffff-ffff-ffff-ffffffffffff"}::uuid))
-    ORDER BY m.created_at DESC,m.id DESC LIMIT 50` as AppMessage[]
+    AND (${before === null} OR (COALESCE(m.scheduled_at,m.created_at),m.id)<(${before?.date ?? "9999-01-01"}::timestamptz,${before?.id ?? "ffffffff-ffff-ffff-ffff-ffffffffffff"}::uuid))
+    ORDER BY COALESCE(m.scheduled_at,m.created_at) DESC,m.id DESC LIMIT 50` as AppMessage[]
 }
 /**
  * Refreshes already-loaded historical messages, including receipts and tombstones.
@@ -50,12 +50,12 @@ export async function historyPage(owner: string, before: { date: string; id: str
  */
 export async function historyByIds(owner:string,ids:string[],receivesBroadcast:boolean):Promise<AppMessage[]>{
   await ensureHistory()
-  return await sql`SELECT m.id,m.sender_email,m.recipient_email,m.body,m.created_at,m.edited_at,m.deleted_at,m.encrypted_payload,m.priority,
+  return await sql`SELECT m.id,m.sender_email,m.recipient_email,m.body,COALESCE(m.scheduled_at,m.created_at) AS created_at,m.edited_at,m.deleted_at,m.encrypted_payload,m.priority,
     r.delivered_at,CASE WHEN m.sender_email=${owner.toLowerCase()} THEN r.read_receipt_at ELSE r.read_at END AS read_at,(SELECT count(*)::int FROM app_message_receipts WHERE message_id=m.id) AS delivered_count,
     (SELECT count(*)::int FROM app_message_receipts WHERE message_id=m.id AND read_receipt_at IS NOT NULL) AS read_count
     FROM app_messages m LEFT JOIN app_message_receipts r ON r.message_id=m.id
       AND r.recipient_email=CASE WHEN m.sender_email=${owner.toLowerCase()} AND m.recipient_email IS NOT NULL THEN m.recipient_email ELSE ${owner.toLowerCase()} END
-    WHERE m.id=ANY(${ids}::uuid[]) AND (m.sender_email=${owner.toLowerCase()} OR m.recipient_email=${owner.toLowerCase()}
+    WHERE m.id=ANY(${ids}::uuid[]) AND COALESCE(m.scheduled_at,m.created_at)<=NOW() AND (m.sender_email=${owner.toLowerCase()} OR m.recipient_email=${owner.toLowerCase()}
       OR (m.recipient_email IS NULL AND (m.encrypted_payload->'keys' ? ${owner.toLowerCase()} OR (${receivesBroadcast} AND m.encrypted_payload IS NULL))))
       AND NOT EXISTS(SELECT 1 FROM app_message_hidden_for h WHERE h.message_id=m.id AND h.account_email=${owner.toLowerCase()})` as AppMessage[]
 }

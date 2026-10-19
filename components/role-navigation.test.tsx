@@ -155,7 +155,7 @@ it("groups admin tools beneath Admin, Reports, and Timesheets while preserving l
   const periodIndex=within(timesheetWindow).getByRole("navigation",{name:"Timesheet periods"})
   expect(within(periodIndex).getByRole("button",{name:/October 2026/})).toHaveTextContent("2026-10-01 – 2026-10-31")
   await userEvent.click(within(timesheetWindow).getByRole("button",{name:/Period settings/}))
-  const periodSettings=await screen.findByRole("dialog",{name:"Timesheet period settings"})
+  const periodSettings=await screen.findByRole("dialog",{name:"Timesheet periods"})
   await userEvent.click(within(periodSettings).getByRole("button",{name:"Add period"}))
   const periodEditor=await screen.findByRole("dialog",{name:"Add submission window"})
   expect(within(periodEditor).getByRole("textbox",{name:"Timesheet period name"})).toBeVisible()

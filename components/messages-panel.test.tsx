@@ -73,6 +73,17 @@ it("separates announcements from individual sender conversations",async()=>{
   expect(screen.getByRole("button",{name:/Office update/})).toBeVisible()
   expect(screen.queryByText("Riley Admin → You")).not.toBeInTheDocument()
 })
+it("opens an announcement composer with audience and scheduled-delivery options",async()=>{
+  requests();const onAnnouncementComposeConsumed=vi.fn()
+  render(<MessagesPanel canSend canBroadcast inbox={inbox()} initialAnnouncement onAnnouncementComposeConsumed={onAnnouncementComposeConsumed}/> )
+  expect(await screen.findByRole("dialog",{name:"New announcement"})).toBeVisible()
+  expect(screen.getByLabelText("Audience")).toHaveValue("workforce")
+  expect(screen.getByRole("radio",{name:"Send now"})).toBeChecked()
+  await userEvent.click(screen.getByRole("radio",{name:"Schedule"}))
+  expect(screen.getByLabelText("Announcement scheduled delivery time")).toBeVisible()
+  expect(screen.getByRole("button",{name:"Schedule announcement"})).toBeDisabled()
+  expect(onAnnouncementComposeConsumed).toHaveBeenCalledOnce()
+})
 it("orders an individual thread oldest at top and latest at bottom with first-name labels",async()=>{
   const state=inbox(true),now=Date.now()
   state.messages=[

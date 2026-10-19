@@ -186,6 +186,7 @@ export type AuditEvent = {
 }
 
 export type TimesheetPeriod = { id:string; name:string; startDate:string; endDate:string; submissionDeadline:string; managerSubmissionDeadline?:string; accountApprovalDeadline?:string; exceptionResolutionDeadline?:string; timezone?:string; managerGraceDays:number; reminderDays:number; createdBy:string; createdAt:string }
+export type TimesheetPeriodAuditRecord={actorEmail:string;action:"timesheet_period_created"|"timesheet_period_updated";occurredAt:string;reason:string|null}
 export type TimesheetPeriodScheduleIssue = {id:string;issueKey:string;message:string;periodIds:string[];firstSeenAt:string;lastSeenAt:string}
 export type TimeProject = { id:string; name:string; description:string; active:boolean; createdBy:string; managerEmail?:string|null; createdAt:string; updatedAt:string; used?:boolean }
 export type EntryRejectionRecord={id:string;actorEmail:string;entryId:string|null;contractor:string;ownerEmail:string|null;project:string;workDate:string|null;hours:number|null;reason:string;rejectedAt:string}
@@ -967,6 +968,16 @@ export async function listTimesheetPeriodScheduleIssues():Promise<TimesheetPerio
   const rows=await sql`SELECT id,issue_key,message,period_ids::text AS period_ids,first_seen_at::text AS first_seen_at,last_seen_at::text AS last_seen_at
     FROM timesheet_period_schedule_issues WHERE resolved_at IS NULL ORDER BY last_seen_at DESC`
   return rows.map(row=>({id:String(row.id),issueKey:String(row.issue_key),message:String(row.message),periodIds:Array.isArray(row.period_ids)?row.period_ids.map(String):String(row.period_ids??"").replace(/[{}]/g,"").split(",").filter(Boolean),firstSeenAt:new Date(String(row.first_seen_at)).toISOString(),lastSeenAt:new Date(String(row.last_seen_at)).toISOString()}))
+}
+
+/** Returns the period's creation and change history for authorized period managers. */
+export async function listTimesheetPeriodAuditHistory(periodId:string):Promise<TimesheetPeriodAuditRecord[]>{
+  await ensureTimesheetPeriodsTable();await ensureAuditEventsTable()
+  const rows=await sql`SELECT actor_email,action,occurred_at::text AS occurred_at,metadata->>'reason' AS reason
+    FROM audit_events WHERE target_type='timesheet_period' AND target_id=${periodId}
+      AND action IN ('timesheet_period_created','timesheet_period_updated')
+    ORDER BY occurred_at DESC LIMIT 100`
+  return rows.map(row=>({actorEmail:String(row.actor_email),action:String(row.action) as TimesheetPeriodAuditRecord["action"],occurredAt:new Date(String(row.occurred_at)).toISOString(),reason:row.reason?String(row.reason):null}))
 }
 
 async function recordTimesheetPeriodScheduleIssue(issueKey:string,message:string,periodIds:string[]=[]):Promise<void>{

@@ -118,14 +118,15 @@ export async function POST(req:Request): Promise<Response> {
     const raw=await req.json() as {recipient?:unknown;audience?:unknown}|null
     const requestedAudience=raw?.audience??(typeof raw?.recipient==="string"?"individual":"workforce")
     if(access.role!=="admin"&&access.role!=="manager"&&(requestedAudience!=="individual"||typeof raw?.recipient!=="string"))return Response.json({error:"Only administrators and managers can send group announcements."},{status:403})
-    const body = z.object({recipient:z.string().email().nullable(),audience:z.enum(messageAudiences).optional(),encrypted:encryptedMessageSchema}).parse(raw)
+    const body = z.object({recipient:z.string().email().nullable(),audience:z.enum(messageAudiences).optional(),encrypted:encryptedMessageSchema,scheduledAt:z.string().datetime({offset:true}).optional()}).parse(raw)
     const audience=body.audience??(body.recipient?"individual":"workforce")
     if((audience==="individual")!==!!body.recipient)return Response.json({error:"Choose an individual or a group, not both."},{status:400})
+    if(body.scheduledAt){const scheduled=Date.parse(body.scheduledAt);if(audience==="individual"||!Number.isFinite(scheduled)||scheduled<=Date.now()||scheduled>Date.now()+90*24*60*60*1000)return Response.json({error:"Choose a group announcement time within the next 90 days."},{status:400})}
     const recipients=audienceEmails(await actorRoster(),audience,body.recipient)
     if(!recipients.length)return Response.json({error:"Select an audience with active recipients."},{status:400})
     if(!await validateEnvelope(body.encrypted,email,email,body.recipient,[email,...recipients]))return Response.json({error:"Every recipient must set up encryption before sending."},{status:400})
-    const id = await sendMessage(email,body.recipient,"[Encrypted message]",body.encrypted)
-    await recordAuditEvent({actorEmail:email,action:"message_sent",targetType:"message",targetId:id,metadata:{broadcast:body.recipient === null,audience,recipientCount:recipients.length},...getAuditContext(req)})
-    return Response.json({id},{status:201})
+    const id = await sendMessage(email,body.recipient,"[Encrypted message]",body.encrypted,body.scheduledAt)
+    await recordAuditEvent({actorEmail:email,action:"message_sent",targetType:"message",targetId:id,metadata:{broadcast:body.recipient === null,audience,recipientCount:recipients.length,scheduledAt:body.scheduledAt??null},...getAuditContext(req)})
+    return Response.json({id,scheduledAt:body.scheduledAt??null,recipientCount:recipients.length},{status:201})
   } catch(error) { if(!(error instanceof z.ZodError)&&!(error instanceof SyntaxError))console.error("[messages] send failed",persistenceFailureDetails(error));return Response.json({error:error instanceof z.ZodError||error instanceof SyntaxError?"Invalid encrypted message request.":"Message could not be sent."},{status:error instanceof z.ZodError||error instanceof SyntaxError?400:500}) }
 }

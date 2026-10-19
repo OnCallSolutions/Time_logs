@@ -53,6 +53,26 @@ it("separates announcements from timesheet alerts and leaves direct messages in 
   expect(refresh).not.toHaveBeenCalled()
 })
 
+it("offers announcement creation to authorized managers and routes to the composer",async()=>{
+  const user=userEvent.setup(),onCreateAnnouncement=vi.fn()
+  render(<MessageNotifications inbox={inbox} onOpen={onOpen} canCreateAnnouncement onCreateAnnouncement={onCreateAnnouncement}/> )
+  await user.click(await screen.findByRole("button",{name:"Notifications, 2 unread"}))
+  const center=screen.getByRole("dialog",{name:"Notification center"})
+  await user.click(within(center).getByRole("button",{name:/Announcements/}))
+  await user.click(within(center).getByRole("button",{name:"Create announcement"}))
+  expect(onCreateAnnouncement).toHaveBeenCalledOnce()
+  expect(screen.queryByRole("dialog",{name:"Notification center"})).not.toBeInTheDocument()
+})
+
+it("does not expose announcement creation without the capability",async()=>{
+  const user=userEvent.setup()
+  render(<MessageNotifications inbox={inbox} onOpen={onOpen}/> )
+  await user.click(await screen.findByRole("button",{name:"Notifications, 2 unread"}))
+  const center=screen.getByRole("dialog",{name:"Notification center"})
+  await user.click(within(center).getByRole("button",{name:/Announcements/}))
+  expect(within(center).queryByRole("button",{name:"Create announcement"})).not.toBeInTheDocument()
+})
+
 it("activates sound only after the preference click and plays a tone for a new alert",async()=>{
   const user=userEvent.setup()
   const oscillator={frequency:{value:0},connect:vi.fn(),start:vi.fn(),stop:vi.fn()}

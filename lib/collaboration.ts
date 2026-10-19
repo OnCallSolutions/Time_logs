@@ -51,6 +51,8 @@ async function initializeMessages(): Promise<void> {
   await sql`ALTER TABLE app_messages ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ, ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`
   await sql`ALTER TABLE app_messages ADD COLUMN IF NOT EXISTS encrypted_payload JSONB`
   await sql`ALTER TABLE app_messages ADD COLUMN IF NOT EXISTS priority text NOT NULL DEFAULT 'normal' CHECK(priority IN ('normal','high'))`
+  await sql`ALTER TABLE app_messages ADD COLUMN IF NOT EXISTS scheduled_at TIMESTAMPTZ`
+  await sql`CREATE INDEX IF NOT EXISTS app_messages_schedule_idx ON app_messages (scheduled_at) WHERE scheduled_at IS NOT NULL`
   await sql`CREATE TABLE IF NOT EXISTS app_message_receipts (
     message_id UUID NOT NULL REFERENCES app_messages(id) ON DELETE CASCADE,
     recipient_email TEXT NOT NULL, delivered_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), read_at TIMESTAMPTZ, read_receipt_at TIMESTAMPTZ,
@@ -83,7 +85,7 @@ export function ensureMessages():Promise<void>{
 export async function messageAuthors(email:string):Promise<string[]>{
   await ensureMessages()
   const rows=await sql`SELECT DISTINCT encrypted_payload->>'author' AS email FROM app_messages
-    WHERE encrypted_payload IS NOT NULL AND (sender_email=${email.toLowerCase()} OR recipient_email=${email.toLowerCase()} OR encrypted_payload->'keys' ? ${email.toLowerCase()})`
+    WHERE encrypted_payload IS NOT NULL AND COALESCE(scheduled_at,created_at)<=NOW() AND (sender_email=${email.toLowerCase()} OR recipient_email=${email.toLowerCase()} OR encrypted_payload->'keys' ? ${email.toLowerCase()})`
   return rows.flatMap(row=>typeof row.email==="string"?[row.email]:[])
 }
 /**
@@ -96,20 +98,20 @@ export async function listMessages(email:string,receivesBroadcast:boolean) {
   await ensureMessages()
   const identity = email.toLowerCase()
   await sql`INSERT INTO app_message_receipts (message_id,recipient_email)
-    SELECT id,${identity} FROM app_messages WHERE sender_email <> ${identity} AND deleted_at IS NULL
+    SELECT id,${identity} FROM app_messages WHERE sender_email <> ${identity} AND deleted_at IS NULL AND COALESCE(scheduled_at,created_at)<=NOW()
       AND NOT EXISTS(SELECT 1 FROM app_message_hidden_for h WHERE h.message_id=app_messages.id AND h.account_email=${identity})
       AND (recipient_email = ${identity} OR (recipient_email IS NULL AND (encrypted_payload->'keys' ? ${identity} OR (${receivesBroadcast} AND encrypted_payload IS NULL))))
     ORDER BY created_at DESC,id DESC LIMIT 100 ON CONFLICT DO NOTHING`
-  return sql`SELECT m.id,m.sender_email,m.recipient_email,m.body,to_char(m.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS created_at,m.edited_at,m.deleted_at,m.encrypted_payload,m.priority,
+  return sql`SELECT m.id,m.sender_email,m.recipient_email,m.body,to_char(COALESCE(m.scheduled_at,m.created_at) AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS created_at,m.edited_at,m.deleted_at,m.encrypted_payload,m.priority,
     r.delivered_at,CASE WHEN m.sender_email=${identity} THEN r.read_receipt_at ELSE r.read_at END AS read_at,
     (SELECT COUNT(*)::int FROM app_message_receipts WHERE message_id=m.id) AS delivered_count,
     (SELECT COUNT(*)::int FROM app_message_receipts WHERE message_id=m.id AND read_receipt_at IS NOT NULL) AS read_count
     FROM app_messages m LEFT JOIN app_message_receipts r ON r.message_id=m.id
       AND r.recipient_email=CASE WHEN m.sender_email=${identity} AND m.recipient_email IS NOT NULL THEN m.recipient_email ELSE ${identity} END
-    WHERE (m.recipient_email = ${identity} OR m.sender_email = ${identity}
+    WHERE COALESCE(m.scheduled_at,m.created_at)<=NOW() AND (m.recipient_email = ${identity} OR m.sender_email = ${identity}
       OR (m.recipient_email IS NULL AND (m.encrypted_payload->'keys' ? ${identity} OR (${receivesBroadcast} AND m.encrypted_payload IS NULL))))
       AND NOT EXISTS(SELECT 1 FROM app_message_hidden_for h WHERE h.message_id=m.id AND h.account_email=${identity})
-    ORDER BY m.created_at DESC,m.id DESC LIMIT 100`
+    ORDER BY COALESCE(m.scheduled_at,m.created_at) DESC,m.id DESC LIMIT 100`
 }
 
 /** @param email - Authenticated account identity. @returns Its persistent messaging privacy preference. */
@@ -144,11 +146,11 @@ export async function canViewMessageProfile(viewer:string,participant:string,rec
   await ensureMessages()
   const current=viewer.toLowerCase(),other=participant.toLowerCase()
   if(current===other)return false
-  const rows=await sql`SELECT 1 FROM app_messages WHERE
+  const rows=await sql`SELECT 1 FROM app_messages WHERE COALESCE(scheduled_at,created_at)<=NOW() AND (
     ((sender_email=${current} AND recipient_email=${other}) OR (sender_email=${other} AND recipient_email=${current}))
     OR (sender_email=${other} AND recipient_email IS NULL AND
       (encrypted_payload->'keys' ? ${current} OR (${receivesBroadcast} AND encrypted_payload IS NULL)))
-    LIMIT 1`
+    ) LIMIT 1`
   return rows.length>0
 }
 
@@ -163,7 +165,7 @@ export async function readMessages(email: string, receivesBroadcast: boolean, id
   await ensureMessages()
   await sql`INSERT INTO app_message_receipts (message_id,recipient_email,read_at,read_receipt_at)
     SELECT id,${email.toLowerCase()},NOW(),CASE WHEN COALESCE((SELECT read_receipts_enabled FROM app_message_preferences WHERE account_email=${email.toLowerCase()}),TRUE) THEN NOW() ELSE NULL END FROM app_messages WHERE id=ANY(${ids}::uuid[])
-      AND sender_email<>${email.toLowerCase()} AND deleted_at IS NULL
+      AND sender_email<>${email.toLowerCase()} AND deleted_at IS NULL AND COALESCE(scheduled_at,created_at)<=NOW()
       AND NOT EXISTS(SELECT 1 FROM app_message_hidden_for h WHERE h.message_id=app_messages.id AND h.account_email=${email.toLowerCase()})
       AND (recipient_email=${email.toLowerCase()} OR (recipient_email IS NULL AND (encrypted_payload->'keys' ? ${email.toLowerCase()} OR (${receivesBroadcast} AND encrypted_payload IS NULL))))
     ON CONFLICT (message_id,recipient_email) DO UPDATE SET read_at=COALESCE(app_message_receipts.read_at,EXCLUDED.read_at),
@@ -217,12 +219,12 @@ export async function changeMessage(email: string, admin: boolean, id: string, b
  * @param encrypted - Signed ciphertext stored instead of the plaintext placeholder.
  * @returns Promise containing the newly stored message ID.
  */
-export async function sendMessage(sender:string,recipient:string|null,body:string,encrypted?:EncryptedMessage) {
+export async function sendMessage(sender:string,recipient:string|null,body:string,encrypted?:EncryptedMessage,scheduledAt?:string) {
   await ensureMessages()
-  const rows = await sql`INSERT INTO app_messages (id,sender_email,recipient_email,body,encrypted_payload)
-    VALUES (COALESCE(${encrypted?.token??null}::uuid,gen_random_uuid()),${sender.toLowerCase()},${recipient?.toLowerCase() ?? null},${encrypted?"[Encrypted message]":body},${encrypted?JSON.stringify(encrypted):null}::jsonb)
+  const rows = await sql`INSERT INTO app_messages (id,sender_email,recipient_email,body,encrypted_payload,scheduled_at)
+    VALUES (COALESCE(${encrypted?.token??null}::uuid,gen_random_uuid()),${sender.toLowerCase()},${recipient?.toLowerCase() ?? null},${encrypted?"[Encrypted message]":body},${encrypted?JSON.stringify(encrypted):null}::jsonb,${scheduledAt??null}::timestamptz)
     ON CONFLICT(id) DO UPDATE SET id=app_messages.id
-      WHERE app_messages.sender_email=EXCLUDED.sender_email AND app_messages.encrypted_payload=EXCLUDED.encrypted_payload
+      WHERE app_messages.sender_email=EXCLUDED.sender_email AND app_messages.encrypted_payload=EXCLUDED.encrypted_payload AND app_messages.scheduled_at IS NOT DISTINCT FROM EXCLUDED.scheduled_at
     RETURNING id`
   if(!rows.length)throw new Error("Message retry identity conflict.")
   return rows[0].id as string

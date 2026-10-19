@@ -24,6 +24,7 @@ const messageBackgrounds = {
   violet: { label: "Violet", color: "bg-violet-200", canvas: "bg-violet-50", inbox: "bg-violet-50" },
   graphite: { label: "Graphite", color: "bg-slate-700", canvas: "bg-slate-200", inbox: "bg-slate-100" },
 } as const
+function localDateTimeValue(date:Date):string{return new Date(date.getTime()-date.getTimezoneOffset()*60_000).toISOString().slice(0,16)}
 type MessageBackground = keyof typeof messageBackgrounds
 
 /** @param value - Official display name. @returns Its first whitespace-delimited name. */
@@ -74,13 +75,15 @@ function ParticipantAvatar({email,name}:{email:string;name:string}){
  * @param props.inbox - Optional shell-owned inbox for persistent notifications.
  * @returns JSX.Element containing the authorized message workspace.
  */
-export function MessagesPanel({canSend,canBroadcast=false,inbox,encryption:sharedEncryption,initialDraft,onDraftConsumed,onExplainMessage}:{canSend:boolean;canBroadcast?:boolean;inbox?:MessageInbox;encryption?:ReturnType<typeof useMessageEncryption>;initialDraft?:{recipient:string;body:string;confirmed?:boolean}|null;onDraftConsumed?:()=>void;onExplainMessage?:(text:string)=>void}) {
+export function MessagesPanel({canSend,canBroadcast=false,inbox,encryption:sharedEncryption,initialDraft,onDraftConsumed,initialAnnouncement=false,onAnnouncementComposeConsumed,onExplainMessage}:{canSend:boolean;canBroadcast?:boolean;inbox?:MessageInbox;encryption?:ReturnType<typeof useMessageEncryption>;initialDraft?:{recipient:string;body:string;confirmed?:boolean}|null;onDraftConsumed?:()=>void;initialAnnouncement?:boolean;onAnnouncementComposeConsumed?:()=>void;onExplainMessage?:(text:string)=>void}) {
   const local = useMessageInbox(!inbox)
   const state = inbox ?? local
   const localEncryption=useMessageEncryption(sharedEncryption?"":state.email,state.messages)
   const encryption=sharedEncryption??localEncryption
   const [users,setUsers] = useState<{email:string;displayName?:string;role:string;accessStatus:string}[]>([])
   const [audience,setAudience]=useState<MessageAudience>("individual")
+  const [scheduleDelivery,setScheduleDelivery]=useState(false)
+  const [scheduledAt,setScheduledAt]=useState("")
   const [rosterLoading,setRosterLoading]=useState(canSend)
   const [recipient,setRecipient] = useState("")
   const [body,setBody] = useState("")
@@ -92,6 +95,12 @@ export function MessagesPanel({canSend,canBroadcast=false,inbox,encryption:share
   const [deleting,setDeleting] = useState<{message:AppMessage;scope:"me"|"everyone"}|null>(null)
   const [composing,setComposing]=useState(false)
   useEffect(()=>{if(!canBroadcast){setAudience("individual");setRecipient("")}},[canBroadcast])
+  useEffect(()=>{
+    if(!initialAnnouncement)return
+    if(!canSend||!canBroadcast){onAnnouncementComposeConsumed?.();return}
+    setAudience("workforce");setRecipient("");setBody("");setScheduledAt("");setScheduleDelivery(false);setComposing(true)
+    onAnnouncementComposeConsumed?.()
+  },[initialAnnouncement,canSend,canBroadcast,onAnnouncementComposeConsumed])
   const [identitiesOpen,setIdentitiesOpen]=useState(false)
   const [securityOpen,setSecurityOpen]=useState(false)
   const [messageBackground,setMessageBackground]=useState<MessageBackground>("sky")
@@ -357,12 +366,15 @@ export function MessagesPanel({canSend,canBroadcast=false,inbox,encryption:share
     operation.current=true;setBusy(true);setError(null)
     try{
       const target=audience==="individual"?recipient:null
+      const scheduleDate=scheduleDelivery&&audience!=="individual"?new Date(scheduledAt):null
+      if(scheduleDelivery&&audience!=="individual"&&(!scheduledAt||!scheduleDate||Number.isNaN(scheduleDate.getTime()))){setError("Choose a valid announcement delivery time.");return}
+      const deliveryTime=scheduleDate?.toISOString()
       const recipients=audienceEmails(users,audience,target)
       if(!recipients.length)throw new Error("Select an audience with active recipients.")
-      const sendKey=JSON.stringify([state.email,target,audience,body,[...recipients].sort()])
+      const sendKey=JSON.stringify([state.email,target,audience,body,deliveryTime??null,[...recipients].sort()])
       const encrypted=previousSend.current?.key===sendKey?previousSend.current.encrypted:await encryption.encrypt(body,target,[state.email,...recipients])
       previousSend.current={key:sendKey,encrypted}
-      if(await mutate("POST",{recipient:target,audience,encrypted})){setFailed(null);setBody("");setComposing(false)}
+      if(await mutate("POST",{recipient:target,audience,encrypted,...(deliveryTime?{scheduledAt:deliveryTime}:{})})){setFailed(null);setBody("");setScheduledAt("");setScheduleDelivery(false);setComposing(false)}
       else setFailed({body,recipient:target})
     }catch(error){setFailed({body,recipient:audience==="individual"?recipient:null});setError(error instanceof Error?error.message:"Message connection unavailable.")}
     finally{operation.current=false;setBusy(false)}
@@ -471,18 +483,19 @@ export function MessagesPanel({canSend,canBroadcast=false,inbox,encryption:share
       </form>}
       {clipboardNotice&&<p role="status" className="sr-only">{clipboardNotice}</p>}
     </section>}
-    {composing&&<WindowSurface title="New message" onBack={()=>setComposing(false)} disabled={busy}><section className="flex min-h-0 w-full max-w-4xl flex-col bg-white"><h2 className="border-b p-4 font-semibold">New message</h2><div className="grid min-h-0 flex-1 content-start gap-3 overflow-auto p-4">
+    {composing&&<WindowSurface title={audience==="individual"?"New message":"New announcement"} onBack={()=>setComposing(false)} disabled={busy}><section className="flex min-h-0 w-full max-w-4xl flex-col bg-white"><h2 className="border-b p-4 font-semibold">{audience==="individual"?"New message":"New announcement"}</h2><div className="grid min-h-0 flex-1 content-start gap-3 overflow-auto p-4">
       {!encryption.unlocked&&!encryption.error&&<p role="status" className="text-sm text-muted-foreground">Connecting secure messaging automatically...</p>}
       {encryption.error&&<p role="alert" className="text-sm text-destructive">{state.admin?encryption.error:"Message connection unavailable. Retry or contact an administrator."}</p>}
       {rosterLoading&&<p role="status" className="text-sm text-muted-foreground">Loading recipients...</p>}
       {missingRecipients.length>0&&<p role="status" className="text-sm text-muted-foreground">These recipients need to sign in once so their devices connect automatically: {missingRecipients.join(", ")}.</p>}
       {canBroadcast&&<p className="text-xs text-muted-foreground">Managers and administrators can send announcements. Individual messages also require messaging access.</p>}
-      {canBroadcast?<label className="text-sm">Audience<select value={audience} disabled={busy} onChange={event=>{setAudience(event.target.value as MessageAudience);setRecipient("")}} className="mt-1 block w-full rounded-md border border-border bg-background p-2"><option value="workforce">Employees and contractors announcement</option><option value="everyone">Everyone announcement</option><option value="contractor">All contractors announcement</option><option value="employee">All employees announcement</option><option value="manager">All managers announcement</option><option value="admin">All admins announcement</option><option value="individual">Individual message</option></select></label>:<p className="text-sm font-medium text-slate-800">Individual message</p>}
+      {canBroadcast?<label className="text-sm">Audience<select value={audience} disabled={busy} onChange={event=>{const next=event.target.value as MessageAudience;setAudience(next);setRecipient("");if(next==="individual")setScheduleDelivery(false)}} className="mt-1 block w-full rounded-md border border-border bg-background p-2"><option value="workforce">Employees and contractors</option><option value="everyone">Everyone</option><option value="contractor">Contractors</option><option value="employee">Employees</option><option value="manager">Managers</option><option value="admin">Administrators</option><option value="individual">Individual message</option></select></label>:<p className="text-sm font-medium text-slate-800">Individual message</p>}
       {audience==="individual"&&<label className="text-sm">Recipient<select value={recipient} disabled={busy} onChange={event=>setRecipient(event.target.value)} className="mt-1 block w-full rounded-md border border-border bg-background p-2"><option value="">Choose a person</option>{users.map(user=><option key={user.email} value={user.email}>{user.displayName||"Unknown sender"}</option>)}</select></label>}
+      {canBroadcast&&audience!=="individual"&&<fieldset className="grid gap-2 border-y border-slate-200 py-3"><legend className="px-1 text-sm font-medium">Delivery</legend><div className="flex flex-wrap gap-4 text-sm"><label className="flex items-center gap-2"><input type="radio" name="announcement-delivery" checked={!scheduleDelivery} disabled={busy} onChange={()=>setScheduleDelivery(false)}/>Send now</label><label className="flex items-center gap-2"><input type="radio" name="announcement-delivery" checked={scheduleDelivery} disabled={busy} onChange={()=>setScheduleDelivery(true)}/>Schedule</label></div>{scheduleDelivery&&<label className="grid max-w-sm gap-1 text-sm">Send on<input aria-label="Announcement scheduled delivery time" type="datetime-local" value={scheduledAt} min={localDateTimeValue(new Date(Date.now()+60_000))} max={localDateTimeValue(new Date(Date.now()+90*24*60*60_000))} required disabled={busy} onChange={event=>setScheduledAt(event.target.value)} className="h-9 rounded-md border border-border bg-white px-2"/><span className="text-xs text-slate-600">Uses your device’s local timezone. Scheduled up to 90 days ahead.</span></label>}</fieldset>}
       <label className="text-sm">Message<textarea ref={replyInput} value={body} disabled={busy} maxLength={4000} onChange={event=>setBody(event.target.value)} className="mt-1 min-h-28 w-full rounded-md border border-border bg-background p-2"/></label>
       <Button type="button" variant="outline" size="sm" className="w-fit" disabled={busy} onClick={()=>void pasteIntoReply()}><ClipboardPaste className="size-4"/>Paste from clipboard</Button>
       {audience==="individual"&&!recipient&&<p className="text-sm text-muted-foreground">Choose a recipient before sending.</p>}
-      <Button className="w-fit" disabled={busy||rosterLoading||!body.trim()||!encryption.unlocked||!canSend||(audience==="individual"&&!recipient)} onClick={send}><Send className="size-4"/>{busy?"Sending...":"Send message"}</Button>
+      <Button className="w-fit" disabled={busy||rosterLoading||!body.trim()||!encryption.unlocked||!canSend||(audience==="individual"&&!recipient)||(scheduleDelivery&&audience!=="individual"&&!scheduledAt)} onClick={send}><Send className="size-4"/>{busy?(scheduleDelivery?"Scheduling…":"Sending..."):audience==="individual"?"Send message":scheduleDelivery?"Schedule announcement":"Send announcement"}</Button>
       {error&&<p role="alert" className="text-sm text-destructive">{error}</p>}
     </div></section></WindowSurface>}
     {identitiesOpen&&<WindowSurface title="Encryption identities" onBack={()=>setIdentitiesOpen(false)}><section className="w-full overflow-auto bg-white p-4"><h2 className="font-semibold">Encryption identities</h2><p className="my-3 text-sm text-muted-foreground">Compare fingerprints with participants using another trusted channel.</p><table className="w-full text-left text-sm"><thead><tr className="border-b"><th className="p-2">Actor</th><th className="p-2">Fingerprint</th></tr></thead><tbody>{encryption.keys.map(key=><tr key={`${key.email}:${key.fingerprint}`} className="border-b"><td className="p-2">{key.email}</td><td className="break-all p-2 font-mono text-xs">{key.fingerprint}</td></tr>)}</tbody></table></section></WindowSurface>}
