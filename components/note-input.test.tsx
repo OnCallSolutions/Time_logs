@@ -24,6 +24,13 @@ it("does not expose extraction for account-manager sample preview",()=>{
   render(<NoteInput previewOnly onParsed={()=>{}}/>)
   expect(screen.queryByRole("button",{name:"Extract entries"})).not.toBeInTheDocument()
 })
+it("opens directly in AI notes mode when launched from the extraction shortcut",()=>{
+  render(<NoteInput initialMode="notes" onParsed={()=>{}}/> )
+  expect(screen.getByRole("button",{name:"AI notes"})).toHaveAttribute("aria-pressed","true")
+  expect(screen.getByRole("button",{name:"Manual entry"})).toHaveAttribute("aria-pressed","false")
+  expect(screen.getByRole("button",{name:"Try a sample"})).toBeVisible()
+  expect(screen.getByRole("button",{name:"Extract entries"})).toBeVisible()
+})
 it("keeps manager-generated samples read-only and display-only until cleared",async()=>{
   const request=vi.fn(async(input:string|URL|Request)=>String(input).includes("timesheet-periods")?periodResponse():new Response(JSON.stringify({notes:"Sample Contractor A (ID: SAMPLE-CTR-001): 2 hours",previewOnly:true})))
   vi.stubGlobal("fetch",request);render(<NoteInput onParsed={()=>{}}/>)

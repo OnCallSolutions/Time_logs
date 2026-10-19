@@ -30,10 +30,12 @@ export function NoteInput({
   onParsed,
   previewOnly=false,
   canCreateProjects=false,
+  initialMode="manual",
 }: {
   onParsed: (entries: ParsedEntry[],periodId:string) => void | Promise<void>
   previewOnly?:boolean
   canCreateProjects?:boolean
+  initialMode?:"manual"|"notes"
 }) {
   const [notes, setNotes] = useState("")
   const [loading, setLoading] = useState(false)
@@ -41,7 +43,7 @@ export function NoteInput({
   const [sampleCount, setSampleCount] = useState("random")
   const [sampleLoaded,setSampleLoaded]=useState(false)
   const [sampleIsPreview, setSampleIsPreview] = useState(false)
-  const [mode,setMode]=useState<"manual"|"notes">("manual")
+  const [mode,setMode]=useState<"manual"|"notes">(initialMode)
   const [workDate,setWorkDate]=useState(()=>{const today=new Date();return `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}-${String(today.getDate()).padStart(2,"0")}`})
   const [project,setProject]=useState("")
   const [projects,setProjects]=useState<EntryProject[]>([])
@@ -58,6 +60,7 @@ export function NoteInput({
   const [periodId,setPeriodId]=useState("")
   const [periodsLoading,setPeriodsLoading]=useState(!previewOnly)
   const [periodsError,setPeriodsError]=useState("")
+  useEffect(()=>setMode(initialMode),[initialMode])
   useEffect(()=>{
     if(previewOnly)return
     const controller=new AbortController()

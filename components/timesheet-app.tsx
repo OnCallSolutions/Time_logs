@@ -96,7 +96,7 @@ type WorkspacePageSnapshot = {
   adminStartSection: AdminStartSection
   pageWindow: boolean
   workspaceHistory: WorkspaceHistoryFrame[]
-  workspaceWindow: "overview" | "workflow" | "notes" | "projects" | null
+  workspaceWindow: "overview" | "workflow" | "notes" | "ai-extract" | "projects" | null
   accountManagerTool: "periods" | "projects" | null
   initialTimesheetPeriod: string
 }
@@ -430,7 +430,7 @@ export function TimesheetApp({
   const [adminStartSection,setAdminStartSection]=useState<AdminStartSection>("landing")
   const [pageWindow,setPageWindow] = useState(false)
   const [workspaceHistory,setWorkspaceHistory]=useState<WorkspaceHistoryFrame[]>([])
-  const [workspaceWindow,setWorkspaceWindow] = useState<"overview"|"workflow"|"notes"|"projects"|null>(null)
+  const [workspaceWindow,setWorkspaceWindow] = useState<"overview"|"workflow"|"notes"|"ai-extract"|"projects"|null>(null)
   const [accountManagerTool,setAccountManagerTool]=useState<"periods"|"projects"|null>(null)
   const [extensionPanelOpen,setExtensionPanelOpen]=useState(false)
   const [initialTimesheetPeriod,setInitialTimesheetPeriod]=useState("current")
@@ -445,7 +445,7 @@ export function TimesheetApp({
         if(saved.adminStartSection&&adminStartSections.includes(saved.adminStartSection))setAdminStartSection(saved.adminStartSection)
         if(typeof saved.pageWindow==="boolean")setPageWindow(saved.pageWindow)
         if(Array.isArray(saved.workspaceHistory))setWorkspaceHistory(saved.workspaceHistory.filter((frame):frame is WorkspaceHistoryFrame=>Boolean(frame&&workspaceViews.includes(frame.view)&&adminStartSections.includes(frame.adminStartSection)&&typeof frame.pageWindow==="boolean")))
-        if(saved.workspaceWindow===null||saved.workspaceWindow==="overview"||saved.workspaceWindow==="workflow"||saved.workspaceWindow==="notes"||saved.workspaceWindow==="projects")setWorkspaceWindow(saved.workspaceWindow)
+        if(saved.workspaceWindow===null||saved.workspaceWindow==="overview"||saved.workspaceWindow==="workflow"||saved.workspaceWindow==="notes"||saved.workspaceWindow==="ai-extract"||saved.workspaceWindow==="projects")setWorkspaceWindow(saved.workspaceWindow)
         if(saved.accountManagerTool===null||saved.accountManagerTool==="periods"||saved.accountManagerTool==="projects")setAccountManagerTool(saved.accountManagerTool)
         if(typeof saved.initialTimesheetPeriod==="string")setInitialTimesheetPeriod(saved.initialTimesheetPeriod)
       }
@@ -623,7 +623,7 @@ export function TimesheetApp({
     if(!permissionsLoaded)return
     if(accessDenied){setWorkspaceWindow(null);setAccountManagerTool(null);setMessagesOpen(false);return}
     if(workspaceWindow==="projects"&&!permissions.manage_projects&&!permissions.create_projects)setWorkspaceWindow(null)
-    if(workspaceWindow==="notes"&&!permissions.create_entries)setWorkspaceWindow(null)
+    if((workspaceWindow==="notes"||workspaceWindow==="ai-extract")&&!permissions.create_entries)setWorkspaceWindow(null)
     if(accountManagerTool==="projects"&&(role!=="account_manager"||!permissions.manage_projects))setAccountManagerTool(null)
   },[permissionsLoaded,accessDenied,workspaceWindow,accountManagerTool,permissions.manage_projects,permissions.create_projects,permissions.create_entries,role])
 
@@ -849,7 +849,7 @@ export function TimesheetApp({
 
       {!accessDenied && <nav aria-label="Workspaces" className="flex flex-wrap gap-2 border-b pb-3">
           {role==="admin" ? <>
-          {view==="admin"&&adminStartSection==="landing"&&permissions.create_entries&&<Button className="border border-orange-800 bg-orange-700 font-semibold text-white shadow-sm hover:bg-orange-800" onClick={()=>setWorkspaceWindow("notes")}><Sparkles className="size-4"/>Extract timesheet with AI<ArrowRight className="size-4"/></Button>}
+          {view==="admin"&&adminStartSection==="landing"&&permissions.create_entries&&<Button className="border border-orange-800 bg-orange-700 font-semibold text-white shadow-sm hover:bg-orange-800" onClick={()=>setWorkspaceWindow("ai-extract")}><Sparkles className="size-4"/>Extract timesheet with AI<ArrowRight className="size-4"/></Button>}
           <Button variant="outline" onClick={()=>openWorkspacePage("admin","admin")}><ShieldCheck className="size-4"/>Admin</Button>
           <Button variant="outline" onClick={()=>openWorkspacePage("admin","reports")}><BarChart3 className="size-4"/>Reports</Button>
           <Button variant="outline" onClick={()=>openWorkspacePage("admin","timesheets")}><Layers3 className="size-4"/>Timesheets</Button>
@@ -873,8 +873,8 @@ export function TimesheetApp({
       {canViewAdmin && technologyReports && <SecurityRiskWindow onClose={() => setTechnologyReports(false)} />}
       {!accessDenied&&extensionPanelOpen&&((role==="account_manager"||role==="manager")&&permissions.review_entries||((role==="employee"||role==="contractor"||role==="manager")&&permissions.submit_entries))&&<SubmissionExtensionPanel reviewer={(role==="account_manager"||role==="manager")&&permissions.review_entries} canRequest={permissions.submit_entries&&(role==="employee"||role==="contractor"||role==="manager")} requesterRole={role==="manager"?"manager":role==="employee"?"employee":"contractor"} onClose={()=>{setExtensionPanelOpen(false);setEntriesRefresh(value=>value+1)}}/>}
 
-      {!accessDenied&&workspaceWindow&&<WindowSurface title={workspaceWindow==="notes"?"Create timesheet entries":workspaceWindow==="projects"?(permissions.manage_projects?role==="manager"?"My projects and team assignments":"Organization projects and assignments":"My projects"):workspaceWindow==="overview"?"Workspace overview":"Workflow totals"} onBack={()=>setWorkspaceWindow(null)} compact={workspaceWindow!=="notes"}><section className={"flex min-h-0 w-full flex-col bg-white "+(workspaceWindow==="notes"||workspaceWindow==="projects"?"max-w-none":"mx-auto max-w-6xl")}><div className="min-h-0 flex-1 overflow-auto p-4">
-      {workspaceWindow==="projects"?(permissions.manage_projects||permissions.create_projects?<ProjectManagement fullWidth canManage={permissions.manage_projects} canCreate={permissions.manage_projects||permissions.create_projects} organizationWide={role==="admin"||role==="account_manager"}/>:<p role="status" className="m-4 border border-orange-200 bg-orange-50 p-3 text-sm text-orange-950">Project access was updated. Returning to your available workspace…</p>):workspaceWindow==="overview"?<RoleOverview role={role}/>:workspaceWindow==="notes"?(permissions.create_entries?<NoteInput canCreateProjects={permissions.create_projects} onParsed={async (parsed,periodId)=>{await addParsed(parsed,periodId);setWorkspaceWindow(null);if(role!=="admin"||view!=="admin")openWorkspacePage(role==="manager"?"personal":"log")}}/>:<p role="status" className="m-4 border border-orange-200 bg-orange-50 p-3 text-sm text-orange-950">Time-entry access was updated. Returning to your available workspace…</p>):<WorkflowOverview
+      {!accessDenied&&workspaceWindow&&<WindowSurface title={workspaceWindow==="notes"?"Create timesheet entries":workspaceWindow==="ai-extract"?"Extract timesheet with AI":workspaceWindow==="projects"?(permissions.manage_projects?role==="manager"?"My projects and team assignments":"Organization projects and assignments":"My projects"):workspaceWindow==="overview"?"Workspace overview":"Workflow totals"} onBack={()=>setWorkspaceWindow(null)} compact={workspaceWindow!=="notes"&&workspaceWindow!=="ai-extract"}><section className={"flex min-h-0 w-full flex-col bg-white "+(workspaceWindow==="notes"||workspaceWindow==="ai-extract"||workspaceWindow==="projects"?"max-w-none":"mx-auto max-w-6xl")}><div className="min-h-0 flex-1 overflow-auto p-4">
+      {workspaceWindow==="projects"?(permissions.manage_projects||permissions.create_projects?<ProjectManagement fullWidth canManage={permissions.manage_projects} canCreate={permissions.manage_projects||permissions.create_projects} organizationWide={role==="admin"||role==="account_manager"}/>:<p role="status" className="m-4 border border-orange-200 bg-orange-50 p-3 text-sm text-orange-950">Project access was updated. Returning to your available workspace…</p>):workspaceWindow==="overview"?<RoleOverview role={role}/>:workspaceWindow==="notes"||workspaceWindow==="ai-extract"?(permissions.create_entries?<NoteInput canCreateProjects={permissions.create_projects} initialMode={workspaceWindow==="ai-extract"?"notes":"manual"} onParsed={async (parsed,periodId)=>{await addParsed(parsed,periodId);setWorkspaceWindow(null);if(role!=="admin"||view!=="admin")openWorkspacePage(role==="manager"?"personal":"log")}}/>:<p role="status" className="m-4 border border-orange-200 bg-orange-50 p-3 text-sm text-orange-950">Time-entry access was updated. Returning to your available workspace…</p>):<WorkflowOverview
         approvedCount={approvedEntries.length}
         draftCount={draftEntries.length}
         pendingCount={pendingEntries.length}
@@ -914,7 +914,7 @@ export function TimesheetApp({
             canRequestExtension={role==="manager"&&permissions.submit_entries}
             onTimesheets={()=>openWorkspacePage(role==="manager"?"personal":"period-index")}
             onReviews={()=>openWorkspacePage("approvals")}
-            onLogTime={()=>setWorkspaceWindow("notes")}
+            onLogTime={()=>setWorkspaceWindow("ai-extract")}
             onReport={()=>openWorkspacePage(canViewTeamReports?"report":"my-report")}
             onProjects={()=>setWorkspaceWindow("projects")}
             onTeamAccess={()=>openWorkspacePage("permissions")}

@@ -253,8 +253,12 @@ it("requires confirmation before requesting a clear-all operation",async()=>{
   render(<EntriesLog entries={[{id:"one",contractor:"Person",project:"Project A",date:"2026-10-10",hours:2,description:"Documentation",status:"draft"}]} canClear onUpdate={vi.fn()} onStatusChange={vi.fn()} onDelete={vi.fn()} onClear={onClear}/> )
   await user.click(screen.getByRole("button",{name:"Clear all"}))
   const dialog=await screen.findByRole("dialog",{name:"Confirm clearing timesheets"})
+  expect(dialog).toHaveAttribute("data-window-size","compact")
+  expect(within(dialog).getByText("Loaded entries")).toBeVisible()
+  expect(within(dialog).getByText("Total hours")).toBeVisible()
+  expect(within(dialog).getByText("2h")).toBeVisible()
   expect(onClear).not.toHaveBeenCalled()
-  await user.click(within(dialog).getByRole("button",{name:"Continue to Entra verification"}))
+  await user.click(within(dialog).getByRole("button",{name:"Continue to secure verification"}))
   expect(onClear).toHaveBeenCalledOnce()
 })
 

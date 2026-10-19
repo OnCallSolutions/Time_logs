@@ -23,7 +23,7 @@ vi.mock("@/components/sign-out-button", () => ({
 }))
 
 vi.mock("@/components/note-input", () => ({
-  NoteInput: () => <div data-testid="note-input" />,
+  NoteInput: ({initialMode}:{initialMode?:string}) => <div data-testid="note-input" data-initial-mode={initialMode??"manual"} />,
 }))
 
 vi.mock("@/components/entries-log", () => ({
@@ -290,6 +290,14 @@ describe("TimesheetApp admin directory", () => {
       close: vi.fn(),
     } as unknown as Window)
     mockTimesheetFetch()
+  })
+
+  it("opens the landing-page extraction shortcut directly in AI mode",async()=>{
+    const user=userEvent.setup()
+    render(<TimesheetApp role="contractor" userEmail="contractor@example.com" userName="Contractor"/> )
+    await user.click(await screen.findByRole("button",{name:/Extract timesheet with AI/i}))
+    const extraction=await screen.findByRole("dialog",{name:"Extract timesheet with AI"})
+    expect(within(extraction).getByTestId("note-input")).toHaveAttribute("data-initial-mode","notes")
   })
 
   it("orders people by descending seniority without exposing account identifiers in the roster", async () => {

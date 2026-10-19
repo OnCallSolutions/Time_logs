@@ -330,16 +330,23 @@ export function EntriesLog({
           </footer>
         </section>
       </WindowSurface>}
-      {clearConfirmationOpen && <WindowSurface title="Confirm clearing timesheets" onBack={() => setClearConfirmationOpen(false)} compact resizable>
-        <section className="flex w-full max-w-xl flex-col bg-white text-slate-950">
-          <header className="flex items-start gap-3 border-b border-red-200 bg-red-50 p-4">
-            <AlertTriangle className="mt-0.5 size-5 shrink-0 text-red-700" aria-hidden="true" />
-            <div><h2 className="font-semibold text-red-950">Clear all visible timesheet entries?</h2><p className="mt-1 text-sm text-red-900">This starts Microsoft Entra verification. Nothing is deleted until you sign in again and confirm a second time.</p></div>
-          </header>
-          <p className="p-4 text-sm">The action applies to the entries visible to your authorized account ({entries.length} currently loaded). It cannot be undone.</p>
-          <footer className="flex justify-end gap-2 border-t p-4">
+      {clearConfirmationOpen && <WindowSurface title="Confirm clearing timesheets" onBack={() => setClearConfirmationOpen(false)} compact resizable={false} initialExpanded={false} assistant={false}>
+        <section className="flex w-full flex-col bg-white text-slate-950">
+          <div className="flex-1 p-5 sm:p-6">
+            <header className="flex items-start gap-3">
+              <span className="grid size-10 shrink-0 place-items-center rounded-full bg-red-50 text-red-700 ring-1 ring-red-200"><AlertTriangle className="size-5" aria-hidden="true" /></span>
+              <div className="min-w-0"><h2 className="text-base font-semibold text-slate-950">Clear loaded timesheet entries?</h2><p className="mt-1 text-sm leading-5 text-slate-600">Review exactly what is in scope before continuing to secure verification.</p></div>
+            </header>
+            <div className="mt-5 grid grid-cols-2 divide-x divide-slate-200 border-y border-slate-200 bg-slate-50">
+              <div className="px-4 py-3"><p className="text-xs text-slate-600">Loaded entries</p><p className="mt-0.5 text-lg font-semibold tabular-nums">{entries.length}</p></div>
+              <div className="px-4 py-3"><p className="text-xs text-slate-600">Total hours</p><p className="mt-0.5 text-lg font-semibold tabular-nums">{entries.reduce((sum,entry)=>sum+entry.hours,0).toLocaleString(undefined,{maximumFractionDigits:2})}h</p></div>
+            </div>
+            <p className="mt-4 text-sm leading-5 text-slate-700">Only entries currently loaded for your authorized account are included.</p>
+            <div className="mt-4 border-l-2 border-red-500 bg-red-50 px-3 py-2 text-sm leading-5 text-red-900"><strong>Permanent action.</strong> A second sign-in confirmation is required. Nothing is removed at this step.</div>
+          </div>
+          <footer className="flex flex-wrap justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-3 sm:px-6">
             <Button variant="outline" onClick={() => setClearConfirmationOpen(false)}>Cancel</Button>
-            <Button variant="destructive" onClick={() => { setClearConfirmationOpen(false); onClear() }}><Trash2 className="size-4" />Continue to Entra verification</Button>
+            <Button variant="destructive" onClick={() => { setClearConfirmationOpen(false); onClear() }}><Trash2 className="size-4" />Continue to secure verification</Button>
           </footer>
         </section>
       </WindowSurface>}
