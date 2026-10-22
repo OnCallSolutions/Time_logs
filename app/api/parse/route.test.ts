@@ -66,6 +66,30 @@ it("leaves unsupported fields blank and flags evidence not found in the source n
   expect(result.entries[0].contractor).toBe("Own Person")
 })
 
+it("grounds transcript drafts in concrete actions and leaves missing fields for confirmation",async()=>{
+  const notes = [
+    "Speaker A: I enabled transcription so we can test timesheet extraction.",
+    "Speaker B: Will it identify who is speaking?",
+    "Speaker A: Someone might say they worked on XYZ, and the app could suggest 8 hours."
+  ].join("\n")
+  vi.mocked(generateText).mockResolvedValue({output:{entries:[{
+    contractor:"Speaker A",date:null,hours:null,project:"Unassigned",
+    description:"Enabled transcription for a timesheet extraction test.",
+    evidenceQuote:"I enabled transcription so we can test timesheet extraction.",
+    reviewFlags:["date_needs_confirmation","hours_needs_confirmation","project_needs_confirmation"]
+  }]}} as never)
+  const response=await POST(new Request("http://localhost/api/parse",{method:"POST",body:JSON.stringify({notes,periodId:"10000000-0000-4000-8000-000000000001"})}))
+  const result=await response.json()
+  const prompt=vi.mocked(generateText).mock.calls[0][0].system
+  expect(response.status).toBe(200)
+  expect(result.entries).toHaveLength(1)
+  expect(result.entries[0]).toMatchObject({contractor:"Own Person",date:null,hours:null,project:"Unassigned",evidenceQuote:"I enabled transcription so we can test timesheet extraction."})
+  expect(result.entries[0].reviewFlags).toEqual(expect.arrayContaining(["date_needs_confirmation","hours_needs_confirmation","project_needs_confirmation"]))
+  expect(prompt).toContain("display name is not proof of an account identity")
+  expect(prompt).toContain("hypothetical examples")
+  expect(prompt).toContain("Never apply a suggested or default 8-hour day")
+})
+
 it("supplies only the contractor's assigned projects as canonical extraction hints",async()=>{
   vi.mocked(listTimeProjects).mockResolvedValue([{name:"Field service"}] as never)
   const entries=[{contractor:"Person",date:"2026-10-15",hours:2,project:"Field service",description:"Inspection",evidenceQuote:"Inspection",reviewFlags:[]}]
