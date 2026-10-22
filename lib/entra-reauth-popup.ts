@@ -16,15 +16,21 @@ export function openEntraReauthentication(state:string,onFailure:()=>void):Windo
     if(!csrfResponse.ok)throw new Error("Microsoft verification could not start.")
     const {csrfToken}=await csrfResponse.json() as {csrfToken?:string}
     if(!csrfToken)throw new Error("Microsoft verification could not start.")
-    const response=await fetch(`${base}/signin/microsoft-entra-id?stepup=1&max_age=0&prompt=login`,{
-      method:"POST",
-      headers:{"Content-Type":"application/x-www-form-urlencoded","X-Auth-Return-Redirect":"1"},
-      body:new URLSearchParams({csrfToken,callbackUrl:redirectTo}),
-      cache:"no-store",
-    })
-    const result=await response.json() as {url?:string}
-    if(!response.ok||!result.url)throw new Error("Microsoft verification could not start.")
-    popup.location.href=result.url
+    // Submit from the popup as a real top-level form navigation. Auth.js then
+    // sets its transient OAuth cookies on the same browsing context that later
+    // receives Microsoft's callback, instead of relying on an XHR redirect.
+    const form=popup.document.createElement("form")
+    form.method="POST"
+    form.action=`${base}/signin/microsoft-entra-id?stepup=1&max_age=0&prompt=login`
+    for(const [name,value] of Object.entries({csrfToken,callbackUrl:redirectTo})){
+      const input=popup.document.createElement("input")
+      input.type="hidden"
+      input.name=name
+      input.value=value
+      form.appendChild(input)
+    }
+    popup.document.body.appendChild(form)
+    form.submit()
   })().catch(()=>{popup.close();onFailure()})
   return popup
 }
