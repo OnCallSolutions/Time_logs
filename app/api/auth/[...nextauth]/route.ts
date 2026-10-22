@@ -40,6 +40,15 @@ function isStepUpRequest(req:NextRequest):boolean{
   return req.nextUrl.pathname.includes("/callback/")&&req.cookies.has("tanovo-time.stepup.state")
 }
 
+/** Logs only the selected callback flow and cookie presence, never cookie values. */
+function logCallbackFlow(req:NextRequest,stepUp:boolean):void{
+  if(!req.nextUrl.pathname.includes("/callback/"))return
+  console.info("[auth-route] OAuth callback routed.",{
+    flow:stepUp?"step-up":"primary",
+    hasStepUpStateCookie:req.cookies.has("tanovo-time.stepup.state"),
+  })
+}
+
 /**
  * Handles Auth.js GET requests after restoring the public base path.
  *
@@ -47,7 +56,9 @@ function isStepUpRequest(req:NextRequest):boolean{
  * @returns The Auth.js response for the requested action.
  */
 export function GET(req: NextRequest) {
-  return (isStepUpRequest(req)?stepUpHandlers.GET:handlers.GET)(withPublicAuthBasePath(req))
+  const stepUp=isStepUpRequest(req)
+  logCallbackFlow(req,stepUp)
+  return (stepUp?stepUpHandlers.GET:handlers.GET)(withPublicAuthBasePath(req))
 }
 
 /**
@@ -57,5 +68,7 @@ export function GET(req: NextRequest) {
  * @returns The Auth.js response for the requested action.
  */
 export function POST(req: NextRequest) {
-  return (isStepUpRequest(req)?stepUpHandlers.POST:handlers.POST)(withPublicAuthBasePath(req))
+  const stepUp=isStepUpRequest(req)
+  logCallbackFlow(req,stepUp)
+  return (stepUp?stepUpHandlers.POST:handlers.POST)(withPublicAuthBasePath(req))
 }

@@ -45,9 +45,27 @@ it("routes an explicitly tagged step-up sign-in to isolated handlers", async () 
 })
 
 it("routes the unchanged Entra callback URI to isolated handlers using its state cookie", () => {
+  const log=vi.spyOn(console,"info").mockImplementation(()=>{})
   GET(new NextRequest("http://localhost:3000/api/auth/callback/microsoft-entra-id?code=fixture", {
     headers: { cookie: "tanovo-time.stepup.state=fixture" },
   }))
   expect(vi.mocked(stepUpHandlers.GET).mock.calls[0][0].url).toBe("http://localhost:3000/tanovo-time/api/auth/callback/microsoft-entra-id?code=fixture")
   expect(vi.mocked(handlers.GET)).not.toHaveBeenCalled()
+  expect(log).toHaveBeenCalledWith("[auth-route] OAuth callback routed.",{
+    flow:"step-up",
+    hasStepUpStateCookie:true,
+  })
+  log.mockRestore()
+})
+
+it("reports a primary callback without exposing cookie values",()=>{
+  const log=vi.spyOn(console,"info").mockImplementation(()=>{})
+  GET(new NextRequest("http://localhost:3000/api/auth/callback/microsoft-entra-id?code=fixture",{
+    headers:{cookie:"unrelated=private-value"},
+  }))
+  expect(log).toHaveBeenCalledWith("[auth-route] OAuth callback routed.",{
+    flow:"primary",
+    hasStepUpStateCookie:false,
+  })
+  log.mockRestore()
 })

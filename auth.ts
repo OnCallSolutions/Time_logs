@@ -31,7 +31,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       const causeType=cause&&typeof cause==="object"?safeAuthDiagnostic(Reflect.get(cause,"name")):undefined
       const causeCode=cause&&typeof cause==="object"?safeAuthDiagnostic(Reflect.get(cause,"code")):undefined
       const providerError=cause&&typeof cause==="object"?safeAuthDiagnostic(Reflect.get(cause,"error")):undefined
-      const diagnostics={errorType,causeType,causeCode,providerError}
+      // Auth.js wraps OAuth failures more than once; inspect one nested cause,
+      // but only publish identifier-shaped fields rather than provider messages.
+      const nested=cause&&typeof cause==="object"?Reflect.get(cause,"err"):undefined
+      const nestedCause=nested&&typeof nested==="object"?Reflect.get(nested,"cause"):undefined
+      const nestedCauseType=nested&&typeof nested==="object"?safeAuthDiagnostic(Reflect.get(nested,"name")):undefined
+      const nestedCauseCode=nested&&typeof nested==="object"?safeAuthDiagnostic(Reflect.get(nested,"code")):undefined
+      const nestedProviderError=nestedCause&&typeof nestedCause==="object"?safeAuthDiagnostic(Reflect.get(nestedCause,"error")):undefined
+      const status=cause&&typeof cause==="object"?Reflect.get(cause,"status"):undefined
+      const diagnostics={errorType,causeType,causeCode,providerError,nestedCauseType,nestedCauseCode,nestedProviderError,status:typeof status==="number"?status:undefined}
       console.error("[auth] Authentication failed.",diagnostics)
       void writeAuthAudit({actorEmail:"system@tanovo-time.local",action:"authentication_failed",targetType:"authentication",metadata:{provider:"microsoft-entra-id",...diagnostics,outcome:"failed"}})
     },
