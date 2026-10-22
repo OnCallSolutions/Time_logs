@@ -11,7 +11,7 @@ const secure=process.env.NODE_ENV==="production"
 // cross-site callback and are Secure when SameSite=None is enabled.
 const {standard:cookieOptions,oauth:oauthCookieOptions}=stepUpCookiePolicies(secure)
 
-export const {handlers:stepUpHandlers,auth:stepUpAuth}=NextAuth({
+export const {handlers:stepUpHandlers,auth:stepUpAuth,signIn:stepUpSignIn}=NextAuth({
   trustHost:true,
   basePath:apiPath("/api/auth"),
   secret:process.env.AUTH_SECRET,
