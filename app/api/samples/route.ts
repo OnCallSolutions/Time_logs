@@ -94,7 +94,10 @@ export async function GET(request?: Request):Promise<Response>{
       `[00:02:14] ${speaker}: For ${period.startDate}, I spent 2 hours on ${assignedProject} completing an implementation task.`,
       `[00:02:32] ${speaker}: I also documented the work and next steps.`,
     ].join("\n")
-    return Response.json({notes,synthetic:true,transcript:true,project:assignedProject,periodId:period.id},{headers:{"Cache-Control":"no-store"}})
+    // A fixed fallback keeps this demo inspectable when the configured model is temporarily unavailable.
+    // It is deliberately returned only for this synthetic fixture, never for real transcript or note content.
+    const demoEntries=[{contractor:speaker,date:period.startDate,hours:2,project:assignedProject,description:"Implementation task"}]
+    return Response.json({notes,synthetic:true,transcript:true,project:assignedProject,periodId:period.id,demoEntries},{headers:{"Cache-Control":"no-store"}})
   }
   const count=requested==="random"?randomInt(3,19):Number(requested)
   if(requested!=="random"&&![3,6,12].includes(count))return Response.json({error:"Choose random, 3, 6, or 12 sample entries per person."},{status:400})

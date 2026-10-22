@@ -117,6 +117,23 @@ it("extracts the fetched Teams sample transcript immediately into the editable p
   expect(await screen.findByRole("region",{name:"Extracted timesheet preview"})).toHaveTextContent("Field service")
   expect(screen.getByRole("textbox",{name:"Time worked notes"})).toHaveValue(transcript)
 })
+it("keeps the synthetic sample preview available when the configured AI provider fails",async()=>{
+  const periodId=period.id
+  const demoEntries=[{contractor:"Own Person",date:"2026-10-17",hours:2,project:"Field service",description:"Implementation task"}]
+  const request=vi.fn(async(input:string|URL|Request)=>{
+    const url=String(input)
+    if(url.includes("timesheet-periods"))return periodResponse()
+    if(url.includes("teams-transcript"))return Response.json({notes:"Synthetic Teams transcript",synthetic:true,transcript:true,demoEntries})
+    if(url.includes("/api/parse"))return Response.json({error:"AI service unavailable"},{status:503})
+    return Response.json({projects:[{id:"p1",name:"Field service",description:""}]})
+  })
+  vi.stubGlobal("fetch",request);render(<NoteInput initialMode="notes" onParsed={()=>{}}/>);const user=userEvent.setup()
+  await user.click(screen.getByRole("button",{name:"Try sample transcript"}))
+  expect(await screen.findByRole("textbox",{name:"Project for entry 1"})).toHaveValue("Field service")
+  expect(screen.getByRole("alert")).toHaveTextContent(/fixed demo rows.*not AI results/)
+  expect(screen.getByRole("button",{name:"Save entries"})).toBeVisible()
+  expect(request).toHaveBeenCalledWith("/tanovo-time/api/parse",expect.objectContaining({body:JSON.stringify({notes:"Synthetic Teams transcript",periodId})}))
+})
 it("sends the selected configured period with AI extraction",async()=>{
   const onParsed=vi.fn(async()=>{})
   const request=vi.fn(async(input:string|URL|Request)=>String(input).includes("timesheet-periods")?periodResponse():String(input).includes("/api/projects")?Response.json({projects:[{id:"p1",name:"Project",description:""}]}):Response.json({entries:[{contractor:"Own Person",date:"2026-10-17",hours:2,project:"Project",description:"Work"}]}))
