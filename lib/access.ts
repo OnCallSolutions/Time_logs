@@ -11,6 +11,7 @@ import { getManagedAccessUser } from "@/lib/db"
 import { getAccountLifecycle } from "@/lib/access-lifecycle-store"
 import { lifecycleDeniesAccess } from "@/lib/access-lifecycle-policy"
 import type { UserRole } from "@/lib/types"
+import { normalizeEmail } from "./identity-policy"
 
 /**
  * Converts a comma-separated email environment variable into normalized emails.
@@ -25,7 +26,7 @@ import type { UserRole } from "@/lib/types"
 function parseEmailList(value?: string) {
   return (value ?? "")
     .split(",")
-    .map((email) => email.trim().toLowerCase())
+    .map(normalizeEmail)
     .filter(Boolean)
 }
 
@@ -130,7 +131,7 @@ function hasEnvironmentAccessPolicy() {
 export function getUserRole(email?: string | null): UserRole | null {
   if (!email) return null
 
-  const normalizedEmail = email.toLowerCase()
+  const normalizedEmail = normalizeEmail(email)
 
   if (getRoleEmails("admin").includes(normalizedEmail)) return "admin"
   if (getRoleEmails("manager").includes(normalizedEmail)) return "manager"
@@ -156,7 +157,7 @@ export async function getEffectiveUserRole(
 ): Promise<UserRole | null> {
   if (!email) return null
 
-  const normalizedEmail = email.toLowerCase()
+  const normalizedEmail = normalizeEmail(email)
   const environmentRole = getUserRole(normalizedEmail)
 
   if (environmentRole === "admin") {

@@ -5,6 +5,10 @@
  */
 export const MESSAGE_EDIT_MINUTES = 60
 export type AppMessage = {
+  sender_name?: string;
+  recipient_name?: string | null;
+  author_name?: string;
+  priority?: "normal" | "high";
   id: string; sender_email: string; recipient_email: string | null; body: string;
   created_at: string; edited_at?: string | null; deleted_at?: string | null;
   delivered_at?: string | null; read_at?: string | null;
@@ -21,6 +25,7 @@ export type AppMessage = {
  * @returns boolean indicating whether the client should show Edit.
  */
 export function canEditMessage(message: AppMessage, email: string, admin: boolean, now = Date.now()): boolean {
-  return !message.deleted_at && (admin || (message.sender_email.toLowerCase() === email.toLowerCase()
-    && now < new Date(message.created_at).getTime() + MESSAGE_EDIT_MINUTES * 60_000))
+  const isAuthor = message.sender_email.toLowerCase() === email.toLowerCase()
+  return !message.deleted_at && isAuthor && (admin
+    || now < new Date(message.created_at).getTime() + MESSAGE_EDIT_MINUTES * 60_000)
 }

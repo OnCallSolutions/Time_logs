@@ -32,7 +32,7 @@ export function useDialogFocus<T extends HTMLElement = HTMLElement>(onClose: () 
       return Array.from(element!.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex="0"]'))
         .filter(control => control.getClientRects().length > 0)
     }
-    ;(controls()[0] ?? element).focus()
+    element.focus({preventScroll:true})
     /**
      * Handles dismissal and prevents keyboard focus from leaving the dialog.
      * @param event - Native keyboard event from a dialog control.
@@ -59,7 +59,7 @@ export function useDialogFocus<T extends HTMLElement = HTMLElement>(onClose: () 
     return () => {
       document.body.style.overflow = previousOverflow
       element.removeEventListener("keydown", handleKey)
-      if (previousFocus?.isConnected) previousFocus.focus()
+      if (previousFocus?.isConnected) previousFocus.focus({preventScroll:true})
     }
   }, [enabled])
   return ref

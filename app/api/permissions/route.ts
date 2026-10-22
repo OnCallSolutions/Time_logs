@@ -5,13 +5,15 @@
  */
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
+import { withOperationalCapture } from "@/lib/api-outcome-capture"
 /**
  * Resolves current rights without caching potentially revoked permissions.
  * @returns Promise<Response> with current permissions or denied access.
  */
-export async function GET(): Promise<Response> {
+async function getPermissions(): Promise<Response> {
   const email = (await auth())?.user?.email
   if (!email) return Response.json({error:"Unauthorized."},{status:401})
   const access = await getEffectivePermissions(email)
-  return Response.json(access,{status:access.role ? 200 : 403,headers:{"Cache-Control":"no-store"}})
+  return Response.json(access,{status:access.role ? 200 : 403,headers:{"Cache-Control":"private, no-store, max-age=0","Vary":"Cookie"}})
 }
+export const GET=withOperationalCapture("/api/permissions","GET",getPermissions)

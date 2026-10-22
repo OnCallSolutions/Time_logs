@@ -7,6 +7,7 @@ vi.mock("@/auth",()=>({auth:vi.fn()}))
 vi.mock("@/lib/effective-permissions",()=>({getEffectivePermissions:vi.fn()}))
 vi.mock("@/lib/db",()=>({recordAuditEvent:vi.fn(),delegateEmployeePermissions:vi.fn()}))
 vi.mock("@/lib/collaboration",()=>({employeeRoster:vi.fn(),actorRoster:vi.fn()}))
+vi.mock("@/lib/account-identities",()=>({ensureAccountIdentitiesForActors:vi.fn(async(emails:string[]=[])=>(emails??[]).map(email=>({email,officialName:"Official Person",contractorNumber:"TN-long",shortReference:"TN-000001"})))}))
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { employeeRoster,actorRoster } from "@/lib/collaboration"

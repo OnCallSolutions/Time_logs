@@ -2,16 +2,21 @@
  * Verifies that technology-manager shortcuts open existing administration tools.
  * Navigation callbacks are exercised without applying role or permission changes.
  */
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { expect, it, vi } from "vitest"
 import { AdminWorkspace } from "./admin-workspace"
-it("opens directory and AI security reports through explicit buttons", async () => {
-  const directory = vi.fn(), security = vi.fn()
-  render(<AdminWorkspace onDirectory={directory} onSecurity={security} />)
-  expect(directory).not.toHaveBeenCalled()
-  await userEvent.click(screen.getByRole("button",{name:"Employee access"}))
-  await userEvent.click(screen.getByRole("button",{name:"AI security reports"}))
-  expect(directory).toHaveBeenCalledOnce()
-  expect(security).toHaveBeenCalledOnce()
+it("exposes only the three admin dashboard command groups", async () => {
+  const admin = vi.fn(), reports = vi.fn(), timesheets = vi.fn()
+  render(<AdminWorkspace activeSection={null} onAdmin={admin} onReports={reports} onTimesheets={timesheets} />)
+  const commands = screen.getByRole("navigation", { name: "Admin dashboard commands" })
+  expect(within(commands).getAllByRole("button").map(button => button.textContent?.trim())).toEqual([
+    "Admin", "Reports", "Timesheets",
+  ])
+  await userEvent.click(within(commands).getByRole("button", { name: "Admin" }))
+  await userEvent.click(within(commands).getByRole("button", { name: "Reports" }))
+  await userEvent.click(within(commands).getByRole("button", { name: "Timesheets" }))
+  expect(admin).toHaveBeenCalledOnce()
+  expect(reports).toHaveBeenCalledOnce()
+  expect(timesheets).toHaveBeenCalledOnce()
 })

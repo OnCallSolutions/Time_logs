@@ -3,28 +3,70 @@
  * Verifies category filtering and permission-gated controls without live APIs.
  * Explicit confirmation prevents incidental UI clicks from changing review state.
  */
-import { render,screen,waitFor } from "@testing-library/react"
+import { render,screen,waitFor,within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach,it,expect,vi } from "vitest"
 import { BusinessAccounts } from "./business-accounts"
-const row={id:"123e4567-e89b-42d3-a456-426614174000",assigned_to:"accounts@example.com",current:true,review_state:"pending",review_version:0,evidence:{contractor:"Supplier",workerCategory:"contractor",reviewedBy:"manager@example.com",project:"Build",date:"2026-10-09",hours:4}}
+const row={id:"123e4567-e89b-42d3-a456-426614174000",assigned_to:"accounts@example.com",current:true,review_state:"pending",review_version:0,source_updated_at:"2026-10-10T12:00:00.000Z",evidence:{contractor:"Supplier",ownerEmail:"supplier@example.com",workerCategory:"contractor",reviewedBy:"manager@example.com",reviewedAt:"2026-10-10T12:00:00.000Z",project:"Build",date:"2026-10-09",hours:4,description:"Site work"}}
 afterEach(()=>vi.unstubAllGlobals())
 /**
  * Installs an isolated queue fixture with both internal and outsourced evidence.
  * @returns Mock fetch recording all attempted mutations.
  */
-function fixture(){const fetch=vi.fn(async()=>new Response(JSON.stringify({candidates:[],assignees:[],handoffs:[row,{...row,id:"second",evidence:{...row.evidence,contractor:"Staff",workerCategory:"employee"}}]})));vi.stubGlobal("fetch",fetch);return fetch}
-it("groups approved evidence and filters internal employees",async()=>{
-  fixture();render(<BusinessAccounts canSend={false}/>);await screen.findByText("Supplier")
-  expect(screen.getByText("Approving reviewer: manager@example.com")).toBeVisible()
+function fixture(){const fetch=vi.fn(async()=>new Response(JSON.stringify({candidates:[],assignees:[],periods:[{id:"period-oct",name:"October 2026",startDate:"2026-10-01",endDate:"2026-10-31"}],managers:[{email:"manager@example.com",officialName:"Morgan Manager"}],handoffs:[row,{...row,id:"second",evidence:{...row.evidence,contractor:"Staff",workerCategory:"employee"}}]})));vi.stubGlobal("fetch",fetch);return fetch}
+it("shows a compact triage summary and filters employee evidence",async()=>{
+  fixture();render(<BusinessAccounts canSend={false}/>);await screen.findByText("Supplier",{selector:"span"})
+  expect(screen.getByRole("heading",{name:"Timesheet approvals"})).toBeVisible()
+  expect(screen.getByText(/Review complete manager-approved timesheets/i)).toBeVisible()
+  expect(screen.getByLabelText("Business queue summary")).toBeVisible()
+  expect(screen.getByRole("columnheader",{name:"Approving manager"})).toBeVisible()
+  expect(screen.getAllByText("manager@example.com").length).toBeGreaterThan(1)
+  expect(screen.queryByRole("button",{name:"Sample preview"})).not.toBeInTheDocument()
+  await userEvent.click(screen.getByText("Filter and sort"))
   await userEvent.selectOptions(screen.getByRole("combobox",{name:"Category"}),"employee")
-  expect(screen.queryByText("Supplier")).not.toBeInTheDocument();expect(screen.getByText("Staff")).toBeVisible()
-  expect(screen.queryByRole("button",{name:"Review"})).not.toBeInTheDocument()
+  expect(screen.queryByText("Supplier",{selector:"span"})).not.toBeInTheDocument();expect(screen.getByText("Staff",{selector:"span"})).toBeVisible()
+  expect(screen.queryByRole("button",{name:"Triage"})).not.toBeInTheDocument()
   expect(screen.queryByRole("button",{name:"AI review"})).not.toBeInTheDocument()
 })
+it("nests period controls inside the final approval dashboard when authorized",async()=>{
+  const onManagePeriods=vi.fn();fixture();render(<BusinessAccounts canSend={false} onManagePeriods={onManagePeriods}/>);await screen.findByText("Supplier",{selector:"span"})
+  await userEvent.click(screen.getByRole("button",{name:"Periods"}))
+  expect(onManagePeriods).toHaveBeenCalledOnce()
+})
+it("wires project controls into the account manager dashboard",async()=>{
+  const onManageProjects=vi.fn();fixture();render(<BusinessAccounts canSend={false} onManageProjects={onManageProjects}/>);await screen.findByText("Supplier",{selector:"span"})
+  await userEvent.click(screen.getByRole("button",{name:"Projects"}))
+  expect(onManageProjects).toHaveBeenCalledOnce()
+})
 it("requires an explicit review note before saving",async()=>{
-  const fetch=fixture();render(<BusinessAccounts canSend={false} canReview/>);await screen.findByText("Supplier")
-  await userEvent.click(screen.getAllByRole("button",{name:"Review"})[0])
+  const fetch=fixture();render(<BusinessAccounts canSend={false} canReview/>);await screen.findByText("Supplier",{selector:"span"})
+  await userEvent.click(screen.getAllByRole("button",{name:"Triage"})[0])
   expect(screen.getByRole("button",{name:"Confirm review"})).toBeDisabled()
   await waitFor(()=>expect(fetch).toHaveBeenCalledTimes(1))
+})
+it("lets an account manager correct a recalled entry with a reason in the same approval queue",async()=>{
+  const recalled={...row,review_state:"reopened_for_review"}
+  const fetch=vi.fn(async(_url:string,init?:RequestInit)=>init?.method==="PATCH"?Response.json({updated:true}):new Response(JSON.stringify({candidates:[],assignees:[],periods:[{id:"period-oct",name:"October 2026",startDate:"2026-10-01",endDate:"2026-10-31"}],managers:[{email:"manager@example.com"}],handoffs:[recalled]})))
+  vi.stubGlobal("fetch",fetch)
+  render(<BusinessAccounts canSend={false} canReview/>);await screen.findByText("reopened for review")
+  await userEvent.click(screen.getByRole("button",{name:"Correct"}))
+  const dialog=screen.getByRole("dialog",{name:/Correct recalled timesheet/})
+  await userEvent.clear(within(dialog).getByRole("spinbutton",{name:"Hours"}))
+  await userEvent.type(within(dialog).getByRole("spinbutton",{name:"Hours"}),"3")
+  await userEvent.type(within(dialog).getByRole("textbox",{name:"Correction reason"}),"Fix recorded hours")
+  await userEvent.click(within(dialog).getByRole("button",{name:"Save correction"}))
+  await waitFor(()=>expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/api/accounts/correct-entry"),expect.objectContaining({method:"PATCH"})))
+  expect(JSON.parse(String(fetch.mock.calls.find(([,init])=>init?.method==="PATCH")?.[1]?.body))).toMatchObject({id:row.id,periodId:"period-oct",revision:row.source_updated_at,hours:3,reason:"Fix recorded hours"})
+})
+it("shows a vertical period and manager navigator for drilling into manager-owned people",async()=>{
+  fixture();render(<BusinessAccounts canSend={false}/>);await screen.findByText("Supplier",{selector:"span"})
+  expect(screen.getByRole("navigation",{name:"Timesheet periods"})).toBeVisible()
+  expect(screen.getByRole("button",{name:/October 2026/})).toBeVisible()
+  expect(screen.getByRole("navigation",{name:"Managers in selected period"})).toBeVisible()
+  expect(screen.getByRole("button",{name:/Morgan Manager/})).toBeVisible()
+  await userEvent.click(screen.getByRole("button",{name:/Morgan Manager/}))
+  await userEvent.click(screen.getByText("Filter and sort"))
+  await userEvent.selectOptions(screen.getByRole("combobox",{name:"Manager contractor filter"}),"Supplier")
+  expect(screen.getByText("Supplier",{selector:"span"})).toBeVisible()
+  expect(screen.queryByText("Staff",{selector:"span"})).not.toBeInTheDocument()
 })

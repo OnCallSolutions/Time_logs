@@ -20,13 +20,28 @@ export type EntryStatus = "draft" | "submitted" | "approved" | "rejected"
  * the user, and approval fields track the manager review lifecycle.
  */
 export type TimeEntry = {
+  /** Official company-issued number; not an authentication credential. */
+  contractorNumber?: string
+  shortReference?: string
+  companyCode?: string
+  employeeId?: string | null
   id: string
   /** Database evidence revision used to reject stale review decisions. */
   revision?: string
   /** Server-derived eligibility for the current caller's review lane. */
   reviewEligible?: boolean
+  /** Server-derived approval capability, including business-account forwarding rights. */
+  approvalEligible?: boolean
   /** Server-assigned record owner; never inferred from the display contractor name. */
   ownerEmail?: string
+  /** Assigned operational manager; unassigned legacy submissions remain in the shared queue. */
+  reviewManagerEmail?: string | null
+  /** Display name resolved from the reviewer's registered company identity. */
+  reviewManagerName?: string | null
+  /** Display name resolved from the identity that recorded the decision. */
+  reviewedByName?: string | null
+  /** Evidence locked after explicit business-account eligibility authorization. */
+  payoutEligible?: boolean
   contractor: string
   /** ISO date string: YYYY-MM-DD */
   date: string
@@ -34,6 +49,13 @@ export type TimeEntry = {
   project: string
   description: string
   status: EntryStatus
+  /** Latest time this entry was submitted, from the durable audit trail. */
+  submittedAt?: string | null
+  /** Distinguishes a first submission from evidence returned for correction. */
+  workflowOrigin?: "new" | "returned"
+  /** Return recipient and correction cutoff for the current correction cycle. */
+  correctionOwnerEmail?: string | null
+  correctionDueAt?: string | null
   reviewedBy?: string | null
   reviewedAt?: string | null
   reviewNote?: string | null
@@ -47,7 +69,7 @@ export type TimeEntry = {
  */
 export type ParsedEntry = Omit<
   TimeEntry,
-  "id" | "revision" | "reviewEligible" | "ownerEmail" | "status" | "reviewedBy" | "reviewedAt" | "reviewNote"
+  "id" | "contractorNumber" | "shortReference" | "companyCode" | "employeeId" | "revision" | "reviewEligible" | "approvalEligible" | "ownerEmail" | "reviewManagerEmail" | "payoutEligible" | "status" | "reviewedBy" | "reviewedAt" | "reviewNote" | "workflowOrigin" | "correctionOwnerEmail" | "correctionDueAt"
 >
 
 /**
@@ -61,8 +83,10 @@ export type UserRole = "admin" | "manager" | "account_manager" | "employee" | "c
 /**
  * Access states administrators can apply to managed app users.
  *
- * Active users can enter the app with their assigned role. Denied users are known
- * but not currently approved, while blocked users are explicitly barred until an
- * administrator changes their status.
+ * Only active users can enter with their assigned role. Denied represents an
+ * onboarding/access request that was not approved; suspended is a temporary
+ * business hold; retired means an employment or contractor engagement ended;
+ * blocked is reserved for security containment. Historical records remain
+ * separate from access state and are not deleted by these transitions.
  */
-export type AccessStatus = "active" | "denied" | "blocked"
+export type AccessStatus = "active" | "denied" | "suspended" | "retired" | "blocked"

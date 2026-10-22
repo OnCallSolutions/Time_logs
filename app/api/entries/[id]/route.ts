@@ -6,10 +6,16 @@
  * row ownership is checked in SQL.
  */
 import { z } from "zod"
+import { withOperationalCapture } from "@/lib/api-outcome-capture"
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { getEffectiveUserRole } from "@/lib/access"
 import { canReviewRole } from "@/lib/review-policy"
+import { createReviewAccess } from "@/lib/review-access"
+import { decideTimesheetBatch } from "@/lib/account-handoffs"
+import { listAccountIdentities } from "@/lib/account-identities"
+import { resolveSubmissionReviewer } from "@/lib/submission-reviewer"
+import { persistenceFailureDetails } from "@/lib/persistence-diagnostics"
 import {
   auditActionForStatus,
   changedFieldMetadata,
@@ -19,7 +25,14 @@ import {
   deleteTimeEntry,
   getTimeEntry,
   recordAuditEvent,
-  updateTimeEntry,
+  updateTimeEntryWithAudit,
+  submitTimeEntryWithAudit,
+  getTimesheetSubmissionDeadline,
+  listTimeProjects,
+  isTimesheetDateArchived,
+  hasActiveTimesheetExtension,
+  listTimeEntries,
+  listTimesheetPeriods,
 } from "@/lib/db"
 import type { EntryStatus, TimeEntry } from "@/lib/types"
 
@@ -34,9 +47,12 @@ const patchSchema = z
     description: z.string().optional(),
     status: z.enum(["draft", "submitted", "approved", "rejected"]).optional(),
     reviewNote: z.string().trim().max(500).optional(),
+    correctionDueAt: z.string().datetime({offset:true}).optional(),
     expectedRevision: z.string().min(1).max(100).optional(),
+    reviewManagerEmail: z.string().email().nullable().optional(),
+    batchEntries:z.array(z.object({id:z.string().uuid(),revision:z.string().min(1).max(100)}).strict()).min(1).max(100).optional(),
   })
-  .refine((patch) => Object.keys(patch).some(key=>key!=="expectedRevision"), {
+  .refine((patch) => Object.keys(patch).some(key=>key!=="expectedRevision"&&key!=="batchEntries"), {
     message: "At least one field is required.",
   })
 
@@ -61,8 +77,8 @@ async function getAccess() {
   return {
     email,
     role,
-    includeAll: permissions.view_team||(role==="account_manager"&&permissions.review_manager_entries),
-    canReview: permissions.review_entries||(role==="account_manager"&&permissions.review_manager_entries),
+    includeAll: role==="manager"||permissions.view_team||(role==="account_manager"&&(permissions.view_manager_entries||permissions.review_entries)),
+    canReview: permissions.review_entries||permissions.review_manager_entries,
     permissions,
   }
 }
@@ -162,7 +178,7 @@ function validateStatusChange(
  * @param context - Route context containing the entry id parameter.
  * @returns JSON response containing the updated entry or an error.
  */
-export async function PATCH(
+async function updateEntry(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
@@ -173,7 +189,7 @@ export async function PATCH(
     }
 
     const { id } = await params
-    const patch = patchSchema.parse(await req.json())
+    let patch = patchSchema.parse(await req.json())
     if ((hasEntryFieldPatch(patch) && !access.permissions.edit_entries) ||
       ((patch.status === "approved" || patch.status === "rejected") && !access.canReview) ||
       ((patch.status === "draft" || patch.status === "submitted") && !access.permissions.submit_entries && !access.permissions.review_entries))
@@ -190,11 +206,44 @@ export async function PATCH(
     if (!current) {
       return Response.json({ error: "Entry not found." }, { status: 404 })
     }
+    if(current.correctionOwnerEmail&&access.role!=="admin"&&current.correctionOwnerEmail.toLowerCase()!==access.email.toLowerCase())return Response.json({error:"Only the designated correction owner may edit or resubmit this returned timesheet."},{status:403})
+    if(current.correctionDueAt&&Date.now()>Date.parse(current.correctionDueAt)&&access.role!=="admin")return Response.json({error:`The correction window closed on ${new Date(current.correctionDueAt).toLocaleString()}. Contact an administrator if further changes are required.`},{status:409})
+    const correctionWindowOpen=!!current.correctionOwnerEmail&&current.correctionOwnerEmail.toLowerCase()===access.email.toLowerCase()&&!!current.correctionDueAt&&Date.now()<=Date.parse(current.correctionDueAt)
+    if((access.role==="contractor"||access.role==="employee")&&!correctionWindowOpen&&await isTimesheetDateArchived(current.date)){
+      const extensionSubmission=patch.status==="submitted"&&!hasEntryFieldPatch(patch)&&await hasActiveTimesheetExtension(current.ownerEmail??access.email,current.date)
+      if(!extensionSubmission)return Response.json({error:"Past timesheet periods are archived and read-only. An approved extension only permits submitting existing draft entries."},{status:409})
+    }
+    if(patch.project!==undefined&&(access.role==="contractor"||access.role==="employee")){
+      const assigned=await listTimeProjects(false,access.email)
+      if(!assigned.some(project=>project.name.toLocaleLowerCase()===patch.project!.toLocaleLowerCase()))return Response.json({error:"That project is not assigned to your account. Ask your manager to assign it before changing this entry."},{status:422})
+    }
 
+    const scope = await createReviewAccess(access.email, access)(current)
+    if(!scope.visible)return Response.json({error:"Entry not found."},{status:404})
+    if(access.role!=="admin"&&current.ownerEmail?.toLowerCase()!==access.email.toLowerCase()&&!scope.reviewable)return Response.json({error:"View-only access does not permit changing this timesheet. Request review assistance or ask an administrator."},{status:403})
+    if(patch.contractor!==undefined&&current.ownerEmail){
+      const identity=(await listAccountIdentities([current.ownerEmail]))[0]
+      if(identity&&patch.contractor!==identity.officialName)return Response.json({error:"Official names are managed through company identity, not timesheet editing."},{status:400})
+    }
+    if(current.payoutEligible)return Response.json({error:"Business accounts has authorized eligibility; this evidence is locked."},{status:409})
+    if(access.role==="manager"&&current.ownerEmail?.toLowerCase()!==access.email.toLowerCase()&&hasEntryFieldPatch(patch)&&!scope.reviewable)return Response.json({error:"Review assistance rights are required to change this evidence."},{status:403})
+    if(patch.reviewManagerEmail!==undefined){
+      if(patch.status!=="submitted"||current.ownerEmail?.toLowerCase()!==access.email.toLowerCase())return Response.json({error:"A manager can only be selected when submitting your own work."},{status:403})
+    }
+    if(patch.status==="submitted"){
+      if((access.role==="contractor"||access.role==="employee")&&current.ownerEmail?.toLowerCase()!==access.email.toLowerCase())return Response.json({error:"Only the account owner can route a personal timesheet for review."},{status:403})
+      const submitterEmail=current.ownerEmail??access.email
+      const selfAccountManager=current.ownerEmail?.toLowerCase()===access.email.toLowerCase()&&access.role==="account_manager"
+      const reviewer=selfAccountManager?{email:access.email}:await resolveSubmissionReviewer(submitterEmail)
+      if(!reviewer)return Response.json({error:"No active manager currently has both team-view and approval rights. Ask an administrator to assign a reviewer before submitting."},{status:400})
+      if(patch.reviewManagerEmail&&patch.reviewManagerEmail.toLowerCase()!==reviewer.email)return Response.json({error:"Reviewing manager is assigned by the company and cannot be changed during submission."},{status:403})
+      patch={...patch,reviewManagerEmail:reviewer.email}
+    }
+
+    const selfAccountManagerApproval=access.role==="account_manager"&&current.ownerEmail?.toLowerCase()===access.email.toLowerCase()&&patch.status==="approved"
     if (patch.status === "approved" || patch.status === "rejected") {
-      if(current.ownerEmail?.toLowerCase()===access.email.toLowerCase())return Response.json({error:"Your own entries require another authorized reviewer."},{status:403})
-      const ownerRole=current.ownerEmail?await getEffectiveUserRole(current.ownerEmail):null
-      if(!canReviewRole(access.role,ownerRole))return Response.json({error:"Manager timesheets require an authorized account manager; account managers cannot review other operational timesheets."},{status:403})
+      if(current.ownerEmail?.toLowerCase()===access.email.toLowerCase()&&!selfAccountManagerApproval)return Response.json({error:"You may self-approve business account manager entries, but cannot reject your own entries."},{status:403})
+      if(!scope.reviewable)return Response.json({error:"An explicit independent-review right or active scoped request is required."},{status:403})
       if(hasEntryFieldPatch(patch))return Response.json({error:"Review decisions cannot change submitted evidence."},{status:400})
     }
 
@@ -216,7 +265,7 @@ export async function PATCH(
     const statusError = validateStatusChange(
       current,
       patch.status,
-      access.canReview && current.ownerEmail?.toLowerCase()!==access.email.toLowerCase(),
+      access.canReview && (current.ownerEmail?.toLowerCase()!==access.email.toLowerCase()||selfAccountManagerApproval),
       patch.reviewNote,
     )
     if (statusError) {
@@ -226,13 +275,112 @@ export async function PATCH(
       )
     }
 
-    const entry = await updateTimeEntry(
+    if(patch.status==="approved"||patch.status==="rejected"){
+      if(patch.expectedRevision&&patch.expectedRevision!==current.revision)return Response.json({error:"Evidence changed. Refresh the complete timesheet before deciding."},{status:409})
+      if(!current.ownerEmail)return Response.json({error:"Timesheet owner is unavailable."},{status:409})
+      if(patch.status==="approved"&&!selfAccountManagerApproval&&access.role!=="account_manager"&&!access.permissions.send_to_accounts)return Response.json({error:"Approval requires permission to forward evidence to business accounts."},{status:403})
+      const periods=await listTimesheetPeriods()
+      const period=periods.find(item=>current.date>=item.startDate&&current.date<=item.endDate)
+      const [year,month]=current.date.slice(0,7).split("-").map(Number)
+      const startDate=period?.startDate??`${current.date.slice(0,7)}-01`
+      const endDate=period?.endDate??new Date(Date.UTC(year,month,0)).toISOString().slice(0,10)
+      const visibleEntries=await listTimeEntries(access.email,access.includeAll)
+      const batch=visibleEntries.filter(entry=>entry.status==="submitted"&&entry.ownerEmail?.toLowerCase()===current.ownerEmail!.toLowerCase()&&entry.date>=startDate&&entry.date<=endDate)
+      if(!batch.some(entry=>entry.id===id))return Response.json({error:"The selected entry is not in an awaiting timesheet."},{status:409})
+      const batchScopes=await Promise.all(batch.map(entry=>createReviewAccess(access.email,access)(entry)))
+      if(batchScopes.some(item=>!item.visible||!item.reviewable))return Response.json({error:"Every entry in this timesheet must be in your review scope before deciding the batch."},{status:403})
+      const selection=batch.map(entry=>({id:entry.id,revision:entry.revision??""}))
+      if(selection.some(item=>!item.revision))return Response.json({error:"Refresh the timesheet before reviewing it."},{status:409})
+      if(patch.batchEntries){
+        const supplied=new Map(patch.batchEntries.map(item=>[item.id,item.revision]))
+        if(supplied.size!==selection.length||selection.some(item=>supplied.get(item.id)!==item.revision))return Response.json({error:"The timesheet changed. Refresh the complete timesheet before deciding."},{status:409})
+      }
+      if(patch.status==="rejected"&&!patch.reviewNote?.trim())return Response.json({error:"A rejection reason is required."},{status:400})
+      if(patch.status==="approved"&&access.role==="admin"&&!patch.reviewNote?.trim())return Response.json({error:"An admin approval requires an intervention reason."},{status:400})
+      let correctionDueAt:string|undefined
+      if(patch.status==="rejected"){
+        if(!patch.correctionDueAt)return Response.json({error:"Choose a correction deadline before returning this timesheet."},{status:400})
+        const periodDeadline=period?.exceptionResolutionDeadline??period?.accountApprovalDeadline??period?.submissionDeadline
+        const due=Date.parse(patch.correctionDueAt)
+        if(!periodDeadline||!Number.isFinite(due)||due<=Date.now()||due>Date.parse(periodDeadline))return Response.json({error:"Correction deadlines must be in the future and no later than the configured period resolution deadline."},{status:422})
+        correctionDueAt=new Date(due).toISOString()
+      }
+      if(patch.status==="approved"&&!selfAccountManagerApproval&&!((await listAccountIdentities([current.ownerEmail]))[0]))return Response.json({error:"Only a registered account can be approved into the business-accounts workflow."},{status:409})
+      const ownerRole=await getEffectiveUserRole(current.ownerEmail)
+      const finalAccountDecision=access.role==="account_manager"||(access.role==="admin"&&(ownerRole==="manager"||ownerRole==="account_manager"))
+      const updated=await decideTimesheetBatch({ownerEmail:current.ownerEmail,startDate,endDate,selection,rejectedEntryId:patch.status==="rejected"?id:undefined,correctionDueAt},access.email,patch.status,ownerRole??"contractor",finalAccountDecision,patch.reviewNote?.trim()??"",getAuditContext(req))
+      if(updated.length!==selection.length)return Response.json({error:"The timesheet changed while it was being reviewed. Refresh before deciding."},{status:409})
+      return Response.json({entry:updated.find(entry=>entry.id===id),entries:updated})
+    }
+    const revision=patch.expectedRevision??current.revision
+    if(!revision)return Response.json({error:"Refresh this timesheet before saving a status or editing it."},{status:409})
+    if(patch.status==="submitted"){
+      const submissionDeadline=await getTimesheetSubmissionDeadline()
+      const hasExtension=await hasActiveTimesheetExtension(current.ownerEmail??access.email,current.date)
+      if(submissionDeadline&&Date.now()>=Date.parse(submissionDeadline)&&!hasExtension)return Response.json({error:`The submission deadline passed on ${new Date(submissionDeadline).toLocaleString()}. Request an extension from your account manager.`},{status:409})
+      let submitted: TimeEntry | null
+      try {
+        submitted=await submitTimeEntryWithAudit(
+          access.email,
+          id,
+          patch as typeof patch & {status:"submitted";reviewManagerEmail:string},
+          access.includeAll,
+          access.canReview ? access.email : undefined,
+          revision,
+          access.email,
+          current.status,
+          changedFieldMetadata(patch),
+          access.role,
+          getAuditContext(req),
+        )
+      } catch (writeError) {
+        // A transport can fail after PostgreSQL commits. Confirm the durable state
+        // before telling the user to retry an operation that may already have saved.
+        try {
+          const persisted=await getTimeEntry(access.email,id,access.includeAll)
+          const expectedReviewer=patch.reviewManagerEmail!
+          const requestedFieldsPersisted=(patch.contractor===undefined||persisted?.contractor===patch.contractor)&&
+            (patch.date===undefined||persisted?.date.slice(0,10)===patch.date)&&
+            (patch.hours===undefined||persisted?.hours===patch.hours)&&
+            (patch.project===undefined||persisted?.project===patch.project)&&
+            (patch.description===undefined||persisted?.description===patch.description)
+          if(persisted?.status==="submitted"&&persisted.ownerEmail?.toLowerCase()===current.ownerEmail?.toLowerCase()&&
+            requestedFieldsPersisted&&
+            persisted.reviewManagerEmail?.toLowerCase()===expectedReviewer.toLowerCase()){
+            console.warn("[entries] submission confirmed after persistence error",{id,...persistenceFailureDetails(writeError)})
+            return Response.json({entry:persisted})
+          }
+        } catch (readError) {
+          console.warn("[entries] submission read-back failed",{id,...persistenceFailureDetails(readError)})
+        }
+        throw writeError
+      }
+      if(!submitted){
+        const latestDeadline=await getTimesheetSubmissionDeadline()
+        const hasLatestExtension=await hasActiveTimesheetExtension(current.ownerEmail??access.email,current.date)
+        if(latestDeadline&&Date.now()>=Date.parse(latestDeadline)&&!hasLatestExtension)return Response.json({error:`The submission deadline passed on ${new Date(latestDeadline).toLocaleString()}. Request an extension from your account manager.`},{status:409})
+        return Response.json({error:"Evidence changed. Refresh before submitting again."},{status:409})
+      }
+      return Response.json({entry:submitted})
+    }
+    const entry = await updateTimeEntryWithAudit(
       access.email,
       id,
       patch,
       access.includeAll,
       access.canReview ? access.email : undefined,
-      patch.expectedRevision,
+      revision,
+      {
+        actorEmail: access.email,
+        action: patch.status ? auditActionForStatus(patch.status) : "entry_updated",
+        metadata: {
+          fromStatus: current.status,
+          toStatus: patch.status ?? current.status,
+          ...changedFieldMetadata(patch),
+        },
+        context: getAuditContext(req),
+      },
+      selfAccountManagerApproval,
     )
 
     if (!entry) {
@@ -240,27 +388,15 @@ export async function PATCH(
       return Response.json({ error: "Entry not found." }, { status: 404 })
     }
 
-    await recordAuditEvent({
-      actorEmail: access.email,
-      action: patch.status
-        ? auditActionForStatus(patch.status)
-        : "entry_updated",
-      targetType: "time_entry",
-      targetId: id,
-      metadata: {
-        fromStatus: current.status,
-        toStatus: entry.status,
-        ...changedFieldMetadata(patch),
-      },
-      ...getAuditContext(req),
-    })
-
     return Response.json({ entry })
   } catch (err) {
-    console.error("[entries] update failed")
+    if(err instanceof z.ZodError||err instanceof SyntaxError)return Response.json({error:"Invalid entry update. Check the selected fields and rejection reason."},{status:400})
+    const reference=crypto.randomUUID()
+    const diagnostics=persistenceFailureDetails(err)
+    console.error("[entries] update failed",{reference,...diagnostics})
     return Response.json(
-      { error: "Failed to update entry." },
-      { status: 400 },
+      { error: "The update could not be confirmed. Refresh before retrying; the server may have saved it.",reference,code:diagnostics.databaseCode },
+      { status: 503 },
     )
   }
 }
@@ -276,7 +412,7 @@ export async function PATCH(
  * @param context - Route context containing the entry id parameter.
  * @returns JSON response confirming deletion or reporting an error.
  */
-export async function DELETE(
+async function deleteEntry(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
@@ -293,7 +429,13 @@ export async function DELETE(
     if (!current) {
       return Response.json({ error: "Entry not found." }, { status: 404 })
     }
-
+    if(current.correctionOwnerEmail&&access.role!=="admin"&&current.correctionOwnerEmail.toLowerCase()!==access.email.toLowerCase())return Response.json({error:"Only the designated correction owner may delete this returned timesheet."},{status:403})
+    if(current.correctionDueAt&&Date.now()>Date.parse(current.correctionDueAt)&&access.role!=="admin")return Response.json({error:`The correction window closed on ${new Date(current.correctionDueAt).toLocaleString()}. Contact an administrator if further changes are required.`},{status:409})
+    const correctionWindowOpen=!!current.correctionOwnerEmail&&current.correctionOwnerEmail.toLowerCase()===access.email.toLowerCase()&&!!current.correctionDueAt&&Date.now()<=Date.parse(current.correctionDueAt)
+    const scope = await createReviewAccess(access.email, access)(current)
+    if(!scope.visible)return Response.json({error:"Entry not found."},{status:404})
+    if(current.payoutEligible)return Response.json({error:"Authorized eligibility evidence cannot be deleted."},{status:409})
+    if(access.role==="manager"&&current.ownerEmail?.toLowerCase()!==access.email.toLowerCase())return Response.json({error:"Managers cannot delete another person's timesheet. Reject it with a reason to return it for correction."},{status:403})
     if (
       (!access.canReview || current.ownerEmail?.toLowerCase()===access.email.toLowerCase()) &&
       current.status !== "draft" &&
@@ -331,3 +473,6 @@ export async function DELETE(
     )
   }
 }
+
+export const PATCH=withOperationalCapture("/api/entries/[id]","PATCH",updateEntry)
+export const DELETE=withOperationalCapture("/api/entries/[id]","DELETE",deleteEntry)

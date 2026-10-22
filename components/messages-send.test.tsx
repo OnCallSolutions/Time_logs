@@ -15,9 +15,9 @@ const inbox:MessageInbox={messages:[],email:"manager@example.com",admin:false,er
 beforeEach(()=>{invalidateClientData();cryptoState.ready=true;encrypt.mockResolvedValue({ciphertext:"encrypted-envelope"})})
 afterEach(()=>{invalidateClientData();vi.unstubAllGlobals();vi.clearAllMocks()})
 /** @returns Fetch spy accepting a scoped roster and explicit message sends. */
-function requests(){const request=vi.fn(async(url:string)=>new Response(JSON.stringify(url.includes("delegation")?{users:[{email:"employee@example.com",role:"employee",accessStatus:"active"}]}:{ok:true})));vi.stubGlobal("fetch",request);return request}
+function requests(){const request=vi.fn(async(url:string)=>new Response(JSON.stringify(url.includes("delegation")?{users:[{email:"employee@example.com",displayName:"Alex Employee",role:"employee",accessStatus:"active"}]}:{ok:true})));vi.stubGlobal("fetch",request);return request}
 /** @returns Promise<void> after preparing an individual message without sending it. */
-async function compose(){const user=userEvent.setup();await user.click(screen.getByRole("button",{name:"New message"}));await screen.findByRole("option",{name:"employee@example.com"});await user.selectOptions(screen.getByRole("combobox",{name:"Recipient"}),"employee@example.com");await user.type(screen.getByRole("textbox",{name:"Message"}),"Private hello")}
+async function compose(){const user=userEvent.setup();await user.click(screen.getByRole("button",{name:"New message"}));await screen.findByRole("option",{name:"Alex Employee"});await user.selectOptions(screen.getByRole("combobox",{name:"Recipient"}),"employee@example.com");await user.type(screen.getByRole("textbox",{name:"Message"}),"Private hello")}
 it("sends only an encrypted envelope after choosing a recipient",async()=>{
   const request=requests();render(<MessagesPanel canSend inbox={inbox}/>);await compose();await userEvent.click(screen.getByRole("button",{name:"Send message"}))
   await waitFor(()=>expect(inbox.refresh).toHaveBeenCalled())
@@ -32,7 +32,7 @@ it("reports missing encryption setup without posting or excluding anyone",async(
 it("preserves the draft and explains uncertain delivery after a timeout",async()=>{
   requests()
   vi.mocked(fetch).mockImplementation(async input=>{
-    if(String(input).includes("delegation"))return new Response(JSON.stringify({users:[{email:"employee@example.com",role:"employee",accessStatus:"active"}]}))
+    if(String(input).includes("delegation"))return new Response(JSON.stringify({users:[{email:"employee@example.com",displayName:"Alex Employee",role:"employee",accessStatus:"active"}]}))
     throw Object.assign(new Error("timeout"),{name:"TimeoutError"})
   })
   render(<MessagesPanel canSend inbox={inbox}/>);await compose();await userEvent.click(screen.getByRole("button",{name:"Send message"}))
