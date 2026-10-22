@@ -432,8 +432,6 @@ async function deleteEntry(
     if(current.correctionOwnerEmail&&access.role!=="admin"&&current.correctionOwnerEmail.toLowerCase()!==access.email.toLowerCase())return Response.json({error:"Only the designated correction owner may delete this returned timesheet."},{status:403})
     if(current.correctionDueAt&&Date.now()>Date.parse(current.correctionDueAt)&&access.role!=="admin")return Response.json({error:`The correction window closed on ${new Date(current.correctionDueAt).toLocaleString()}. Contact an administrator if further changes are required.`},{status:409})
     const correctionWindowOpen=!!current.correctionOwnerEmail&&current.correctionOwnerEmail.toLowerCase()===access.email.toLowerCase()&&!!current.correctionDueAt&&Date.now()<=Date.parse(current.correctionDueAt)
-    if((access.role==="contractor"||access.role==="employee")&&!correctionWindowOpen&&await isTimesheetDateArchived(current.date))return Response.json({error:"Past timesheet periods are archived and read-only. Contact your manager if a correction is required."},{status:409})
-
     const scope = await createReviewAccess(access.email, access)(current)
     if(!scope.visible)return Response.json({error:"Entry not found."},{status:404})
     if(current.payoutEligible)return Response.json({error:"Authorized eligibility evidence cannot be deleted."},{status:409})

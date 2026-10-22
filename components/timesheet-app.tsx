@@ -710,6 +710,22 @@ export function TimesheetApp({
       .finally(()=>{invalidateEntriesCache();pendingEntryWrites.current--;entryReadEpoch.current++})
   }
 
+  /** Deletes a confirmed selection using server-side role and row checks. */
+  async function deleteSelectedEntries(ids:string[]) {
+    if(!ids.length||!permissions.delete_entries)return
+    invalidateEntriesCache();pendingEntryWrites.current++;entryReadEpoch.current++
+    let statusCode:number|undefined
+    try{
+      const response=await fetch(apiPath("/api/entries"),{method:"DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({ids})})
+      statusCode=response.status
+      const data=await response.json()
+      if(!response.ok)throw Object.assign(new Error(data.error??"Selected timesheets could not be deleted."),{code:data.code})
+      setEntries(previous=>previous.filter(entry=>!ids.includes(entry.id)))
+      setSyncError(null)
+    }catch(error){showTrackedFailure(error,"entry.bulk_delete","/api/entries",statusCode,"DELETE");throw error}
+    finally{invalidateEntriesCache();pendingEntryWrites.current--;entryReadEpoch.current++}
+  }
+
   /** Opens an explicit confirmation before clearing the administrator-visible entries. */
   function clearEntries() {
     if (!canClearVisibleEntries || !userEmail) return
@@ -926,6 +942,7 @@ export function TimesheetApp({
           onUpdate={updateEntry}
           onStatusChange={changeEntryStatus}
           onDelete={deleteEntry}
+          onDeleteSelected={deleteSelectedEntries}
           onClear={clearEntries}
           canClear={view!=="personal"&&canClearVisibleEntries}
           canReview={false}

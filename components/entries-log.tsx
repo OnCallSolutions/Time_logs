@@ -120,6 +120,7 @@ export function EntriesLog({
   onUpdate,
   onStatusChange,
   onDelete,
+  onDeleteSelected,
   onClear,
   title = "Time entries",
   stateKey,
@@ -148,6 +149,7 @@ export function EntriesLog({
   onUpdate: EntryMutation
   onStatusChange: EntryTransition
   onDelete: (id: string) => void
+  onDeleteSelected?: (ids:string[]) => Promise<void>
   onClear: () => void
   title?: string
   stateKey?: string
@@ -169,6 +171,8 @@ export function EntriesLog({
   const [groupBy, setGroupBy] = useRetainedViewState(stateKey?`${stateKey}:group`:undefined,`project`)
   const [review, setReview] = useState<{ entry: TimeEntry; decision: "approved" | "rejected" } | null>(null)
   const [clearConfirmationOpen, setClearConfirmationOpen] = useState(false)
+  const [deleteSelectedOpen,setDeleteSelectedOpen]=useState(false)
+  const [deleteSelectedBusy,setDeleteSelectedBusy]=useState(false)
   const [submissionDeadline,setSubmissionDeadline]=useState<string|null>(null)
   const [periods,setPeriods]=useState<Array<{id:string;name:string;startDate:string;endDate:string;submissionDeadline:string;managerGraceDays:number}>>([])
   const [extensionRequests,setExtensionRequests]=useState<Array<{periodId:string;status:string;approvedUntil:string|null}>>([])
@@ -227,10 +231,13 @@ export function EntriesLog({
   const submissions = canSubmit&&userEmail ? periodEntries.filter(entry => (!ownerEntryIsArchived(entry)||hasExtensionForEntry(entry)) && !entry.payoutEligible && (entry.status === "draft" || entry.status === "rejected") && (entry.ownerEmail?.toLowerCase() === userEmail.toLowerCase() || canSubmitOthers) && isEntrySubmissionOpen(entry,entry.ownerEmail?.toLowerCase()===userEmail.toLowerCase())) : []
   const requestable = canRequestReview ? periodEntries.filter(entry=>entry.status==="submitted"&&(entry.reviewEligible||entry.ownerEmail?.toLowerCase()===userEmail?.toLowerCase())) : []
   const eligible = [...submissions,...requestable]
-  const eligibleIdSet = new Set(eligible.map(entry => entry.id))
   const selected = eligible.filter(entry => selectedIdSet.has(entry.id))
-  const matchingEligible = eligible.filter(entry => visibleIdSet.has(entry.id))
+  const deletable=visibleEntries.filter(entry=>canDelete&&!entry.payoutEligible&&(entry.ownerEmail?.toLowerCase()===userEmail?.toLowerCase()||canReview&&!!entry.ownerEmail)&&(!deleteOwnOnly||entry.ownerEmail?.toLowerCase()===userEmail?.toLowerCase())&&!ownerEntryIsArchived(entry)&&(entry.status==="draft"||entry.status==="rejected"||(canReview&&entry.ownerEmail?.toLowerCase()!==userEmail?.toLowerCase())))
+  const selectableRecords=[...new Map([...eligible,...deletable].map(entry=>[entry.id,entry])).values()]
+  const selectableRecordIds=new Set(selectableRecords.map(entry=>entry.id))
+  const matchingEligible = selectableRecords.filter(entry => visibleIdSet.has(entry.id))
   const allMatchingSelected = matchingEligible.length > 0 && matchingEligible.every(entry => selectedIdSet.has(entry.id))
+  const selectedDeletable=deletable.filter(entry=>selectedIdSet.has(entry.id))
   if (entries.length === 0) {
     return (
       <div className="border-y border-border bg-card/50">
@@ -350,6 +357,9 @@ export function EntriesLog({
           </footer>
         </section>
       </WindowSurface>}
+      {deleteSelectedOpen&&<WindowSurface title="Delete selected timesheets" onBack={()=>{if(!deleteSelectedBusy)setDeleteSelectedOpen(false)}} compact resizable={false} assistant={false} disabled={deleteSelectedBusy}>
+        <section className="flex w-full flex-col bg-white text-slate-950"><div className="p-5"><header className="flex items-start gap-3"><span className="grid size-10 shrink-0 place-items-center rounded-full bg-red-50 text-red-700 ring-1 ring-red-200"><AlertTriangle className="size-5"/></span><div><h2 className="font-semibold">Delete {selectedDeletable.length} selected {selectedDeletable.length===1?"entry":"entries"}?</h2><p className="mt-1 text-sm text-slate-600">Only entries eligible for deletion in your current filtered view are included. Submitted or approved work, archived periods, and protected records are excluded.</p></div></header><p className="mt-4 border-l-2 border-red-500 bg-red-50 px-3 py-2 text-sm text-red-900">This cannot be undone. The deletion will be recorded in the activity history.</p></div><footer className="flex justify-end gap-2 border-t bg-slate-50 p-3"><Button variant="outline" disabled={deleteSelectedBusy} onClick={()=>setDeleteSelectedOpen(false)}>Cancel</Button><Button variant="destructive" disabled={deleteSelectedBusy||!selectedDeletable.length||!onDeleteSelected} onClick={async()=>{if(!onDeleteSelected)return;setDeleteSelectedBusy(true);try{await onDeleteSelected(selectedDeletable.map(entry=>entry.id));setSelectedIds(previous=>previous.filter(id=>!selectedDeletable.some(entry=>entry.id===id)));setDeleteSelectedOpen(false)}catch{/* Parent surfaces the tracked failure and preserves current rows. */}finally{setDeleteSelectedBusy(false)}}}><Trash2 className="size-4"/>{deleteSelectedBusy?"Deleting…":"Delete selected"}</Button></footer></section>
+      </WindowSurface>}
       {review && <EntryReviewDialog entry={review.entry} decision={review.decision} onCancel={() => setReview(null)} onConfirm={async note => {
         await onStatusChange(review.entry.id, review.decision, note || undefined, review.entry.revision)
         setReview(null)
@@ -428,10 +438,12 @@ export function EntriesLog({
               <label className="flex items-center gap-2 text-xs font-medium text-slate-700">Through<input aria-label="Entries through date" type="date" value={dateThrough} min={dateFrom||undefined} onChange={event=>setDateThrough(event.target.value)} className="h-7 min-w-0 flex-1 rounded-md border border-emerald-200 bg-white px-2 text-xs"/></label>
               <select aria-label="Group entries" value={groupBy} onChange={event=>setGroupBy(event.target.value)} className="h-7 rounded-md border border-teal-200 bg-white px-2 text-xs"><option value="project">Group by project</option><option value="day">Group by day</option><option value="person">Group by person</option><option value="none">No grouping</option></select>
               <div className="flex items-center justify-between gap-2"><span className="text-xs font-medium text-slate-600">{visibleEntries.length} visible · {filtersActive?"custom view":"all entries"}</span><Button variant="outline" size="sm" className="h-7" title="Reset search, filters, sorting, and grouping" aria-label="Reset timesheet view" disabled={!filtersActive} onClick={clearFilters}><FilterX className="size-4"/>Reset view</Button></div>
-              {selectable&&!(showPatronBulkActions&&periodView)&&<div className="flex flex-wrap items-center gap-1 border-t border-orange-200 bg-orange-50/60 px-1.5 py-1 sm:col-span-2 xl:col-span-4">
-                <span className="mr-1 text-xs font-semibold text-orange-950">Bulk actions · {selected.length} selected / {matchingEligible.length} eligible</span>
+              {(selectable||canDelete)&&!(showPatronBulkActions&&periodView)&&<div className="flex flex-wrap items-center gap-1 border-t border-orange-200 bg-orange-50/60 px-1.5 py-1 sm:col-span-2 xl:col-span-4">
+                <span className="mr-1 text-xs font-semibold text-orange-950">Bulk actions · {selectedIds.filter(id=>selectableRecordIds.has(id)).length} selected / {matchingEligible.length} available</span>
+                {canDelete&&<Button variant="outline" size="sm" disabled={!deletable.length} onClick={()=>setSelectedIds(previous=>[...new Set([...previous,...deletable.map(entry=>entry.id)])])}>Select all deletable ({deletable.length})</Button>}
                 <Button variant="outline" size="sm" disabled={!eligible.length} onClick={() => setSelectedIds(eligible.map(entry => entry.id))}>Select all eligible ({eligible.length})</Button>
                 <Button variant="ghost" size="sm" disabled={!selected.length} onClick={() => setSelectedIds([])}>Clear selection</Button>
+                {onDeleteSelected&&<Button variant="destructive" size="sm" disabled={!selectedDeletable.length} onClick={()=>setDeleteSelectedOpen(true)}><Trash2 className="size-3.5"/>Delete selected ({selectedDeletable.length})</Button>}
                 {canSubmit&&<SubmissionActions entries={submissions.filter(entry=>selectedIdSet.has(entry.id))} openRequest={submissionRequest} destination={submissionDestination} onStatusChange={onStatusChange} onSubmitted={id => setSelectedIds(previous => previous.filter(current => current !== id))} />}
                 {canRequestReview&&onRequestReview&&<Button size="sm" variant="outline" disabled={!requestable.some(entry=>selectedIdSet.has(entry.id))||requestable.filter(entry=>selectedIdSet.has(entry.id)).length>50} onClick={()=>onRequestReview(requestable.filter(entry=>selectedIdSet.has(entry.id)))}>Request reviewer help ({requestable.filter(entry=>selectedIdSet.has(entry.id)).length})</Button>}
               </div>}
@@ -443,7 +455,7 @@ export function EntriesLog({
         <table className="w-full min-w-[1080px] border-collapse border-2 border-slate-500 text-left shadow-sm [&_th]:border-r [&_th]:border-slate-400 [&_td]:border-r [&_td]:border-b [&_td]:border-slate-300 [&_th:last-child]:border-r-0 [&_td:last-child]:border-r-0">
           <thead className="sticky top-0 z-[1] bg-sky-100">
             <tr className="border-b-2 border-sky-500 text-[10px] uppercase tracking-wide text-sky-950">
-              {selectable && <th className="px-2 py-1"><input type="checkbox" aria-label="Select all matching eligible entries" checked={allMatchingSelected} disabled={!matchingEligible.length} ref={input => { if (input) input.indeterminate = !allMatchingSelected && matchingEligible.some(entry => selectedIds.includes(entry.id)) }} onChange={event => setSelectedIds(previous => event.target.checked ? [...new Set([...previous, ...matchingEligible.map(entry => entry.id)])] : previous.filter(id => !matchingEligible.some(entry => entry.id === id)))} className="size-3.5 accent-orange-700" /></th>}
+              {(selectable||canDelete) && <th className="px-2 py-1"><input type="checkbox" aria-label="Select all matching eligible entries" checked={allMatchingSelected} disabled={!matchingEligible.length} ref={input => { if (input) input.indeterminate = !allMatchingSelected && matchingEligible.some(entry => selectedIds.includes(entry.id)) }} onChange={event => setSelectedIds(previous => event.target.checked ? [...new Set([...previous, ...matchingEligible.map(entry => entry.id)])] : previous.filter(id => !matchingEligible.some(entry => entry.id === id)))} className="size-3.5 accent-orange-700" /></th>}
               <th className="px-1.5 py-0.5 font-medium">Contractor</th>
               <th className="px-1.5 py-0.5 font-medium">Date</th>
               <th className="px-1.5 py-0.5 font-medium">Project</th>
@@ -459,9 +471,9 @@ export function EntriesLog({
               const unlocked = !entry.payoutEligible && (entry.status === "draft" || entry.status === "rejected" || (canReview && !own))
               return (
                 <Fragment key={entry.id}>
-              {groupBy!=="none"&&(index===0||entryGroupKey(visibleEntries[index-1],groupBy)!==entryGroupKey(entry,groupBy))&&<tr className="bg-sky-100 text-sky-950"><th colSpan={selectable ? 8 : 7} className="border-y-2 border-sky-300 px-2 py-1 text-left text-xs font-semibold text-sky-950">{entryGroupLabel(entry,groupBy)} <span className="ml-1 font-normal text-sky-800">{groupTotals.get(entryGroupKey(entry,groupBy))?.count} entries · {groupTotals.get(entryGroupKey(entry,groupBy))?.hours.toLocaleString(undefined,{maximumFractionDigits:2})}h</span></th></tr>}
+              {groupBy!=="none"&&(index===0||entryGroupKey(visibleEntries[index-1],groupBy)!==entryGroupKey(entry,groupBy))&&<tr className="bg-sky-100 text-sky-950"><th colSpan={selectable||canDelete ? 8 : 7} className="border-y-2 border-sky-300 px-2 py-1 text-left text-xs font-semibold text-sky-950">{entryGroupLabel(entry,groupBy)} <span className="ml-1 font-normal text-sky-800">{groupTotals.get(entryGroupKey(entry,groupBy))?.count} entries · {groupTotals.get(entryGroupKey(entry,groupBy))?.hours.toLocaleString(undefined,{maximumFractionDigits:2})}h</span></th></tr>}
                 <EntryLogRow entry={entry} showIdentity
-                  selection={selectable ? { checked: selectedIdSet.has(entry.id) && eligibleIdSet.has(entry.id), disabled: !eligibleIdSet.has(entry.id), onChange: checked => setSelectedIds(previous => checked ? [...new Set([...previous, entry.id])] : previous.filter(id => id !== entry.id)) } : undefined}
+                  selection={selectable||canDelete ? { checked: selectedIdSet.has(entry.id) && selectableRecordIds.has(entry.id), disabled: !selectableRecordIds.has(entry.id), onChange: checked => setSelectedIds(previous => checked ? [...new Set([...previous, entry.id])] : previous.filter(id => id !== entry.id)) } : undefined}
                   canEdit={canEdit && unlocked && !ownerEntryIsArchived(entry)} canDelete={canDelete && unlocked && (!deleteOwnOnly||own) && !ownerEntryIsArchived(entry)}
                   canSubmit={canSubmit && (own||canSubmitOthers) && (!ownerEntryIsArchived(entry)||hasExtensionForEntry(entry)) && isEntrySubmissionOpen(entry,own)} canRecall={canSubmit && own && !ownerEntryIsArchived(entry)} canReview={canReview && !own}
                   onUpdate={onUpdate} onStatusChange={onStatusChange} onDelete={onDelete}

@@ -2291,6 +2291,26 @@ export async function deleteTimeEntry(
 }
 
 /**
+ * Deletes a bounded set of entries that remain eligible under the SQL-level
+ * ownership, workflow, and eligibility locks. Route handlers validate the full
+ * business scope before calling this helper; the predicates below close races
+ * with a concurrent submission or eligibility update.
+ */
+export async function deleteTimeEntriesByIds(ownerEmail:string,ids:string[],includeAll=false):Promise<string[]> {
+  if(!ids.length)return []
+  await ensureTimeEntriesTable()
+  const rows=await sql`
+    DELETE FROM time_entries
+    WHERE id=ANY(${ids}::uuid[])
+      AND payout_eligible_at IS NULL
+      AND (${includeAll} OR lower(owner_email)=lower(${ownerEmail}))
+      AND (lower(owner_email)<>lower(${ownerEmail}) OR status IN ('draft','rejected'))
+    RETURNING id
+  `
+  return rows.map(row=>String(row.id))
+}
+
+/**
  * Clears visible entries for the current user or elevated role.
  *
  * For standard users, this clears only their own records. For managers and admins,

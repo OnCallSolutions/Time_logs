@@ -18,6 +18,8 @@ import { getAuditContext } from "@/lib/audit"
 import {
   clearTimeEntries,
   createTimeEntries,
+  deleteTimeEntriesByIds,
+  getTimeEntry,
   listTimeEntries,
   listTimeProjects,
   listTimesheetPeriods,
@@ -172,7 +174,34 @@ async function deleteEntries(req: Request) {
       return Response.json({ error: "Unauthorized." }, { status: 401 })
     }
     if (!access.permissions.delete_entries) return Response.json({error:"Forbidden."},{status:403})
-    const input=z.object({scope:z.enum(["own_entries","all_entries"]).default("own_entries")}).strict().parse(await req.json().catch(()=>({})))
+    const input=z.union([
+      z.object({scope:z.enum(["own_entries","all_entries"]).default("own_entries")}).strict(),
+      z.object({ids:z.array(z.string().uuid()).min(1).max(100)}).strict(),
+    ]).parse(await req.json().catch(()=>({})))
+    if("ids" in input){
+      const ids=[...new Set(input.ids)]
+      if(ids.length!==input.ids.length)return Response.json({error:"Remove duplicate records from the selection and try again."},{status:400})
+      const load=async(id:string)=>getTimeEntry(access.email,id,access.includeAll)
+      const records=[]
+      for(let offset=0;offset<ids.length;offset+=25){records.push(...await Promise.all(ids.slice(offset,offset+25).map(load)))}
+      if(records.some(record=>!record))return Response.json({error:"One or more selected timesheets are unavailable. Refresh the page and try again."},{status:409})
+      const rows=records.filter((record):record is NonNullable<typeof record>=>!!record)
+      const resolve=createReviewAccess(access.email,access)
+      for(const record of rows){
+        if(record.correctionOwnerEmail&&access.role!=="admin"&&record.correctionOwnerEmail.toLowerCase()!==access.email.toLowerCase())return Response.json({error:"One selected returned timesheet belongs to another correction owner."},{status:403})
+        if(record.correctionDueAt&&Date.now()>Date.parse(record.correctionDueAt)&&access.role!=="admin")return Response.json({error:"A selected correction window has closed. Refresh the list before deleting."},{status:409})
+        const scope=await resolve(record)
+        if(!scope.visible)return Response.json({error:"One or more selected timesheets are outside your access."},{status:403})
+        if(record.payoutEligible)return Response.json({error:"Timesheets with protected eligibility evidence cannot be deleted."},{status:409})
+        if(access.role==="manager"&&record.ownerEmail?.toLowerCase()!==access.email.toLowerCase())return Response.json({error:"Managers may bulk-delete only their own eligible entries."},{status:403})
+        if((!access.permissions.review_entries&&!access.permissions.review_manager_entries||record.ownerEmail?.toLowerCase()===access.email.toLowerCase())&&record.status!=="draft"&&record.status!=="rejected")return Response.json({error:"A selected entry is submitted or approved and cannot be deleted in this workflow."},{status:409})
+      }
+      const deletedIds=await deleteTimeEntriesByIds(access.email,ids,access.includeAll)
+      if(deletedIds.length!==ids.length)return Response.json({error:"Some records changed while deleting. Refresh the list; the page will show the current records."},{status:409})
+      const auditContext=getAuditContext(req)
+      await Promise.all(rows.map(record=>recordAuditEvent({actorEmail:access.email,action:"entry_deleted",targetType:"time_entry",targetId:record.id,metadata:{status:record.status,hours:record.hours,date:record.date,bulk:true},...auditContext})))
+      return Response.json({ok:true,deletedCount:deletedIds.length})
+    }
     if(input.scope==="all_entries"&&(access.role!=="admin"||!access.permissions.view_team))return Response.json({error:"Only an administrator can clear all organization timesheets."},{status:403})
     if(access.role==="manager"&&access.includeAll)return Response.json({error:"Managers must use individual authorized entry controls; hidden records cannot be bulk-cleared."},{status:403})
     if(input.scope==="all_entries")await ensureAccountHandoffStorage()
