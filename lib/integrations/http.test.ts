@@ -36,3 +36,14 @@ it("does not retry failed mutations and reports safe network diagnostics", async
   await expect(callIntegrationApi({ provider: "microsoft_graph", operation: "calendar.create", method: "POST", path: "/me/events", accessToken: "token", body: { subject: "example" } })).rejects.toBeInstanceOf(IntegrationApiError)
   expect(fetch).toHaveBeenCalledTimes(1)
 })
+
+it("reads bounded Graph transcript text without parsing it as JSON", async () => {
+  const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("WEBVTT\n\n00:00:00.000 --> 00:00:01.000\n<v Person>Hello</v>", { headers: { "content-type": "text/vtt" } }))
+  await expect(callIntegrationApi({ provider: "microsoft_graph", operation: "transcript.content", method: "GET", path: "/users/u/transcripts/t/content", accessToken: "token", accept: "text/vtt", responseType: "text" })).resolves.toContain("WEBVTT")
+  expect(fetch).toHaveBeenCalledWith(expect.any(URL), expect.objectContaining({ headers: expect.objectContaining({ Accept: "text/vtt" }) }))
+})
+
+it("rejects oversized transcript responses", async () => {
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("12345"))
+  await expect(callIntegrationApi({ provider: "microsoft_graph", operation: "transcript.content", method: "GET", path: "/users/u/transcripts/t/content", accessToken: "token", responseType: "text", maxResponseBytes: 4 })).rejects.toMatchObject({ diagnostic: { status: 413, code: "RESPONSE_TOO_LARGE" } })
+})

@@ -16,7 +16,13 @@ import { getAiModel } from "@/lib/ai-models"
 export const maxDuration=30
 const schema=z.object({summary:z.string().max(1000),recommendations:z.array(z.object({handoffId:z.string().uuid(),assessment:z.enum(["looks_consistent","needs_information","potential_duplicate"]),severity:z.enum(["low","medium","high"]),reason:z.string().min(1).max(500)})).max(50)})
 
-/** @param req - Optional explicit handoff selection; identities/evidence are loaded on the server. @returns Scoped advisory report with evidence revision references. */
+/**
+ * Produces an advisory consistency scan for the caller's authorized handoff queue.
+ * @param req - Optional handoff IDs; all underlying evidence is reloaded server-side.
+ * @returns A scoped report with handoff IDs and review-version references.
+ * Worker and reviewer names are pseudonymized in the model prompt; the app keeps
+ * control of decisions and rechecks the snapshot before presenting advice.
+ */
 async function runAccountReview(req:Request){
   try{
     const email=(await auth())?.user?.email;const access=await getEffectivePermissions(email)

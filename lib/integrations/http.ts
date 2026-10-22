@@ -16,6 +16,9 @@ export type IntegrationCall = {
   query?: Record<string, string | number | boolean | undefined>
   body?: unknown
   timeoutMs?: number
+  responseType?: "json" | "text"
+  maxResponseBytes?: number
+  accept?: string
 }
 
 export type IntegrationErrorDiagnostic = {
@@ -72,7 +75,7 @@ export async function callIntegrationApi<T>(call: IntegrationCall): Promise<T> {
       redirect: "error",
       signal: AbortSignal.timeout(timeoutMs),
       headers: {
-        Accept: "application/json",
+        Accept: call.accept ?? "application/json",
         Authorization: `Bearer ${call.accessToken}`,
         ...(call.body === undefined ? {} : { "Content-Type": "application/json" }),
       },
@@ -93,5 +96,26 @@ export async function callIntegrationApi<T>(call: IntegrationCall): Promise<T> {
   }
 
   if (response.status === 204) return undefined as T
+  if (call.responseType === "text") {
+    const limit = Math.min(Math.max(call.maxResponseBytes ?? 4_194_304, 1), 8_388_608)
+    const reader = response.body?.getReader()
+    if (!reader) return "" as T
+    const chunks: Uint8Array[] = []
+    let size = 0
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      size += value.byteLength
+      if (size > limit) {
+        await reader.cancel()
+        throw new IntegrationApiError({ provider: call.provider, operation: call.operation, method: call.method, path: call.path, status: 413, code: "RESPONSE_TOO_LARGE", requestId: requestId(response) })
+      }
+      chunks.push(value)
+    }
+    const bytes = new Uint8Array(size)
+    let offset = 0
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength }
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes) as T
+  }
   return await response.json() as T
 }

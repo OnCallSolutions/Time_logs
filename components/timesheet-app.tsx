@@ -36,6 +36,7 @@ import { PeriodExpirationNotice } from "@/components/period-expiration-notice"
 import { AccessLifecyclePanel } from "@/components/access-lifecycle-panel"
 import { SecurityRiskWindow } from "@/components/security-risk-window"
 import { SubmissionDeadlineSettings } from "@/components/submission-deadline-settings"
+import { TeamsTranscriptSources } from "@/components/teams-transcript-sources"
 import { SubmissionDeadlineNotice } from "@/components/submission-deadline-notice"
 import { PatronAccountActivity } from "@/components/patron-account-activity"
 import { WindowSurface } from "@/components/window-surface"
@@ -639,20 +640,21 @@ export function TimesheetApp({
    * @param parsed - Entries returned by the AI parser.
    * @returns A promise that resolves after entries are saved and local state updates.
    */
-  async function addParsed(parsed: ParsedEntry[],periodId:string) {
+  async function addParsed(parsed: ParsedEntry[],periodId:string,transcriptDraftId?:string) {
     invalidateEntriesCache()
     pendingEntryWrites.current++;entryReadEpoch.current++
     try{
-    const res = await fetch(apiPath("/api/entries"), {
+    const route=transcriptDraftId?apiPath("/api/teams/transcripts/drafts"):apiPath("/api/entries")
+    const res = await fetch(route, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ entries: parsed,periodId }),
+      body: JSON.stringify(transcriptDraftId?{id:transcriptDraftId,entries:parsed,periodId}:{ entries: parsed,periodId }),
     })
     const data = await res.json()
       if (!res.ok) throw Object.assign(new Error(`${data.error ?? "Failed to save entries."}${data.reference?` Reference: ${data.reference}`:""}`),{code:data.code})
     setEntries((prev) => [...(data.entries ?? []), ...prev])
     setSyncError(null)
-    }catch(cause){showTrackedFailure(cause,"entry.create","/api/entries",undefined,"POST");throw cause
+      }catch(cause){showTrackedFailure(cause,"entry.create",transcriptDraftId?"/api/teams/transcripts/drafts":"/api/entries",undefined,"POST");throw cause
     }finally{invalidateEntriesCache();pendingEntryWrites.current--;entryReadEpoch.current++}
   }
 
@@ -876,7 +878,7 @@ export function TimesheetApp({
       {!accessDenied&&extensionPanelOpen&&((role==="account_manager"||role==="manager")&&permissions.review_entries||((role==="employee"||role==="contractor"||role==="manager")&&permissions.submit_entries))&&<SubmissionExtensionPanel reviewer={(role==="account_manager"||role==="manager")&&permissions.review_entries} canRequest={permissions.submit_entries&&(role==="employee"||role==="contractor"||role==="manager")} requesterRole={role==="manager"?"manager":role==="employee"?"employee":"contractor"} onClose={()=>{setExtensionPanelOpen(false);setEntriesRefresh(value=>value+1)}}/>}
 
       {!accessDenied&&workspaceWindow&&<WindowSurface title={workspaceWindow==="notes"?"Create timesheet entries":workspaceWindow==="ai-extract"?"Extract timesheet with AI":workspaceWindow==="projects"?(permissions.manage_projects?role==="manager"?"My projects and team assignments":"Organization projects and assignments":"My projects"):workspaceWindow==="overview"?"Workspace overview":"Workflow totals"} onBack={()=>setWorkspaceWindow(null)} compact={workspaceWindow!=="notes"&&workspaceWindow!=="ai-extract"}><section className={"flex min-h-0 w-full flex-col bg-white "+(workspaceWindow==="notes"||workspaceWindow==="ai-extract"||workspaceWindow==="projects"?"max-w-none":"mx-auto max-w-6xl")}><div className="min-h-0 flex-1 overflow-auto p-4">
-      {workspaceWindow==="projects"?(permissions.manage_projects||permissions.create_projects?<ProjectManagement fullWidth canManage={permissions.manage_projects} canCreate={permissions.manage_projects||permissions.create_projects} organizationWide={role==="admin"||role==="account_manager"}/>:<p role="status" className="m-4 border border-orange-200 bg-orange-50 p-3 text-sm text-orange-950">Project access was updated. Returning to your available workspace…</p>):workspaceWindow==="overview"?<RoleOverview role={role}/>:workspaceWindow==="notes"||workspaceWindow==="ai-extract"?(permissions.create_entries?<NoteInput canCreateProjects={permissions.create_projects} initialMode={workspaceWindow==="ai-extract"?"notes":"manual"} onParsed={async (parsed,periodId)=>{await addParsed(parsed,periodId);setWorkspaceWindow(null);if(role!=="admin"||view!=="admin")openWorkspacePage(role==="manager"?"personal":"log")}}/>:<p role="status" className="m-4 border border-orange-200 bg-orange-50 p-3 text-sm text-orange-950">Time-entry access was updated. Returning to your available workspace…</p>):<WorkflowOverview
+      {workspaceWindow==="projects"?(permissions.manage_projects||permissions.create_projects?<ProjectManagement fullWidth canManage={permissions.manage_projects} canCreate={permissions.manage_projects||permissions.create_projects} organizationWide={role==="admin"||role==="account_manager"}/>:<p role="status" className="m-4 border border-orange-200 bg-orange-50 p-3 text-sm text-orange-950">Project access was updated. Returning to your available workspace…</p>):workspaceWindow==="overview"?<RoleOverview role={role}/>:workspaceWindow==="notes"||workspaceWindow==="ai-extract"?(permissions.create_entries?<NoteInput canCreateProjects={permissions.create_projects} initialMode={workspaceWindow==="ai-extract"?"notes":"manual"} onParsed={async (parsed,periodId,transcriptDraftId)=>{await addParsed(parsed,periodId,transcriptDraftId);setWorkspaceWindow(null);if(role!=="admin"||view!=="admin")openWorkspacePage(role==="manager"?"personal":"log")}}/>:<p role="status" className="m-4 border border-orange-200 bg-orange-50 p-3 text-sm text-orange-950">Time-entry access was updated. Returning to your available workspace…</p>):<WorkflowOverview
         approvedCount={approvedEntries.length}
         draftCount={draftEntries.length}
         pendingCount={pendingEntries.length}
@@ -987,7 +989,7 @@ export function TimesheetApp({
         />
         </>
       ) : view === "approvals" ? (
-        role==="account_manager"? <section aria-label="Approval workspace" className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden"><div className="min-h-0 flex-1 overflow-auto p-3"><section aria-label="Direct account-manager approvals" className="mb-4 border-l-4 border-blue-500 bg-blue-50/60 px-3 py-2"><h2 className="text-sm font-semibold">Direct account-manager approvals</h2><p className="mb-2 text-xs text-muted-foreground">Manager personal timesheets come here for final review. Existing direct assignments are also kept visible; manager-approved workforce batches are in the handoff queue below.</p>{pendingEntries.length?<ApprovalSelection entries={pendingEntries} email={userEmail??""} canReview={canReviewEntries} canAI={canAIReview} allowSelfApproval finalApprover onUpdated={entry=>{entryReadEpoch.current++;setEntries(previous=>previous.map(current=>current.id===entry.id?entry:current))}}/>:<p className="py-2 text-sm text-muted-foreground">No direct submissions are awaiting review.</p>}</section><div className="min-h-[50dvh]"><BusinessAccounts canSend={false} canReview={permissions.review_accounts&&permissions.review_entries} canAI={permissions.ai_accounts} canAuthorize={permissions.authorize_payouts} onManagePeriods={permissions.manage_timesheet_periods?()=>setAccountManagerTool("periods"):undefined} onManageProjects={permissions.manage_projects?()=>setAccountManagerTool("projects"):undefined} onDataChanged={()=>setEntriesRefresh(value=>value+1)}/></div></div></section> : <section aria-label="Approval workspace" className="min-w-0 space-y-4">
+        role==="account_manager"? <section aria-label="Approval workspace" className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-white"><div className="min-h-0 flex-1 overflow-auto bg-white p-3"><section aria-label="Direct account-manager approvals" className="mb-4 border-l-4 border-blue-500 bg-white px-3 py-2"><h2 className="text-sm font-semibold">Direct account-manager approvals</h2><p className="mb-2 text-xs text-muted-foreground">Manager personal timesheets come here for final review. Existing direct assignments are also kept visible; manager-approved workforce batches are in the handoff queue below.</p>{pendingEntries.length?<ApprovalSelection entries={pendingEntries} email={userEmail??""} canReview={canReviewEntries} canAI={canAIReview} allowSelfApproval finalApprover onUpdated={entry=>{entryReadEpoch.current++;setEntries(previous=>previous.map(current=>current.id===entry.id?entry:current))}}/>:<p className="py-2 text-sm text-muted-foreground">No direct submissions are awaiting review.</p>}</section><div className="min-h-[50dvh]"><BusinessAccounts canSend={false} canReview={permissions.review_accounts&&permissions.review_entries} canAI={permissions.ai_accounts} canAuthorize={permissions.authorize_payouts} onManagePeriods={permissions.manage_timesheet_periods?()=>setAccountManagerTool("periods"):undefined} onManageProjects={permissions.manage_projects?()=>setAccountManagerTool("projects"):undefined} onDataChanged={()=>setEntriesRefresh(value=>value+1)}/></div></div></section> : <section aria-label="Approval workspace" className="min-w-0 space-y-4">
         {role==="manager"&&<div className="flex flex-wrap items-center justify-between gap-2 border-y border-red-200 bg-red-50/60 px-3 py-2"><div><h2 className="text-sm font-semibold text-red-950">Manager review archive</h2><p className="text-xs text-red-900">Rejection decisions and return reasons, searchable and grouped by person or date.</p></div><ManagerRejectionArchive/></div>}
         {(canReviewEntries||canAIReview||canViewTeamReports)&&<ManagerWorkspace canReview={canReviewEntries} canReports={canViewTeamReports} canAI={canAIReview} pending={pendingEntries.length} entries={pendingEntries} onApprovals={()=>{}} onReports={()=>openWorkspacePage("report")} onRecommendation={(entry,decision,reason)=>setSuggestedReview({entry,decision,reason})}/>}
         {pendingEntries.length === 0 ? (
@@ -1742,6 +1744,7 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
               <div className="grid gap-2"><Button variant="outline" className="justify-start" onClick={()=>onLifecycle?.()}><CalendarClock className="size-4"/>Access lifecycle</Button>{role==="admin"&&<Button variant="destructive" className="justify-start" onClick={onPreviewDataReset}><Trash2 className="size-4"/>Reset preview data</Button>}</div>
             </section>
           </div>
+          <TeamsTranscriptSources />
         </section>
       </WindowSurface>}
       {!rightsOnly&&adminSection==="reports"&&<WindowSurface title="Reports" onBack={backAdminSection}>

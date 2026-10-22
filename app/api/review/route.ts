@@ -25,6 +25,11 @@ const schema = z.object({ recommendations: z.array(z.object({
  * No client-provided entry data is trusted and no approval mutation is performed.
  * @returns Promise<Response> containing grounded recommendations or a safe error.
  */
+/**
+ * Builds a bounded advisory review from entries visible to this review lane.
+ * Revalidates scope, live permissions, and record revisions after inference;
+ * the response is never an approval command and a separate API enforces decisions.
+ */
 async function adviseTimesheetReview(req?:Request): Promise<Response> {
   try {
     const email = (await auth())?.user?.email

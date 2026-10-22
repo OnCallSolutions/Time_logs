@@ -5,7 +5,7 @@
  */
 import { auth } from "@/auth"
 import { getEffectiveUserRole } from "@/lib/access"
-import { listTimeEntries,listTimeProjects } from "@/lib/db"
+import { listTimeEntries,listTimeProjects,listTimesheetPeriods } from "@/lib/db"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { listAccountIdentities } from "@/lib/account-identities"
 import { createReviewAccess } from "@/lib/review-access"
@@ -79,6 +79,23 @@ export async function GET(request?: Request):Promise<Response>{
   const access=await getEffectivePermissions(email)
   if(!email||!access.role||!(access.permissions.create_entries||(access.role==="account_manager"&&access.permissions.view_accounts)))return Response.json({error:"Sample access is not permitted."},{status:403})
   const requested=request ? new URL(request.url).searchParams.get("count") ?? "random" : "random"
+  const format=request ? new URL(request.url).searchParams.get("format") : null
+  if(format==="teams-transcript"){
+    const periodId=request ? new URL(request.url).searchParams.get("periodId") : null
+    const period=(await listTimesheetPeriods()).find(candidate=>candidate.id===periodId)
+    if(!period)return Response.json({error:"Select a configured timesheet period before loading the sample transcript."},{status:400})
+    const availableProjects=await listTimeProjects(false,access.role==="contractor"||access.role==="employee"?email:undefined)
+    const assignedProject=availableProjects[0]?.name
+    if(!assignedProject)return Response.json({error:"There is no available project for this account. Ask your manager to assign one before trying the sample."},{status:409})
+    const identity=(await listAccountIdentities([email]))[0]
+    const speaker=identity?.officialName||session?.user?.name?.trim()||email
+    const notes=[
+      "Synthetic Microsoft Teams transcript for extraction testing. This is not a real meeting or work record.",
+      `[00:02:14] ${speaker}: For ${period.startDate}, I spent 2 hours on ${assignedProject} completing an implementation task.`,
+      `[00:02:32] ${speaker}: I also documented the work and next steps.`,
+    ].join("\n")
+    return Response.json({notes,synthetic:true,transcript:true,project:assignedProject,periodId:period.id},{headers:{"Cache-Control":"no-store"}})
+  }
   const count=requested==="random"?randomInt(3,19):Number(requested)
   if(requested!=="random"&&![3,6,12].includes(count))return Response.json({error:"Choose random, 3, 6, or 12 sample entries per person."},{status:400})
   const identity=(await listAccountIdentities([email]))[0]

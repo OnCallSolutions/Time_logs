@@ -9,6 +9,7 @@ import "server-only"
 import { LastAdministratorError } from "@/lib/admin-policy"
 import { createDatabaseInitializer } from "@/lib/database-initializer"
 import type {AuditContext} from "@/lib/audit"
+import { ensureTeamsTranscriptInbox } from "@/lib/teams-transcript-inbox"
 
 import { neon } from "@neondatabase/serverless"
 import type { PermissionOverrides } from "@/lib/permissions"
@@ -169,6 +170,12 @@ export type AuditAction =
   | "user_issue_submitted"
   | "issue_updated"
   | "admin_extension_override"
+  | "teams_transcript_draft_saved"
+  | "teams_transcript_draft_dismissed"
+  | "teams_transcript_extraction_retried"
+  | "teams_transcript_development_queue_processed"
+  | "teams_transcript_source_updated"
+  | "teams_transcript_backfill_requested"
 
 export type AuditEvent = {
   id: string
@@ -372,7 +379,9 @@ export function ensureTimeEntriesTable() {
     await sql`ALTER TABLE time_entries
       ADD COLUMN IF NOT EXISTS workflow_origin text NOT NULL DEFAULT 'new',
       ADD COLUMN IF NOT EXISTS correction_owner_email text,
-      ADD COLUMN IF NOT EXISTS correction_due_at timestamptz`
+      ADD COLUMN IF NOT EXISTS correction_due_at timestamptz,
+      ADD COLUMN IF NOT EXISTS source_transcript_draft_id uuid,
+      ADD COLUMN IF NOT EXISTS source_transcript_entry_index integer`
     await sql`
       DO $$
       BEGIN
@@ -400,6 +409,9 @@ export function ensureTimeEntriesTable() {
       CREATE INDEX IF NOT EXISTS time_entries_status_work_date_idx
       ON time_entries (status, work_date DESC)
     `
+    await sql`CREATE UNIQUE INDEX IF NOT EXISTS time_entries_transcript_source_entry_idx
+      ON time_entries (source_transcript_draft_id, source_transcript_entry_index)
+      WHERE source_transcript_draft_id IS NOT NULL AND source_transcript_entry_index IS NOT NULL`
   })
 }
 
@@ -1872,6 +1884,68 @@ export async function createTimeEntries(
   }
 
   return created
+}
+
+/** Atomically converts a patron-owned transcript proposal into regular draft entries. */
+export async function saveTeamsTranscriptDraftEntries(input: {
+  draftId: string
+  ownerEmail: string
+  contractor: string
+  contractorNumber?: string
+  entries: ParsedEntry[]
+  context: AuditContext
+}) {
+  await ensureTeamsTranscriptInbox()
+  await ensureTimeEntriesTable()
+  await ensureAuditEventsTable()
+  const ownerEmail = input.ownerEmail.toLowerCase()
+  const rows = await sql`WITH claimed AS (
+      UPDATE teams_transcript_drafts SET status='saved',updated_at=now()
+      WHERE id=${input.draftId}::uuid AND lower(owner_email)=${ownerEmail} AND status='needs_review' AND expires_at>now()
+      RETURNING id
+    ), source_entries AS (
+      SELECT * FROM jsonb_to_recordset(${JSON.stringify(input.entries.map((entry,index)=>({entryIndex:index,date:entry.date,hours:entry.hours,project:entry.project,description:entry.description})))}::jsonb)
+        AS item("entryIndex" integer,date date,hours numeric,project text,description text)
+    ), created AS (
+      INSERT INTO time_entries (
+        contractor,work_date,hours,project,description,owner_email,contractor_number,
+        source_transcript_draft_id,source_transcript_entry_index
+      )
+      SELECT ${input.contractor},item.date,item.hours,item.project,item.description,${ownerEmail},${input.contractorNumber??null},claimed.id,item."entryIndex"
+      FROM claimed CROSS JOIN source_entries item
+      RETURNING id,owner_email,contractor_number,review_manager_email,payout_eligible_at,workflow_origin,
+        correction_owner_email,correction_due_at,contractor,work_date,hours,project,description,status,
+        reviewed_by,reviewed_at,review_note,updated_at::text AS updated_at
+    ), audited_entries AS (
+      INSERT INTO audit_events(actor_email,action,target_type,target_id,metadata,ip_address,user_agent,request_method,request_path,request_id)
+      SELECT ${ownerEmail},'entry_created','time_entry',created.id::text,
+        jsonb_build_object('status',created.status,'hours',created.hours,'date',created.work_date,'source','teams_transcript'),
+        ${input.context.ipAddress},${input.context.userAgent},${input.context.requestMethod},${input.context.requestPath},${input.context.requestId}
+      FROM created RETURNING target_id
+    ), audited_draft AS (
+      INSERT INTO audit_events(actor_email,action,target_type,target_id,metadata,ip_address,user_agent,request_method,request_path,request_id)
+      SELECT ${ownerEmail},'teams_transcript_draft_saved','teams_transcript_draft',claimed.id::text,
+        jsonb_build_object('entryCount',(SELECT count(*) FROM created)),
+        ${input.context.ipAddress},${input.context.userAgent},${input.context.requestMethod},${input.context.requestPath},${input.context.requestId}
+      FROM claimed RETURNING target_id
+    )
+    SELECT created.* FROM created JOIN audited_entries ON audited_entries.target_id=created.id::text
+      WHERE EXISTS(SELECT 1 FROM audited_draft)` as TimeEntryRow[]
+  if (rows.length) return { status: "saved" as const, entries: rows.map(toTimeEntry) }
+
+  const existing = await getTeamsTranscriptDraftSavedEntries(input.draftId, ownerEmail)
+  if (existing.length) return { status: "already_saved" as const, entries: existing }
+  return { status: "unavailable" as const, entries: [] as TimeEntry[] }
+}
+
+export async function getTeamsTranscriptDraftSavedEntries(draftId:string, ownerEmail:string) {
+  await ensureTimeEntriesTable()
+  const rows = await sql`SELECT id,owner_email,contractor_number,review_manager_email,payout_eligible_at,workflow_origin,
+      correction_owner_email,correction_due_at,contractor,work_date,hours,project,description,status,reviewed_by,
+      reviewed_at,review_note,updated_at::text AS updated_at
+    FROM time_entries WHERE source_transcript_draft_id=${draftId}::uuid AND lower(owner_email)=${ownerEmail.toLowerCase()}
+    ORDER BY source_transcript_entry_index ASC` as TimeEntryRow[]
+  return rows.map(toTimeEntry)
 }
 
 /**

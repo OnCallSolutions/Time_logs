@@ -12,9 +12,16 @@ import { Loader2, Plus, Sparkles, Trash2, WandSparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { apiPath } from "@/lib/paths"
 import type { ParsedEntry } from "@/lib/types"
+import { TeamsTranscriptConnect } from "@/components/teams-transcript-connect"
 
 type EntryPeriod={id:string;name:string;startDate:string;endDate:string}
 type EntryProject={id:string;name:string;description:string}
+type TranscriptEvidence={cueId:number;start:string;end:string;text:string}
+type TranscriptDraft={id:string;meetingDate:string;createdAt:string;entries:Array<{date:string|null;hours:number|null;project:string;description:string;evidence:TranscriptEvidence[];reviewFlags?:string[]}>}
+type TranscriptExtractionJob={id:string;meetingDate:string;status:"queued"|"processing"|"failed_final";attempts:number}
+type AiEntryInsight={evidenceQuote:string|null;reviewFlags:string[]}
+
+const reviewFlagLabels:Record<string,string>={contractor_needs_confirmation:"Confirm person",date_needs_confirmation:"Confirm date",hours_needs_confirmation:"Confirm hours",project_needs_confirmation:"Confirm project",evidence_unverified:"Check source evidence"}
 
 /**
  * Captures messy time notes and sends them to the parser API.
@@ -32,7 +39,7 @@ export function NoteInput({
   canCreateProjects=false,
   initialMode="manual",
 }: {
-  onParsed: (entries: ParsedEntry[],periodId:string) => void | Promise<void>
+  onParsed: (entries: ParsedEntry[],periodId:string,transcriptDraftId?:string) => void | Promise<void>
   previewOnly?:boolean
   canCreateProjects?:boolean
   initialMode?:"manual"|"notes"
@@ -40,7 +47,6 @@ export function NoteInput({
   const [notes, setNotes] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [sampleCount, setSampleCount] = useState("random")
   const [sampleLoaded,setSampleLoaded]=useState(false)
   const [sampleIsPreview, setSampleIsPreview] = useState(false)
   const [mode,setMode]=useState<"manual"|"notes">(initialMode)
@@ -60,6 +66,12 @@ export function NoteInput({
   const [periodId,setPeriodId]=useState("")
   const [periodsLoading,setPeriodsLoading]=useState(!previewOnly)
   const [periodsError,setPeriodsError]=useState("")
+  const [transcriptDrafts,setTranscriptDrafts]=useState<TranscriptDraft[]>([])
+  const [transcriptExtractionJobs,setTranscriptExtractionJobs]=useState<TranscriptExtractionJob[]>([])
+  const [transcriptDraftsError,setTranscriptDraftsError]=useState("")
+  const [activeTranscriptDraftId,setActiveTranscriptDraftId]=useState<string|null>(null)
+  const [activeTranscriptEvidence,setActiveTranscriptEvidence]=useState<TranscriptEvidence[][]>([])
+  const [aiEntryInsights,setAiEntryInsights]=useState<AiEntryInsight[]>([])
   useEffect(()=>setMode(initialMode),[initialMode])
   useEffect(()=>{
     if(previewOnly)return
@@ -75,6 +87,24 @@ export function NoteInput({
     }).catch(cause=>{if(!controller.signal.aborted)setPeriodsError(cause instanceof Error?cause.message:"Timesheet periods are unavailable.")}).finally(()=>{if(!controller.signal.aborted)setPeriodsLoading(false)})
     return()=>controller.abort()
   },[previewOnly])
+  useEffect(()=>{
+    if(previewOnly||mode!=="notes")return
+    const controller=new AbortController()
+    const refreshDrafts=async()=>{
+      try{
+        const response=await fetch(apiPath("/api/teams/transcripts/drafts"),{cache:"no-store",signal:controller.signal})
+        const data=await response.json()
+        if(!response.ok)throw new Error(data.error??"Transcript drafts are unavailable.")
+        setTranscriptDrafts(Array.isArray(data.drafts)?data.drafts:[])
+        setTranscriptExtractionJobs(Array.isArray(data.extractionJobs)?data.extractionJobs:[])
+        setTranscriptDraftsError("")
+      }catch(cause){if(!controller.signal.aborted)setTranscriptDraftsError(cause instanceof Error?cause.message:"Transcript drafts are unavailable.")}
+    }
+    void refreshDrafts()
+    const interval=window.setInterval(()=>void refreshDrafts(),15_000)
+    window.addEventListener("teams-transcript-drafts-updated",refreshDrafts)
+    return()=>{controller.abort();window.clearInterval(interval);window.removeEventListener("teams-transcript-drafts-updated",refreshDrafts)}
+  },[previewOnly,mode])
   useEffect(()=>{
     if(previewOnly)return
     const controller=new AbortController()
@@ -94,8 +124,16 @@ export function NoteInput({
    */
   async function loadSample(){
     setMode("notes");setLoading(true);setError(null);setProjectNamesFromNotes([])
-    try{const response=await fetch(apiPath(`/api/samples?count=${sampleCount}`),{cache:"no-store"});const data=await response.json();if(!response.ok)throw new Error(data.error);setNotes(data.notes);setSampleLoaded(true);setSampleIsPreview(!!data.previewOnly);setParsedEntries([])}
-    catch(error){setError(error instanceof Error?error.message:"Samples unavailable.")}finally{setLoading(false)}
+    try{
+      if(!selectedPeriod)throw new Error("Select a configured timesheet period before extracting the sample.")
+      const response=await fetch(apiPath(`/api/samples?format=teams-transcript&periodId=${encodeURIComponent(selectedPeriod.id)}`),{cache:"no-store"})
+      const data=await response.json()
+      if(!response.ok)throw new Error(data.error??"Sample transcript unavailable.")
+      setNotes(data.notes);setSampleLoaded(true);setSampleIsPreview(false);setParsedEntries([]);setAiEntryInsights([])
+      await extractNotes(data.notes)
+    }
+    catch(error){setError(error instanceof Error?error.message:"Sample transcript unavailable.")}
+    finally{setLoading(false)}
   }
 
   /**
@@ -105,25 +143,27 @@ export function NoteInput({
    *
    * @returns A promise that resolves after parsing, saving, or error handling.
    */
-  async function handleParse() {
-    if (!notes.trim() || loading || previewOnly || sampleIsPreview) return
+  async function extractNotes(sourceNotes:string) {
+    if (!sourceNotes.trim() || previewOnly || !selectedPeriod) return
     if(!selectedPeriod){setError("Select a configured timesheet period before extracting entries.");return}
-    setLoading(true)
+    setActiveTranscriptDraftId(null);setActiveTranscriptEvidence([]);setAiEntryInsights([])
     setError(null)
     try {
       const res = await fetch(apiPath("/api/parse"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ notes,periodId:selectedPeriod.id }),
+        body: JSON.stringify({ notes:sourceNotes,periodId:selectedPeriod.id }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? "Something went wrong.")
-      const entries: ParsedEntry[] = data.entries ?? []
-      if (entries.length === 0) {
+      const extracted=(Array.isArray(data.entries)?data.entries:[]) as Array<ParsedEntry&AiEntryInsight&{date:string|null;hours:number|null}>
+      const entries:ParsedEntry[]=extracted.map(entry=>({...entry,date:entry.date??"",hours:entry.hours??0,contractor:entry.contractor??"Unspecified"}))
+    if (entries.length === 0) {
         setError("No time entries were found in those notes.")
       } else {
+        setAiEntryInsights(extracted.map(entry=>({evidenceQuote:entry.evidenceQuote??null,reviewFlags:entry.reviewFlags??[]})))
         setProjectNamesFromNotes(entries.map(entry=>entry.project))
-        setParsedEntries(entries.map(entry=>({...entry,project:aiProjectChoice==="__notes__"?entry.project:aiProjectChoice})))
+        setParsedEntries(entries.map((entry,index)=>({...entry,date:entry.date??"",hours:entry.hours??0,contractor:entry.contractor??"Unspecified",project:aiProjectChoice==="__notes__"?entry.project:aiProjectChoice})))
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to parse notes.")
@@ -132,10 +172,19 @@ export function NoteInput({
     }
   }
 
+  async function handleParse() {
+    if (!notes.trim() || loading || previewOnly || sampleIsPreview) return
+    setLoading(true)
+    await extractNotes(notes)
+  }
+
   async function saveParsedEntries(){
     if(!parsedEntries.length||loading||previewOnly||!selectedPeriod)return
     setLoading(true);setError(null)
     try{
+      if(parsedEntries.some(entry=>!/^\d{4}-\d{2}-\d{2}$/.test(entry.date)||entry.date<selectedPeriod.startDate||entry.date>selectedPeriod.endDate))throw new Error(`Enter work dates within ${selectedPeriod.name} (${selectedPeriod.startDate}–${selectedPeriod.endDate}) before saving.`)
+      if(parsedEntries.some(entry=>!Number.isFinite(entry.hours)||entry.hours<0.25||entry.hours>24))throw new Error("Hours must be between 0.25 and 24 for every entry.")
+      if(parsedEntries.some(entry=>!entry.contractor.trim()))throw new Error("Identify the person for every preview row before saving.")
       if(parsedEntries.some(entry=>!entry.project.trim()||/^(general|unassigned|unknown)$/i.test(entry.project.trim())))throw new Error("Choose a project for every preview row before saving.")
       const assignedNames=new Map(projects.map(item=>[item.name.trim().toLocaleLowerCase(),item.name.trim()]))
       const entriesToSave=parsedEntries.map(entry=>{const name=entry.project.trim();return {...entry,project:assignedNames.get(name.toLocaleLowerCase())??name}})
@@ -162,7 +211,11 @@ export function NoteInput({
         const available:EntryProject[]=Array.isArray(data.projects)?data.projects:[]
         setProjects(available);setProject(current=>available.some(item=>item.name===current)?current:available[0]?.name??"")
       }
-      await onParsed(entriesToSave,selectedPeriod.id)
+      if(activeTranscriptDraftId)await onParsed(entriesToSave,selectedPeriod.id,activeTranscriptDraftId)
+      else await onParsed(entriesToSave,selectedPeriod.id)
+      if(activeTranscriptDraftId){
+        setTranscriptDrafts(previous=>previous.filter(draft=>draft.id!==activeTranscriptDraftId));setActiveTranscriptDraftId(null);setActiveTranscriptEvidence([]);setAiEntryInsights([])
+      }
       setParsedEntries([]);setProjectNamesFromNotes([]);setNotes("");setSampleLoaded(false);setSampleIsPreview(false)
     }catch(err){setError(err instanceof Error?err.message:"Failed to save extracted entries.")}
     finally{setLoading(false)}
@@ -213,12 +266,6 @@ export function NoteInput({
           </div>
         </div>
         {(mode==="notes"||previewOnly)&&<div className="flex flex-wrap items-center gap-2">
-        <select aria-label="Sample entry count per person" value={sampleCount} disabled={loading} onChange={event=>setSampleCount(event.target.value)} className="rounded-md border border-input bg-white px-2 py-2 text-sm">
-          <option value="random">Random (3-18 entries / person)</option>
-          <option value="3">3 entries / person</option>
-          <option value="6">6 entries / person</option>
-          <option value="12">12 entries / person</option>
-        </select>
         <Button
           variant="ghost"
           size="sm"
@@ -227,7 +274,7 @@ export function NoteInput({
           disabled={loading}
         >
           <WandSparkles className="size-3.5" aria-hidden="true" />
-          Try a sample
+          Try sample transcript
         </Button>
         </div>}
       </div>
@@ -245,6 +292,17 @@ export function NoteInput({
         <button type="button" aria-pressed={mode==="manual"} onClick={()=>{setMode("manual");setError(null)}} className={`border-b-2 px-3 py-2 text-sm font-medium ${mode==="manual"?"border-orange-600 text-orange-900":"border-transparent text-slate-600 hover:text-slate-950"}`}>Manual entry</button>
         <button type="button" aria-pressed={mode==="notes"} onClick={()=>{setMode("notes");setError(null)}} className={`border-b-2 px-3 py-2 text-sm font-medium ${mode==="notes"?"border-blue-600 text-blue-900":"border-transparent text-slate-600 hover:text-slate-950"}`}>AI notes</button>
       </div>}
+
+      {!previewOnly&&mode==="notes"&&<>
+        <TeamsTranscriptConnect/>
+        <section aria-label="Teams transcript proposals" className="mb-3 border border-sky-200 bg-white">
+          <header className="flex items-center justify-between gap-3 border-b border-sky-100 bg-sky-50 px-3 py-2"><div><h3 className="text-sm font-semibold">Meeting transcript proposals</h3><p className="text-xs text-slate-600">Private drafts from your attributed Teams speech. Review and save before they enter your timesheet.</p></div><span className="text-xs tabular-nums text-slate-600">{transcriptDrafts.length} pending</span></header>
+          {transcriptDraftsError?<p role="alert" className="p-3 text-sm text-red-800">{transcriptDraftsError}</p>:<>
+            {transcriptExtractionJobs.map(job=><div key={job.id} className={`flex flex-wrap items-center justify-between gap-3 border-b px-3 py-2 text-sm ${job.status==="failed_final"?"border-red-200 bg-red-50 text-red-900":"border-slate-100 text-slate-700"}`}><span>{job.status==="failed_final"?`AI could not process the meeting from ${job.meetingDate} after ${job.attempts} attempts.`:`AI is preparing suggestions from the meeting on ${job.meetingDate}.`}</span>{job.status==="failed_final"&&<Button type="button" size="sm" variant="outline" onClick={async()=>{const response=await fetch(apiPath("/api/teams/transcripts/drafts"),{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify({id:job.id,status:"retry"})});if(response.ok)setTranscriptExtractionJobs(previous=>previous.map(item=>item.id===job.id?{...item,status:"queued",attempts:0}:item));else setTranscriptDraftsError("Unable to retry transcript processing. Refresh and try again.")}}>Retry</Button>}</div>)}
+            {transcriptDrafts.length===0&&transcriptExtractionJobs.length===0?<p className="p-3 text-sm text-slate-600">No transcript proposals are waiting for review.</p>:transcriptDrafts.length>0&&<ul className="divide-y divide-slate-100">{transcriptDrafts.map(draft=><li key={draft.id} className="flex flex-wrap items-center justify-between gap-3 px-3 py-2"><span className="text-sm">Meeting {draft.meetingDate} · {draft.entries.length} proposed {draft.entries.length===1?"entry":"entries"}</span><div className="flex gap-2"><Button type="button" size="sm" variant="outline" onClick={()=>{setActiveTranscriptDraftId(draft.id);setActiveTranscriptEvidence(draft.entries.map(entry=>entry.evidence??[]));setAiEntryInsights(draft.entries.map(entry=>({evidenceQuote:null,reviewFlags:entry.reviewFlags??[]})));setParsedEntries(draft.entries.map(entry=>({contractor:"Self",date:entry.date??"",hours:entry.hours??0,project:entry.project,description:entry.description})));setProjectNamesFromNotes(draft.entries.map(entry=>entry.project));setNotes("");setError(null)}}>Review proposal</Button><Button type="button" size="sm" variant="ghost" onClick={async()=>{const response=await fetch(apiPath("/api/teams/transcripts/drafts"),{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify({id:draft.id,status:"dismissed"})});if(response.ok)setTranscriptDrafts(previous=>previous.filter(item=>item.id!==draft.id));else setTranscriptDraftsError("Unable to dismiss this proposal. Refresh and retry.")}}>Dismiss</Button></div></li>)}</ul>}
+          </>}
+        </section>
+      </>}
 
       {mode==="manual"&&!previewOnly?<>
         <form onSubmit={addManualEntry} className="grid gap-3 rounded-md border border-orange-200 bg-orange-50/50 p-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -276,7 +334,7 @@ export function NoteInput({
         id="notes"
         value={notes}
         readOnly={sampleIsPreview}
-        onChange={(e) => {setNotes(e.target.value);setParsedEntries([]);setProjectNamesFromNotes([]);setError(null)}}
+        onChange={(e) => {setNotes(e.target.value);setParsedEntries([]);setProjectNamesFromNotes([]);setActiveTranscriptDraftId(null);setActiveTranscriptEvidence([]);setAiEntryInsights([]);setError(null)}}
         onKeyDown={(e) => {
           if (
             (e.metaKey || e.ctrlKey) &&
@@ -299,6 +357,8 @@ export function NoteInput({
             <span role="alert" className="text-destructive">{error}</span>
           ) : sampleIsPreview ? (
             <span>Display-only sample. Clear it before entering real timesheet notes.</span>
+          ) : sampleLoaded ? (
+            <span>Demo transcript only. Extracted rows are not saved until you choose Save entries.</span>
           ) : (
             <>
               Press{" "}
@@ -309,7 +369,7 @@ export function NoteInput({
             </>
           )}
         </p>
-        {sampleLoaded&&<Button variant="outline" disabled={loading} onClick={()=>{setNotes("");setSampleLoaded(false);setSampleIsPreview(false);setParsedEntries([]);setProjectNamesFromNotes([]);setError(null)}}>Clear sample</Button>}
+        {sampleLoaded&&<Button variant="outline" disabled={loading} onClick={()=>{setNotes("");setSampleLoaded(false);setSampleIsPreview(false);setParsedEntries([]);setProjectNamesFromNotes([]);setAiEntryInsights([]);setError(null)}}>Clear sample</Button>}
         {!previewOnly&&<Button onClick={handleParse} disabled={loading || !notes.trim()||!selectedPeriod||periodsLoading||!!periodsError||sampleIsPreview} size="lg">
           {loading ? (
             <>
@@ -326,10 +386,15 @@ export function NoteInput({
       </div>
       {parsedEntries.length>0&&<section aria-label="Extracted timesheet preview" className="mt-4 overflow-hidden rounded-md border border-sky-200 bg-white">
         <header className="flex flex-wrap items-center justify-between gap-2 border-b border-sky-100 bg-sky-50 px-3 py-2"><h3 className="text-sm font-semibold">Extracted preview <span className="font-normal text-slate-600">({parsedEntries.length})</span></h3><Button type="button" disabled={loading} onClick={()=>void saveParsedEntries()}>{loading?<Loader2 className="size-4 animate-spin"/>:<Plus className="size-4"/>}{loading?"Saving…":"Save entries"}</Button></header>
-        <ul className="max-h-72 divide-y divide-slate-100 overflow-y-auto overscroll-contain">{parsedEntries.map((entry,index)=><li key={entry.date+":"+index} className="grid gap-2 px-3 py-2 sm:grid-cols-[7rem_minmax(12rem,1fr)_auto] sm:items-center">
-          <span className="text-xs tabular-nums text-slate-600">{entry.date} · {entry.hours}h</span>
+        <ul className="max-h-96 divide-y divide-slate-100 overflow-y-auto overscroll-contain">{parsedEntries.map((entry,index)=><li key={index} className="grid gap-2 px-3 py-2 sm:grid-cols-[minmax(8rem,1fr)_9rem_6rem_minmax(10rem,2fr)]">
+          <label className="grid min-w-0 gap-1 text-[11px] font-medium text-slate-600">Person<input aria-label={"Person for entry "+(index+1)} maxLength={120} value={entry.contractor} onChange={event=>setParsedEntries(previous=>previous.map((item,row)=>row===index?{...item,contractor:event.target.value}:item))} className="h-8 min-w-0 rounded border border-slate-300 px-2 text-sm font-normal text-slate-950"/></label>
+          <label className="grid gap-1 text-[11px] font-medium text-slate-600">Work date<input aria-label={"Work date for entry "+(index+1)} type="date" min={selectedPeriod?.startDate} max={selectedPeriod?.endDate} value={entry.date} onChange={event=>setParsedEntries(previous=>previous.map((item,row)=>row===index?{...item,date:event.target.value}:item))} className="h-8 min-w-0 rounded border border-slate-300 px-2 text-sm font-normal text-slate-950"/></label>
+          <label className="grid gap-1 text-[11px] font-medium text-slate-600">Hours<input aria-label={"Hours for entry "+(index+1)} type="number" min="0.25" max="24" step="0.25" value={entry.hours||""} onChange={event=>setParsedEntries(previous=>previous.map((item,row)=>row===index?{...item,hours:Number(event.target.value)}:item))} className="h-8 min-w-0 rounded border border-slate-300 px-2 text-sm font-normal text-slate-950"/></label>
           <label className="grid min-w-0 gap-1 text-[11px] font-medium text-slate-600">Project<input aria-label={"Project for entry "+(index+1)} maxLength={120} value={entry.project} onChange={event=>setParsedEntries(previous=>previous.map((item,row)=>row===index?{...item,project:event.target.value}:item))} className="h-8 min-w-0 rounded border border-slate-300 px-2 text-sm font-normal text-slate-950"/></label>
-          <span className="min-w-0 break-words text-xs text-slate-700">{entry.description||"No description"}</span>
+          <label className="grid gap-1 text-[11px] font-medium text-slate-600 sm:col-span-4">Work description<textarea aria-label={"Description for entry "+(index+1)} maxLength={1000} value={entry.description} onChange={event=>setParsedEntries(previous=>previous.map((item,row)=>row===index?{...item,description:event.target.value}:item))} rows={2} className="min-w-0 rounded border border-slate-300 px-2 py-1 text-sm font-normal text-slate-950"/></label>
+          {!!aiEntryInsights[index]?.reviewFlags.length&&<p className="sm:col-span-4 rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-950"><strong>Needs confirmation:</strong> {aiEntryInsights[index].reviewFlags.map(flag=>reviewFlagLabels[flag]??flag).join(" · ")}</p>}
+          {aiEntryInsights[index]?.evidenceQuote&&<details className="sm:col-span-4 border-l-2 border-emerald-400 bg-emerald-50/60 px-2 py-1.5 text-xs text-slate-700"><summary className="cursor-pointer font-medium">Source note</summary><p className="mt-1">“{aiEntryInsights[index].evidenceQuote}”</p></details>}
+          {activeTranscriptEvidence[index]?.length>0&&<details className="sm:col-span-3 border-l-2 border-sky-300 bg-sky-50/70 px-2 py-1.5 text-xs text-slate-700"><summary className="cursor-pointer font-medium">Transcript evidence · {activeTranscriptEvidence[index].length} cue{activeTranscriptEvidence[index].length===1?"":"s"}</summary><ul className="mt-2 grid gap-2">{activeTranscriptEvidence[index].map(cue=><li key={cue.cueId} className="border-t border-sky-100 pt-1.5"><time className="font-mono text-[11px] text-slate-500">{cue.start}–{cue.end}</time><p className="mt-0.5">“{cue.text}”</p></li>)}</ul></details>}
         </li>)}</ul>
       </section>}
       </>}

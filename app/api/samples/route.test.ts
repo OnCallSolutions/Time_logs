@@ -5,13 +5,13 @@
 import { beforeEach,expect,it,vi } from "vitest"
 vi.mock("@/lib/account-identities",()=>({listAccountIdentities:vi.fn(async()=>[])}))
 vi.mock("@/lib/access",()=>({getEffectiveUserRole:vi.fn(async()=>null)}))
-vi.mock("@/lib/db",()=>({listTimeEntries:vi.fn(async()=>[]),listTimeProjects:vi.fn(async()=>["Sample Project Alpha","Sample Project Beta","Sample Integration","Sample Field Operations"].map((name,index)=>({id:String(index),name,description:"",active:true})))}))
+vi.mock("@/lib/db",()=>({listTimeEntries:vi.fn(async()=>[]),listTimeProjects:vi.fn(async()=>["Sample Project Alpha","Sample Project Beta","Sample Integration","Sample Field Operations"].map((name,index)=>({id:String(index),name,description:"",active:true}))),listTimesheetPeriods:vi.fn(async()=>[{id:"10000000-0000-4000-8000-000000000001",name:"Current period",startDate:"2026-10-17",endDate:"2026-10-23",timezone:"America/New_York"}])}))
 vi.mock("@/lib/review-access",()=>({createReviewAccess:vi.fn(()=>async()=>({visible:true,reviewable:true}))}))
 vi.mock("@/auth",()=>({auth:vi.fn()}))
 vi.mock("@/lib/effective-permissions",()=>({getEffectivePermissions:vi.fn()}))
 import { auth } from "@/auth"
 import { getEffectiveUserRole } from "@/lib/access"
-import { listTimeEntries,listTimeProjects } from "@/lib/db"
+import { listTimeEntries,listTimeProjects,listTimesheetPeriods } from "@/lib/db"
 import { listAccountIdentities } from "@/lib/account-identities"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { createReviewAccess } from "@/lib/review-access"
@@ -22,6 +22,7 @@ beforeEach(()=>{
   vi.mocked(getEffectiveUserRole).mockResolvedValue(null)
   vi.mocked(listTimeEntries).mockResolvedValue([])
   vi.mocked(listTimeProjects).mockResolvedValue(["Sample Project Alpha","Sample Project Beta","Sample Integration","Sample Field Operations"].map((name,index)=>({id:String(index),name,description:"",active:true})) as never)
+  vi.mocked(listTimesheetPeriods).mockResolvedValue([{id:"10000000-0000-4000-8000-000000000001",name:"Current period",startDate:"2026-10-17",endDate:"2026-10-23",timezone:"America/New_York"}] as never)
   vi.mocked(createReviewAccess).mockReturnValue(async()=>({visible:true,reviewable:true}))
 })
 it("uses only the contractor's authenticated name",async()=>{
@@ -95,4 +96,17 @@ it("rejects unbounded sample counts",async()=>{
   vi.mocked(auth).mockResolvedValue({user:{email:"own@example.com"}} as never)
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"contractor",permissions:resolvePermissions("contractor")})
   expect((await GET(new Request("http://localhost/api/samples?count=999"))).status).toBe(400)
+})
+it("returns a synthetic, period-scoped Teams transcript using the signed-in patron and an available project",async()=>{
+  vi.mocked(auth).mockResolvedValue({user:{email:"own@example.com",name:"Own Person"}} as never)
+  vi.mocked(getEffectivePermissions).mockResolvedValue({role:"contractor",permissions:resolvePermissions("contractor")})
+  const periodId="10000000-0000-4000-8000-000000000001"
+  const response=await GET(new Request(`http://localhost/api/samples?format=teams-transcript&periodId=${periodId}`))
+  const value=await response.json()
+  expect(response.status).toBe(200)
+  expect(value).toMatchObject({synthetic:true,transcript:true,periodId,project:"Sample Project Alpha"})
+  expect(value.notes).toContain("Synthetic Microsoft Teams transcript")
+  expect(value.notes).toContain("Own Person")
+  expect(value.notes).toContain("2026-10-17")
+  expect(value.notes).toContain("2 hours on Sample Project Alpha")
 })

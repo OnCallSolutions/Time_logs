@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { AI_WORKFLOW_MODELS, getAiModel } from "./ai-models"
+import { AI_WORKFLOW_MODELS, getAiModel, getAiModelFallbacks, getAiProviderOptions } from "./ai-models"
 
 afterEach(() => vi.unstubAllEnvs())
 
@@ -18,7 +18,9 @@ describe("AI workflow model routing", () => {
   })
 
   it("uses the workflow default when no override is set", () => {
-    expect(getAiModel("timesheetExtraction")).toBe("openai/gpt-5.4-mini")
+    expect(getAiModel("timesheetExtraction")).toBe("openai/gpt-6.1-sol")
+    expect(getAiModelFallbacks("timesheetExtraction")).toEqual(["openai/gpt-5.6-sol"])
+    expect(getAiProviderOptions("timesheetExtraction")).toEqual({ gateway: { models: ["openai/gpt-5.6-sol"] } })
   })
 
   it("honors a valid workflow-specific override", () => {
@@ -30,5 +32,21 @@ describe("AI workflow model routing", () => {
   it("rejects URLs and malformed model identifiers instead of silently routing elsewhere", () => {
     vi.stubEnv("ASSISTANT_MODEL", "https://example.com/model")
     expect(() => getAiModel("assistant")).toThrow("Invalid model configuration for ASSISTANT_MODEL")
+  })
+
+  it("accepts ordered fallback overrides and excludes duplicates and the primary model", () => {
+    vi.stubEnv("TIMESHEET_EXTRACTION_MODEL", "openai/gpt-5.6-sol")
+    vi.stubEnv("TIMESHEET_EXTRACTION_FALLBACK_MODELS", "openai/gpt-5.6-sol, anthropic/claude-sonnet-5, openai/gpt-5.6-sol")
+    expect(getAiModelFallbacks("timesheetExtraction")).toEqual(["anthropic/claude-sonnet-5"])
+  })
+
+  it("rejects malformed fallback overrides rather than routing to an arbitrary URL", () => {
+    vi.stubEnv("TIMESHEET_EXTRACTION_FALLBACK_MODELS", "https://example.com/model")
+    expect(() => getAiModelFallbacks("timesheetExtraction")).toThrow("Invalid fallback model configuration")
+  })
+
+  it("does not configure failover for ordinary advisory workflows", () => {
+    expect(getAiModelFallbacks("assistant")).toEqual([])
+    expect(getAiProviderOptions("assistant")).toBeUndefined()
   })
 })

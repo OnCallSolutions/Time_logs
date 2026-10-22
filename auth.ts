@@ -17,17 +17,23 @@ async function writeAuthAudit(event:{actorEmail:string;action:"authentication_su
   try{const {recordAuditEvent}=await import("@/lib/db");await recordAuditEvent(event)}catch{console.error("[auth] Authentication audit event could not be recorded.")}
 }
 
+function safeAuthDiagnostic(value:unknown):string|undefined{
+  return typeof value==="string"&&/^[A-Za-z0-9_.:-]{1,80}$/.test(value)?value:undefined
+}
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
   debug: false,
   logger: {
-    /**
-     * Records authentication failures without provider payloads or credentials.
-     * @returns void after a fixed diagnostic message is written.
-     */
+    /** Records safe error categories only; provider messages may contain sensitive data. */
     error(error) {
-      console.error("[auth] Authentication failed; verify server configuration.")
       const errorType=typeof error?.name==="string"?error.name.slice(0,80):"unknown"
-      void writeAuthAudit({actorEmail:"system@tanovo-time.local",action:"authentication_failed",targetType:"authentication",metadata:{provider:"microsoft-entra-id",errorType,outcome:"failed"}})
+      const cause=error&&typeof error==="object"?Reflect.get(error,"cause"):undefined
+      const causeType=cause&&typeof cause==="object"?safeAuthDiagnostic(Reflect.get(cause,"name")):undefined
+      const causeCode=cause&&typeof cause==="object"?safeAuthDiagnostic(Reflect.get(cause,"code")):undefined
+      const providerError=cause&&typeof cause==="object"?safeAuthDiagnostic(Reflect.get(cause,"error")):undefined
+      const diagnostics={errorType,causeType,causeCode,providerError}
+      console.error("[auth] Authentication failed.",diagnostics)
+      void writeAuthAudit({actorEmail:"system@tanovo-time.local",action:"authentication_failed",targetType:"authentication",metadata:{provider:"microsoft-entra-id",...diagnostics,outcome:"failed"}})
     },
   },
   trustHost: true,
