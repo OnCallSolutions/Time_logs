@@ -107,6 +107,15 @@ it("throttles extraction requests and provides a retry delay",async()=>{
   expect(generateText).not.toHaveBeenCalled()
 })
 
+it("returns an actionable setup message when Gateway inference is blocked by account access",async()=>{
+  vi.mocked(generateText).mockRejectedValue(Object.assign(new Error("Gateway request failed"),{
+    cause:{error:{type:"no_providers_available",name:"RestrictedModelsError",message:"Free tier users do not have access to this model."}},
+  }))
+  const response=await POST(new Request("http://localhost/api/parse",{method:"POST",body:JSON.stringify({notes:"I worked 2 hours on a task.",periodId:"10000000-0000-4000-8000-000000000001"})}))
+  expect(response.status).toBe(503)
+  expect(await response.json()).toMatchObject({code:"AI_PROVIDER_ACCESS_REQUIRED",error:expect.stringContaining("Enable Gateway credits")})
+})
+
 it("rejects oversized streamed JSON even without a Content-Length header",async()=>{
   const response=await POST(new Request("http://localhost/api/parse",{method:"POST",body:JSON.stringify({notes:"x".repeat(20_000),periodId:"10000000-0000-4000-8000-000000000001"})}))
   expect(response.status).toBe(413)

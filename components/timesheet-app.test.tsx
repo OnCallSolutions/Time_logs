@@ -130,8 +130,6 @@ function mockTimesheetFetch(entries:unknown[] = []) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     const method = init?.method ?? "GET"
-    if (url === "/tanovo-time/api/auth/csrf?stepup=1") return jsonResponse({csrfToken:"test-csrf-token"})
-    if (url.startsWith("/tanovo-time/api/auth/signin/microsoft-entra-id?stepup=1")) return jsonResponse({url:"https://login.microsoftonline.com/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A3000%2Ftanovo-time%2Fapi%2Fauth%2Fcallback%2Fmicrosoft-entra-id"})
     const body = init?.body ? JSON.parse(String(init.body)) : null
     if (url === "/tanovo-time/api/permissions") return jsonResponse({role:"admin",permissions:resolvePermissions("admin")})
     fetchCalls.push({ url, method, body })
@@ -601,7 +599,7 @@ describe("TimesheetApp admin directory", () => {
     expect(Number.parseFloat(overlay.style.top)).toBeGreaterThanOrEqual(8)
   })
 
-  it("saves role and permission changes only from the edit dialog", async () => {
+  it("saves elevated role and permission changes after the in-app confirmation", async () => {
     const user = await renderAdminPanel()
     const directory = screen
       .getByRole("heading", { name: /admin user directory/i })
@@ -643,11 +641,9 @@ describe("TimesheetApp admin directory", () => {
     await user.click(within(dialog).getByRole("button", { name: /^save$/i }))
 
     const confirmation = await screen.findByRole("dialog", { name: "Confirm access change" })
-    expect(within(confirmation).getByText(/confirm your identity with microsoft/i)).toBeInTheDocument()
-    await user.click(within(confirmation).getByRole("button", { name: /verify with microsoft/i }))
-
-    await waitFor(() => expect(window.sessionStorage.getItem("tanovo-time:pending-access-change")).not.toBeNull())
-    expect(fetchCalls.some(call => call.url === "/tanovo-time/api/users" && call.method === "PATCH")).toBe(false)
+    expect(within(confirmation).queryByText(/confirm your identity with microsoft/i)).not.toBeInTheDocument()
+    await user.click(within(confirmation).getByRole("button", { name: /confirm and save/i }))
+    await waitFor(() => expect(fetchCalls.some(call => call.url === "/tanovo-time/api/users" && call.method === "PATCH")).toBe(true))
   })
 
   it("requires an explicit final confirmation before saving ordinary changes", async () => {
@@ -673,7 +669,7 @@ describe("TimesheetApp admin directory", () => {
     }))
   })
 
-  it("describes account lifecycle states and saves suspension as access control", async () => {
+  it("saves suspension after one in-app confirmation without a second sign-in", async () => {
     const user = await renderAdminPanel()
     const directory = screen.getByRole("heading", { name: /admin user directory/i }).closest("section")
     const employeeRow = patronRows(directory as HTMLElement).find(row => row.textContent?.includes("employee"))
@@ -683,10 +679,9 @@ describe("TimesheetApp admin directory", () => {
     expect(within(dialog).getByText(/temporary hold for leave, contract verification, investigation, or access review/i)).toBeInTheDocument()
     await user.click(within(dialog).getByRole("button", { name: /^save$/i }))
     const confirmation = await screen.findByRole("dialog", { name: "Confirm access change" })
-    expect(within(confirmation).getByText(/confirm your identity with microsoft/i)).toBeInTheDocument()
-    await user.click(within(confirmation).getByRole("button", { name: /verify with microsoft/i }))
-    await waitFor(() => expect(window.sessionStorage.getItem("tanovo-time:pending-access-change")).not.toBeNull())
-    expect(fetchCalls.some(call => call.url === "/tanovo-time/api/users" && call.method === "PATCH")).toBe(false)
+    expect(within(confirmation).queryByText(/confirm your identity with microsoft/i)).not.toBeInTheDocument()
+    await user.click(within(confirmation).getByRole("button", { name: /confirm and save/i }))
+    await waitFor(() => expect(fetchCalls.some(call => call.url === "/tanovo-time/api/users" && call.method === "PATCH")).toBe(true))
   })
 
   it("distinguishes offboarding, security blocks, and not-approved onboarding", async () => {

@@ -22,8 +22,6 @@ import {
 import type { AccessStatus, UserRole } from "@/lib/types"
 import { permissionLabels, resolvePermissions, type PermissionOverrides } from "@/lib/permissions"
 import { LastAdministratorError } from "@/lib/admin-policy"
-import { accessChangeRequiresStepUp } from "@/lib/admin-policy"
-import { isAppSessionFresh } from "@/lib/app-sessions"
 import { ensureAccountIdentitiesForActors } from "@/lib/account-identities"
 import { emailSchema } from "@/lib/identity-policy"
 
@@ -299,15 +297,6 @@ async function saveManagedAccess(req: Request) {
     const nextRights = resolvePermissions(body.accessStatus === "active" ? body.role : null, nextPermissions)
     if (Object.keys(permissionLabels).some(permission => previousRights[permission as keyof typeof permissionLabels] !== nextRights[permission as keyof typeof permissionLabels]) && !body.note) {
       return Response.json({ error: "Add an administrator note explaining this access-right change." }, { status: 400 })
-    }
-    if (accessChangeRequiresStepUp(
-      currentRole ? { role: currentRole, accessStatus: existing?.accessStatus ?? "active", permissions: existing?.permissions } : null,
-      { role: body.role, accessStatus: body.accessStatus, permissions: nextPermissions },
-    )) {
-      const session = await auth()
-      if (!session?.appSessionId || !await isAppSessionFresh(session.appSessionId, adminEmail)) {
-        return Response.json({ error: "Reauthenticate with Microsoft before saving this high-impact access change.", requiresReauthentication: true }, { status: 428 })
-      }
     }
     const user = await upsertManagedAccessUserWithAudit({
       environmentAdmins,

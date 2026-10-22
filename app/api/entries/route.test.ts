@@ -6,13 +6,11 @@ vi.mock("@/lib/review-policy",()=>({canReviewRole:vi.fn()}))
 vi.mock("@/lib/review-access",()=>({createReviewAccess:vi.fn()}))
 vi.mock("@/lib/account-identities",()=>({listAccountIdentities:vi.fn()}))
 vi.mock("@/lib/account-handoffs",()=>({ensureAccountHandoffStorage:vi.fn()}))
-vi.mock("@/lib/app-sessions",()=>({isAppSessionFresh:vi.fn().mockResolvedValue(true)}))
 vi.mock("@/lib/audit",()=>({getAuditContext:vi.fn(()=>({ipAddress:"127.0.0.1",userAgent:"test",requestMethod:"POST",requestPath:"/api/entries",requestId:"req-1"}))}))
 vi.mock("@/lib/db",()=>({clearTimeEntries:vi.fn(),createTimeEntries:vi.fn(),listTimeEntries:vi.fn(),listTimeProjects:vi.fn().mockResolvedValue([{id:"project-id",name:"Project A",description:"",active:true}]),listTimesheetPeriods:vi.fn(),isTimesheetPeriodArchived:vi.fn().mockResolvedValue(false),recordAuditEvent:vi.fn()}))
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { createReviewAccess } from "@/lib/review-access"
-import { isAppSessionFresh } from "@/lib/app-sessions"
 import { listAccountIdentities } from "@/lib/account-identities"
 import { clearTimeEntries,createTimeEntries,listTimeEntries,listTimeProjects,listTimesheetPeriods,isTimesheetPeriodArchived } from "@/lib/db"
 import { resolvePermissions } from "@/lib/permissions"
@@ -24,7 +22,6 @@ const savedEntry:TimeEntry={id:"10000000-0000-4000-8000-000000000001",ownerEmail
 beforeEach(()=>{
   vi.resetAllMocks()
   vi.mocked(auth).mockResolvedValue({user:{email:"person@example.com"}} as never)
-  vi.mocked(isAppSessionFresh).mockResolvedValue(true)
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"contractor",permissions:resolvePermissions("contractor")} as never)
   vi.mocked(listAccountIdentities).mockResolvedValue([{email:"person@example.com",officialName:"Official Person",contractorNumber:"DEVONCALL-000001",shortReference:"TN-000001",companyCode:"DEVONCALL",employeeId:null}] as never)
   vi.mocked(listTimeEntries).mockResolvedValue([savedEntry] as never)
@@ -111,13 +108,14 @@ it("allows only administrators to request an organization-wide timesheet clear a
   expect(recordAuditEvent).toHaveBeenCalledWith(expect.objectContaining({action:"entries_cleared",metadata:expect.objectContaining({scope:"all_entries",deletedCount:4,financeHandoffsPreserved:true})}))
 })
 
-it("requires recent Microsoft reauthentication for organization-wide entry clearing",async()=>{
-  vi.mocked(auth).mockResolvedValue({user:{email:"admin@example.com"},appSessionId:"stale-session"} as never)
+it("does not require a second Microsoft sign-in for an authorized organization-wide clear",async()=>{
+  const {clearTimeEntries}=await import("@/lib/db")
+  vi.mocked(auth).mockResolvedValue({user:{email:"admin@example.com"}} as never)
   vi.mocked(getEffectivePermissions).mockResolvedValue({role:"admin",permissions:resolvePermissions("admin")} as never)
-  vi.mocked(isAppSessionFresh).mockResolvedValue(false)
+  vi.mocked(clearTimeEntries).mockResolvedValue(2)
   const response=await DELETE(new Request("http://localhost/api/entries",{method:"DELETE",headers:{"content-type":"application/json"},body:JSON.stringify({scope:"all_entries"})}))
-  expect(response.status).toBe(428)
-  expect(clearTimeEntries).not.toHaveBeenCalled()
+  expect(response.status).toBe(200)
+  expect(clearTimeEntries).toHaveBeenCalledWith("admin@example.com",true)
 })
 
 it("rejects an organization-wide clear request from a non-admin",async()=>{

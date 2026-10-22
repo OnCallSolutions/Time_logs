@@ -160,7 +160,12 @@ async function parseTimesheetNotes(req: Request) {
     if(err instanceof z.ZodError||err instanceof SyntaxError)return Response.json({error:"Enter notes and select a valid configured timesheet period."},{status:400})
     if(err instanceof Error&&err.name==="TimeoutError")return Response.json({error:"Extraction took too long. Split the notes into smaller parts and try again."},{status:504})
     const message = err instanceof Error ? err.message : String(err)
+    const cause=err&&typeof err==="object"&&"cause" in err?(err as {cause?:unknown}).cause:undefined
+    const causeMessage=cause instanceof Error?cause.message:typeof cause==="string"?cause:JSON.stringify(cause??"")
     console.error("[parse] AI extraction failed")
+    if(/free tier|no providers available|restrictedmodels|credits|top-up/i.test(`${message} ${causeMessage}`)){
+      return Response.json({error:"AI extraction is connected, but this Vercel AI Gateway account does not currently have access to an inference provider. Enable Gateway credits or configure an approved provider key, then try again.",code:"AI_PROVIDER_ACCESS_REQUIRED"},{status:503})
+    }
     const isAuth = /unauthenticat|api key|gateway/i.test(message)
     return Response.json(
       {

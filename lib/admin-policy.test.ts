@@ -5,7 +5,7 @@
  * API tests separately cover conflicts and environment recovery administrators.
  */
 import { afterAll,beforeAll,beforeEach,expect,it,vi } from "vitest"
-import { accessChangeRequiresStepUp,LastAdministratorError } from "./admin-policy"
+import { LastAdministratorError } from "./admin-policy"
 const driver=vi.hoisted(()=>({sql:Object.assign(vi.fn(async (_parts:TemplateStringsArray,..._values:unknown[])=>[]),{transaction:vi.fn<(queries:unknown[],options:unknown)=>Promise<unknown[][]>>()})}))
 vi.mock("@neondatabase/serverless",()=>({neon:()=>driver.sql}))
 let storage:typeof import("./db")
@@ -13,12 +13,6 @@ beforeAll(async()=>{vi.stubEnv("DATABASE_URL","postgresql://test:test@localhost/
 afterAll(()=>vi.unstubAllEnvs())
 beforeEach(()=>vi.clearAllMocks())
 const assignment={email:"admin@example.com",role:"employee" as const,accessStatus:"active" as const,updatedBy:"admin@example.com"}
-it("requires Microsoft step-up when an admin grants account-manager operational review",()=>{
-  expect(accessChangeRequiresStepUp(
-    {role:"account_manager",accessStatus:"active",permissions:{review_entries:false}},
-    {role:"account_manager",accessStatus:"active",permissions:{review_entries:true}},
-  )).toBe(true)
-})
 it("rejects a mutation when its guarded insert returns no administrator-safe row",async()=>{
   driver.sql.transaction.mockResolvedValue([[]])
   await expect(storage.upsertManagedAccessUser(assignment)).rejects.toBeInstanceOf(LastAdministratorError)

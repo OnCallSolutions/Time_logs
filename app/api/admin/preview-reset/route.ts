@@ -1,13 +1,12 @@
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
-import { isAppSessionFresh } from "@/lib/app-sessions"
 import { resetPreviewData } from "@/lib/preview-data-reset"
 import { z } from "zod"
 
 export const runtime="nodejs"
 const confirmationSchema=z.object({confirmation:z.literal("RESET PREVIEW DATA")}).strict()
 
-/** Executes an explicit, administrator-only, recently reauthenticated preview reset. */
+/** Executes an explicit, administrator-only preview reset after typed confirmation. */
 export async function POST(request:Request):Promise<Response>{
   if(process.env.VERCEL_ENV!=="preview"||process.env.TANOVO_DATABASE_ENVIRONMENT!=="preview")return Response.json({error:"Preview data reset requires a Vercel Preview deployment connected to a database explicitly marked as preview."},{status:403})
   if(request.headers.get("origin")!==new URL(request.url).origin||request.headers.get("sec-fetch-site")==="cross-site")return Response.json({error:"Invalid request origin."},{status:403})
@@ -15,7 +14,6 @@ export async function POST(request:Request):Promise<Response>{
   if(!email)return Response.json({error:"Sign in again."},{status:401})
   const access=await getEffectivePermissions(email)
   if(access.role!=="admin")return Response.json({error:"Only an administrator can reset preview data."},{status:403})
-  if(!session.appSessionId||!await isAppSessionFresh(session.appSessionId,email))return Response.json({error:"Reauthenticate with Microsoft before resetting preview data.",requiresReauthentication:true},{status:428})
   try{
     const body=confirmationSchema.parse(await request.json())
     if(body.confirmation!=="RESET PREVIEW DATA")return Response.json({error:"Type the exact confirmation phrase."},{status:400})

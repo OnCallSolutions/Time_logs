@@ -9,7 +9,6 @@
  * the permissions enforced by the API routes.
  */
 import { Fragment,useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
-import { getSession } from "next-auth/react"
 import { AssistantPanel } from "@/components/assistant-panel"
 import { AssistantRunReport } from "@/components/assistant-run-report"
 import { DataExportMenu } from "@/components/data-export-menu"
@@ -28,8 +27,6 @@ import { notifyPermissionsChanged } from "@/lib/permission-events"
 import { EntryReviewDialog, ManagerWorkspace } from "@/components/manager-workspace"
 import { permissionLabels, resolvePermissions, type Permission, type PermissionOverrides } from "@/lib/permissions"
 import { ProjectManagement } from "@/components/project-management"
-import { accessChangeRequiresStepUp } from "@/lib/admin-policy"
-import { openEntraReauthentication } from "@/lib/entra-reauth-popup"
 import { AdminWorkspace } from "@/components/admin-workspace"
 import { AdminIssuesWorkspace, IssueReportWindow, type IssueContext } from "@/components/issue-workspaces"
 import { PeriodExpirationNotice } from "@/components/period-expiration-notice"
@@ -116,8 +113,6 @@ const permissionGroups:{label:string;tone:"orange"|"blue"|"green"|"red"|"sky";pe
   {label:"Finance and periods",tone:"green",permissions:["send_to_accounts","view_accounts","review_accounts","ai_accounts","authorize_payouts","manage_timesheet_periods"]},
   {label:"Access and personal reporting",tone:"red",permissions:["delegate_permissions","view_personal_reports"]},
 ]
-const pendingAccessChangeKey = "tanovo-time:pending-access-change"
-const pendingClearEntriesKey = "tanovo-time:pending-clear-entries"
 
 function canAssignPermission(role:UserRole,permission:Permission):boolean{
   if(permission==="create_projects"&&(role==="contractor"||role==="employee"))return true
@@ -422,7 +417,6 @@ export function TimesheetApp({
   const [clearEntriesBusy, setClearEntriesBusy] = useState(false)
   const [clearEntriesScope,setClearEntriesScope]=useState<"all_entries"|"preview_reset">("all_entries")
   const [previewResetPhrase,setPreviewResetPhrase]=useState("")
-  const reauthenticationPopup=useRef<Window|null>(null)
   const [savedStatus,setSavedStatus]=useState("")
   const [personalStatus, setPersonalStatus] = useState<EntryStatus | "all">("all")
   const [suggestedReview,setSuggestedReview] = useState<{entry:TimeEntry;decision:"approved"|"rejected";reason:string}|null>(null)
@@ -488,33 +482,6 @@ export function TimesheetApp({
     setPageWindow(false)
     setView(role==="admin"?"admin":role==="account_manager"?"accounts":"home")
   }
-  useEffect(() => {
-    if (!userEmail) return
-    const onMessage=async(event:MessageEvent)=>{
-      if(event.origin!==window.location.origin||event.source!==reauthenticationPopup.current)return
-      if(event.data?.type==="tanovo:microsoft-reauth-start-failed"){
-        reauthenticationPopup.current=null
-        const stored=window.sessionStorage.getItem(pendingClearEntriesKey)
-        window.sessionStorage.removeItem(pendingClearEntriesKey)
-        try{if(stored&&(JSON.parse(stored) as {state?:string}).state===event.data.state)setSyncError("Microsoft reauthentication could not start. No data was changed.")}catch{setSyncError("Microsoft reauthentication could not start. No data was changed.")}
-        return
-      }
-      if(event.data?.type!=="tanovo:microsoft-reauth-complete")return
-      reauthenticationPopup.current=null
-      const stored=window.sessionStorage.getItem(pendingClearEntriesKey)
-      window.sessionStorage.removeItem(pendingClearEntriesKey)
-      try{
-        const pending=stored?JSON.parse(stored) as {email?:string;expiresAt?:number;scope?:"all_entries"|"preview_reset";state?:string}:null
-        const session=await getSession()
-        if(!event.data.ok||!pending||pending.state!==event.data.state||typeof pending.expiresAt!=="number"||pending.expiresAt<Date.now()||pending.email?.toLowerCase()!==userEmail.toLowerCase()||session?.user?.email?.toLowerCase()!==userEmail.toLowerCase())throw new Error()
-        setClearEntriesScope(pending.scope??"all_entries")
-        setPreviewResetPhrase("")
-        setClearEntriesConfirmationOpen(true)
-      }catch{setSyncError("Microsoft reauthentication was cancelled, expired, or returned a different account. No data was changed.")}
-    }
-    window.addEventListener("message",onMessage)
-    return()=>window.removeEventListener("message",onMessage)
-  }, [userEmail])
   /** Clears this account's brief entries snapshot after authorization or writes change. */
   const invalidateEntriesCache = () => {
     if (userEmail) invalidateClientData(userEmail, entriesEndpoint)
@@ -743,40 +710,24 @@ export function TimesheetApp({
       .finally(()=>{invalidateEntriesCache();pendingEntryWrites.current--;entryReadEpoch.current++})
   }
 
-  /** Starts the five-minute Entra step-up flow; it does not mutate timesheets. */
-  async function clearEntries() {
+  /** Opens an explicit confirmation before clearing the administrator-visible entries. */
+  function clearEntries() {
     if (!canClearVisibleEntries || !userEmail) return
     setSyncError(null)
-    try {
-      setClearEntriesScope("all_entries")
-      const state=crypto.randomUUID()
-      window.sessionStorage.setItem(pendingClearEntriesKey, JSON.stringify({ email: userEmail.toLowerCase(), expiresAt: Date.now() + 5 * 60_000,scope:"all_entries",state }))
-      const popup=openEntraReauthentication(state,()=>{window.sessionStorage.removeItem(pendingClearEntriesKey);setSyncError("Microsoft reauthentication could not start. No entries were cleared.")})
-      if(!popup){window.sessionStorage.removeItem(pendingClearEntriesKey);setSyncError("Allow the Microsoft verification popup to continue. No entries were cleared.");return}
-      reauthenticationPopup.current=popup
-    } catch {
-      window.sessionStorage.removeItem(pendingClearEntriesKey)
-      setSyncError("Microsoft reauthentication did not complete. No entries were cleared.")
-    }
+    setClearEntriesScope("all_entries")
+    setPreviewResetPhrase("")
+    setClearEntriesConfirmationOpen(true)
   }
 
-  async function startPreviewDataReset(){
+  function startPreviewDataReset(){
     if(role!=="admin"||!userEmail)return
     setSyncError(null)
-    try{
-      setClearEntriesScope("preview_reset")
-      const state=crypto.randomUUID()
-      window.sessionStorage.setItem(pendingClearEntriesKey,JSON.stringify({email:userEmail.toLowerCase(),expiresAt:Date.now()+5*60_000,scope:"preview_reset",state}))
-      const popup=openEntraReauthentication(state,()=>{window.sessionStorage.removeItem(pendingClearEntriesKey);setSyncError("Microsoft reauthentication could not start. No preview data was cleared.")})
-      if(!popup){window.sessionStorage.removeItem(pendingClearEntriesKey);setSyncError("Allow the Microsoft verification popup to continue. No preview data was cleared.");return}
-      reauthenticationPopup.current=popup
-    }catch{
-      window.sessionStorage.removeItem(pendingClearEntriesKey)
-      setSyncError("Microsoft reauthentication did not complete. No preview data was cleared.")
-    }
+    setClearEntriesScope("preview_reset")
+    setPreviewResetPhrase("")
+    setClearEntriesConfirmationOpen(true)
   }
 
-  /** Executes a clear only after fresh Entra authentication and a second explicit confirmation. */
+  /** Executes a clear only after the user confirms the action in-app. */
   async function confirmClearEntries() {
     if (!canClearVisibleEntries || clearEntriesBusy) return
     if(clearEntriesScope==="preview_reset"&&previewResetPhrase!=="RESET PREVIEW DATA")return
@@ -1051,7 +1002,7 @@ export function TimesheetApp({
         <section className="flex w-full max-w-xl flex-col bg-white text-slate-950">
           <header className="flex items-start gap-3 border-b border-red-200 bg-red-50 p-4">
             <ShieldCheck className="mt-0.5 size-5 shrink-0 text-red-700" aria-hidden="true" />
-            <div><h2 className="font-semibold text-red-950">Microsoft verification complete</h2><p className="mt-1 text-sm text-red-900">You reauthenticated as {userEmail}. {clearEntriesScope==="preview_reset"?"This action is available only on a Vercel Preview deployment connected to a database explicitly marked as preview.":"Confirm only if you intend to permanently clear all entries visible to this administrator account."}</p></div>
+            <div><h2 className="font-semibold text-red-950">Confirm this action</h2><p className="mt-1 text-sm text-red-900">{clearEntriesScope==="preview_reset"?"This action is available only on a Vercel Preview deployment connected to a database explicitly marked as preview.":"Confirm only if you intend to permanently clear all entries visible to this administrator account."}</p></div>
           </header>
           <div className="space-y-3 p-4 text-sm">{clearEntriesScope==="preview_reset"?<><p>This permanently clears preview timesheets, rejection history, audit/authentication events, security reports, AI activity, and deadline reminders. It preserves patrons, active sessions, configured periods, messages, and finance handoff snapshots. One audit record will document this reset. Nothing runs automatically during deployment.</p><label className="block text-xs font-medium text-red-950">Type RESET PREVIEW DATA to enable the reset<input value={previewResetPhrase} onChange={event=>setPreviewResetPhrase(event.target.value)} autoComplete="off" className="mt-1 h-10 w-full rounded-md border border-red-300 bg-white px-3 text-sm" /></label></>:<p>This action cannot be undone. It deletes all source timesheet entries while preserving audit/security logs, patrons, configured periods, and finance handoff snapshots. {entries.length} entries are currently loaded. Cancel leaves all data unchanged.</p>}</div>
           <footer className="flex justify-end gap-2 border-t p-4">
@@ -1235,8 +1186,6 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
     null,
   )
   const [accessConfirmationOpen, setAccessConfirmationOpen] = useState(false)
-  const [reauthenticatedPendingChange, setReauthenticatedPendingChange] = useState(false)
-  const accessReauthenticationPopup=useRef<Window|null>(null)
   const [savingUser, setSavingUser] = useState<string | null>(null)
   useEffect(()=>{
     setAdminSection(initialSection??null)
@@ -1280,34 +1229,6 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
 
   useEffect(()=>{if(rightsOnly)setDirectoryOpen(true)},[rightsOnly])
   useEffect(()=>{if(openRequest)setDirectoryOpen(true)},[openRequest])
-
-  useEffect(() => {
-    if (role !== "admin") return
-    const onMessage=async(event:MessageEvent)=>{
-      if(event.origin!==window.location.origin||event.source!==accessReauthenticationPopup.current)return
-      if(event.data?.type==="tanovo:microsoft-reauth-start-failed"){
-        accessReauthenticationPopup.current=null
-        const stored=window.sessionStorage.getItem(pendingAccessChangeKey)
-        window.sessionStorage.removeItem(pendingAccessChangeKey)
-        try{if(stored&&(JSON.parse(stored) as {state?:string}).state===event.data.state)setManagementError("Microsoft reauthentication could not start. No access change was saved.")}catch{setManagementError("Microsoft reauthentication could not start. No access change was saved.")}
-        return
-      }
-      if(event.data?.type!=="tanovo:microsoft-reauth-complete")return
-      accessReauthenticationPopup.current=null
-      const stored=window.sessionStorage.getItem(pendingAccessChangeKey)
-      window.sessionStorage.removeItem(pendingAccessChangeKey)
-      try{
-        const pending=stored?JSON.parse(stored) as AccessEditorState&{expiresAt:number;state:string}:null
-        const session=await getSession()
-        if(!event.data.ok||!pending||pending.state!==event.data.state||pending.expiresAt<Date.now()||!pending.email||pending.email.toLowerCase()!==userEmail.toLowerCase()||session?.user?.email?.toLowerCase()!==userEmail.toLowerCase()||!manageableRoles.includes(pending.role)||!manageableStatuses.includes(pending.accessStatus)||typeof pending.note!=="string")throw new Error()
-        setAccessEditor({ ...pending, mode: "edit" })
-        setReauthenticatedPendingChange(true)
-        setAccessConfirmationOpen(true)
-      }catch{setManagementError("Microsoft reauthentication was cancelled, expired, or returned a different account. No access change was saved.")}
-    }
-    window.addEventListener("message",onMessage)
-    return()=>window.removeEventListener("message",onMessage)
-  }, [role,userEmail])
 
   useEffect(() => {
     let active = true
@@ -1481,7 +1402,6 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
   function openAddUserEditor() {
     setManagementError(null)
     setAccessConfirmationOpen(false)
-    setReauthenticatedPendingChange(false)
     setAccessEditor({
       mode: "add",
       email: "",
@@ -1503,7 +1423,6 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
   function openEditUserEditor(user: AdminDirectoryUser) {
     setManagementError(null)
     setAccessConfirmationOpen(false)
-    setReauthenticatedPendingChange(false)
     setAccessEditor({
       mode: "edit",
       email: user.email,
@@ -1531,28 +1450,9 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
     setAccessConfirmationOpen(true)
   }
 
-  /** Reauthenticates for high-impact changes, then saves only after explicit confirmation. */
+  /** Saves the administrator-reviewed access change through the protected API. */
   async function confirmAccessEditor() {
     if (!accessEditor || !accessEditor.email.trim()) return
-    const existing = users.find(user => user.email.toLowerCase() === accessEditor.email.trim().toLowerCase())
-    const current = existing && existing.role !== "none"
-      ? { role: existing.role, accessStatus: existing.accessStatus === "observed" ? "active" : existing.accessStatus, permissions: existing.permissions }
-      : null
-    const requiresStepUp = accessChangeRequiresStepUp(current, {
-      role: accessEditor.role,
-      accessStatus: accessEditor.accessStatus,
-      permissions: accessEditor.permissions,
-    })
-
-    if (requiresStepUp && !reauthenticatedPendingChange) {
-      const state=crypto.randomUUID()
-      window.sessionStorage.setItem(pendingAccessChangeKey, JSON.stringify({ ...accessEditor, expiresAt: Date.now() + 5 * 60_000,state }))
-      setAccessConfirmationOpen(false)
-      const popup=openEntraReauthentication(state,()=>{window.sessionStorage.removeItem(pendingAccessChangeKey);setManagementError("Microsoft reauthentication could not start. No access change was saved.")})
-      if(!popup){window.sessionStorage.removeItem(pendingAccessChangeKey);setManagementError("Allow the Microsoft verification popup to continue. No access change was saved.");return}
-      accessReauthenticationPopup.current=popup
-      return
-    }
     const saved = await saveManagedUserAccess({
       email: accessEditor.email.trim(),
       role: accessEditor.role,
@@ -1563,7 +1463,6 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
 
     if (saved) {
       setAccessConfirmationOpen(false)
-      setReauthenticatedPendingChange(false)
       setAccessEditor(null)
     }
   }
@@ -1916,7 +1815,6 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
             if (!savingUser) {
               setAccessEditor(null)
               setAccessConfirmationOpen(false)
-              setReauthenticatedPendingChange(false)
             }
           }}
           onSave={saveAccessEditor}
@@ -1927,7 +1825,6 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
         currentRole={users.find(user => user.email.toLowerCase() === accessEditor.email.toLowerCase())?.role ?? null}
         currentStatus={users.find(user => user.email.toLowerCase() === accessEditor.email.toLowerCase())?.accessStatus ?? "observed"}
         currentPermissions={users.find(user => user.email.toLowerCase() === accessEditor.email.toLowerCase())?.permissions ?? {}}
-        reauthenticated={reauthenticatedPendingChange}
         saving={savingUser === accessEditor.email.toLowerCase()}
         error={managementError}
         onClose={() => setAccessConfirmationOpen(false)}
@@ -2180,21 +2077,16 @@ function AdminUserAccessEditor({
 }
 
 /** Requires a deliberate review before saving an administrator access draft. */
-function AccessChangeConfirmation({editor,currentRole,currentStatus,currentPermissions,reauthenticated,saving,error,onClose,onConfirm}: {
+function AccessChangeConfirmation({editor,currentRole,currentStatus,currentPermissions,saving,error,onClose,onConfirm}: {
   editor: AccessEditorState
   currentRole: UserRole | "none" | null
   currentStatus: AccessStatus | "observed"
   currentPermissions?: PermissionOverrides
-  reauthenticated: boolean
   saving: boolean
   error: string | null
   onClose: () => void
   onConfirm: () => void
 }) {
-  const current = currentRole && currentRole !== "none"
-    ? { role: currentRole, accessStatus: currentStatus === "observed" ? "active" : currentStatus, permissions: currentPermissions }
-    : null
-  const highImpact = accessChangeRequiresStepUp(current, { role: editor.role, accessStatus: editor.accessStatus, permissions: editor.permissions })
   const previousRights = resolvePermissions(currentRole && currentRole !== "none" ? currentRole : null, currentPermissions)
   const nextRights = resolvePermissions(editor.role, editor.permissions)
   const changedRights = (Object.keys(permissionLabels) as Permission[]).filter(permission => previousRights[permission] !== nextRights[permission])
@@ -2214,14 +2106,13 @@ function AccessChangeConfirmation({editor,currentRole,currentStatus,currentPermi
         </div>
         {changedRights.length > 0 && <p className="text-xs leading-5 text-slate-700">{changedRights.map(permission => `${permissionLabels[permission]}: ${previousRights[permission] ? "allowed" : "not allowed"} → ${nextRights[permission] ? "allowed" : "not allowed"}`).join(" · ")}</p>}
         {editor.note.trim() && <p className="border-t border-slate-200 pt-2 text-xs text-slate-600">Admin note: {editor.note.trim()}</p>}
-        {highImpact && <p role="note" className="border-l-4 border-red-500 bg-red-50 px-3 py-2 text-xs leading-5 text-red-950">This change affects elevated access or account availability. Confirm your identity with Microsoft before the final save. Tanovo Time never asks for your Microsoft password.</p>}
-        {reauthenticated && <p role="status" className="border-l-4 border-green-600 bg-green-50 px-3 py-2 text-xs text-green-950">Microsoft reauthentication completed. Review this change once more, then confirm the save.</p>}
+        <p role="note" className="border-l-4 border-amber-500 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-950">This change takes effect immediately and is recorded in the access audit history.</p>
         {error && <p role="alert" className="border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>}
       </div>
       <footer className="mt-auto flex flex-wrap justify-end gap-2 border-t border-orange-200 bg-orange-50 px-4 py-3">
         <Button variant="outline" disabled={saving} onClick={onClose}>Back to editor</Button>
-        <Button disabled={saving} onClick={onConfirm} className={highImpact && !reauthenticated ? "bg-blue-700 text-white hover:bg-blue-800" : "bg-orange-600 text-white hover:bg-orange-700"}>
-          {saving ? "Saving..." : highImpact && !reauthenticated ? "Verify with Microsoft" : "Confirm and save"}
+        <Button disabled={saving} onClick={onConfirm} className="bg-orange-600 text-white hover:bg-orange-700">
+          {saving ? "Saving..." : "Confirm and save"}
         </Button>
       </footer>
     </section>

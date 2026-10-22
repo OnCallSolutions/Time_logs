@@ -109,5 +109,5 @@ it("returns a synthetic, period-scoped Teams transcript using the signed-in patr
   expect(value.notes).toContain("Own Person")
   expect(value.notes).toContain("2026-10-17")
   expect(value.notes).toContain("2 hours on Sample Project Alpha")
-  expect(value.demoEntries).toEqual([{contractor:"Own Person",date:"2026-10-17",hours:2,project:"Sample Project Alpha",description:"Implementation task"}])
+  expect(value).not.toHaveProperty("demoEntries")
 })

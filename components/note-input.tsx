@@ -130,7 +130,7 @@ export function NoteInput({
       const data=await response.json()
       if(!response.ok)throw new Error(data.error??"Sample transcript unavailable.")
       setNotes(data.notes);setSampleLoaded(true);setSampleIsPreview(false);setParsedEntries([]);setAiEntryInsights([])
-      await extractNotes(data.notes,Array.isArray(data.demoEntries)?data.demoEntries:undefined)
+      await extractNotes(data.notes)
     }
     catch(error){setError(error instanceof Error?error.message:"Sample transcript unavailable.")}
     finally{setLoading(false)}
@@ -143,7 +143,7 @@ export function NoteInput({
    *
    * @returns A promise that resolves after parsing, saving, or error handling.
    */
-  async function extractNotes(sourceNotes:string,sampleFallback?:ParsedEntry[]) {
+  async function extractNotes(sourceNotes:string) {
     if (!sourceNotes.trim() || previewOnly || !selectedPeriod) return
     if(!selectedPeriod){setError("Select a configured timesheet period before extracting entries.");return}
     setActiveTranscriptDraftId(null);setActiveTranscriptEvidence([]);setAiEntryInsights([])
@@ -166,13 +166,7 @@ export function NoteInput({
         setParsedEntries(entries.map((entry,index)=>({...entry,date:entry.date??"",hours:entry.hours??0,contractor:entry.contractor??"Unspecified",project:aiProjectChoice==="__notes__"?entry.project:aiProjectChoice})))
       }
     } catch (err) {
-      if(sampleFallback?.length){
-        const fallbackEntries=sampleFallback.map(entry=>({...entry,date:entry.date??"",hours:entry.hours??0,contractor:entry.contractor??"Unspecified"}))
-        setParsedEntries(fallbackEntries)
-        setProjectNamesFromNotes(fallbackEntries.map(entry=>entry.project))
-        setAiEntryInsights(fallbackEntries.map(()=>({evidenceQuote:null,reviewFlags:["evidence_unverified"]})))
-        setError("The AI service did not respond. Showing fixed demo rows so you can test the preview; these are not AI results.")
-      }else setError(err instanceof Error ? err.message : "Failed to parse notes.")
+      setError(err instanceof Error ? err.message : "Failed to parse notes.")
     } finally {
       setLoading(false)
     }

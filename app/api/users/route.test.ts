@@ -7,14 +7,12 @@ import { beforeEach, expect, it, vi } from "vitest"
 vi.mock("@/lib/account-identities",()=>({ensureAccountIdentitiesForActors:vi.fn(async(emails:string[])=>(emails??[]).map(email=>({email,officialName:"Name Not Set Abc12345",contractorNumber:"TN-internal",shortReference:"TN-000001"})))}))
 
 vi.mock("@/auth", () => ({ auth: vi.fn() }))
-vi.mock("@/lib/app-sessions", () => ({ isAppSessionFresh: vi.fn() }))
 vi.mock("@/lib/access", () => ({ getEffectiveUserRole: vi.fn(), getConfiguredAccessUsers: vi.fn() }))
 vi.mock("@/lib/db", () => ({
   getManagedAccessUser: vi.fn(), listKnownUsers: vi.fn(), listManagedAccessUsers: vi.fn(),
   upsertManagedAccessUserWithAudit: vi.fn(),
 }))
 import { auth } from "@/auth"
-import { isAppSessionFresh } from "@/lib/app-sessions"
 import { getEffectiveUserRole,getConfiguredAccessUsers } from "@/lib/access"
 import { LastAdministratorError } from "@/lib/admin-policy"
 import { getManagedAccessUser, listKnownUsers, listManagedAccessUsers, upsertManagedAccessUserWithAudit } from "@/lib/db"
@@ -24,7 +22,6 @@ import { GET,PATCH } from "./route"
 beforeEach(() => {
   vi.resetAllMocks()
   vi.mocked(auth).mockResolvedValue({ user: { email: "admin@example.com" }, appSessionId: "00000000-0000-0000-0000-000000000001" } as never)
-  vi.mocked(isAppSessionFresh).mockResolvedValue(true)
   vi.mocked(getEffectiveUserRole).mockResolvedValue("admin")
   vi.mocked(getConfiguredAccessUsers).mockReturnValue([])
   vi.mocked(getManagedAccessUser).mockResolvedValue(null)
@@ -64,12 +61,10 @@ it.each(["suspended", "retired", "blocked", "denied"])("persists the %s lifecycl
   expect(upsertManagedAccessUserWithAudit).toHaveBeenCalledWith(expect.objectContaining({ accessStatus: status }))
 })
 
-it("requires recent Microsoft authentication before an account suspension", async () => {
-  vi.mocked(isAppSessionFresh).mockResolvedValue(false)
+it("saves a high-impact access change after the normal admin and audit-note checks", async () => {
   const response = await PATCH(request({}, "suspended"))
-  expect(response.status).toBe(428)
-  expect(await response.json()).toMatchObject({ requiresReauthentication: true })
-  expect(upsertManagedAccessUserWithAudit).not.toHaveBeenCalled()
+  expect(response.status).toBe(200)
+  expect(upsertManagedAccessUserWithAudit).toHaveBeenCalledWith(expect.objectContaining({ accessStatus: "suspended", note: expect.any(String) }))
 })
 
 it("accepts an empty object to reset role defaults", async () => {

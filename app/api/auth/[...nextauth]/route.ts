@@ -6,7 +6,6 @@
  * thin while preserving the /tanovo-time/api/auth path expected by Azure.
  */
 import { handlers } from "@/auth"
-import { stepUpHandlers } from "@/step-up-auth"
 import { NextRequest } from "next/server"
 import { basePath } from "@/lib/paths"
 
@@ -34,18 +33,11 @@ function withPublicAuthBasePath(req: NextRequest) {
   })
 }
 
-/** Routes explicitly tagged step-up requests, and their OAuth callback, to isolated cookies. */
-function isStepUpRequest(req:NextRequest):boolean{
-  if(req.nextUrl.searchParams.get("stepup")==="1")return true
-  return req.nextUrl.pathname.includes("/callback/")&&req.cookies.has("tanovo-time.stepup.state")
-}
-
-/** Logs only the selected callback flow and cookie presence, never cookie values. */
-function logCallbackFlow(req:NextRequest,stepUp:boolean):void{
+/** Logs callback routing without recording OAuth codes, state, or cookie values. */
+function logCallbackFlow(req:NextRequest):void{
   if(!req.nextUrl.pathname.includes("/callback/"))return
   console.info("[auth-route] OAuth callback routed.",{
-    flow:stepUp?"step-up":"primary",
-    hasStepUpStateCookie:req.cookies.has("tanovo-time.stepup.state"),
+    flow:"primary",
   })
 }
 
@@ -56,9 +48,8 @@ function logCallbackFlow(req:NextRequest,stepUp:boolean):void{
  * @returns The Auth.js response for the requested action.
  */
 export function GET(req: NextRequest) {
-  const stepUp=isStepUpRequest(req)
-  logCallbackFlow(req,stepUp)
-  return (stepUp?stepUpHandlers.GET:handlers.GET)(withPublicAuthBasePath(req))
+  logCallbackFlow(req)
+  return handlers.GET(withPublicAuthBasePath(req))
 }
 
 /**
@@ -68,7 +59,6 @@ export function GET(req: NextRequest) {
  * @returns The Auth.js response for the requested action.
  */
 export function POST(req: NextRequest) {
-  const stepUp=isStepUpRequest(req)
-  logCallbackFlow(req,stepUp)
-  return (stepUp?stepUpHandlers.POST:handlers.POST)(withPublicAuthBasePath(req))
+  logCallbackFlow(req)
+  return handlers.POST(withPublicAuthBasePath(req))
 }
