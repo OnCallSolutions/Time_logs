@@ -491,7 +491,15 @@ export function TimesheetApp({
   useEffect(() => {
     if (!userEmail) return
     const onMessage=async(event:MessageEvent)=>{
-      if(event.origin!==window.location.origin||event.source!==reauthenticationPopup.current||event.data?.type!=="tanovo:microsoft-reauth-complete")return
+      if(event.origin!==window.location.origin||event.source!==reauthenticationPopup.current)return
+      if(event.data?.type==="tanovo:microsoft-reauth-start-failed"){
+        reauthenticationPopup.current=null
+        const stored=window.sessionStorage.getItem(pendingClearEntriesKey)
+        window.sessionStorage.removeItem(pendingClearEntriesKey)
+        try{if(stored&&(JSON.parse(stored) as {state?:string}).state===event.data.state)setSyncError("Microsoft reauthentication could not start. No data was changed.")}catch{setSyncError("Microsoft reauthentication could not start. No data was changed.")}
+        return
+      }
+      if(event.data?.type!=="tanovo:microsoft-reauth-complete")return
       reauthenticationPopup.current=null
       const stored=window.sessionStorage.getItem(pendingClearEntriesKey)
       window.sessionStorage.removeItem(pendingClearEntriesKey)
@@ -1276,7 +1284,15 @@ function AdminPanel({ role, entries, pendingEntries, userEmail, onEntryUpdate, o
   useEffect(() => {
     if (role !== "admin") return
     const onMessage=async(event:MessageEvent)=>{
-      if(event.origin!==window.location.origin||event.source!==accessReauthenticationPopup.current||event.data?.type!=="tanovo:microsoft-reauth-complete")return
+      if(event.origin!==window.location.origin||event.source!==accessReauthenticationPopup.current)return
+      if(event.data?.type==="tanovo:microsoft-reauth-start-failed"){
+        accessReauthenticationPopup.current=null
+        const stored=window.sessionStorage.getItem(pendingAccessChangeKey)
+        window.sessionStorage.removeItem(pendingAccessChangeKey)
+        try{if(stored&&(JSON.parse(stored) as {state?:string}).state===event.data.state)setManagementError("Microsoft reauthentication could not start. No access change was saved.")}catch{setManagementError("Microsoft reauthentication could not start. No access change was saved.")}
+        return
+      }
+      if(event.data?.type!=="tanovo:microsoft-reauth-complete")return
       accessReauthenticationPopup.current=null
       const stored=window.sessionStorage.getItem(pendingAccessChangeKey)
       window.sessionStorage.removeItem(pendingAccessChangeKey)
