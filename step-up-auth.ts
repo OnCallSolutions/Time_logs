@@ -3,10 +3,13 @@ import "server-only"
 import NextAuth from "next-auth"
 import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id"
 import { apiPath } from "@/lib/paths"
+import {stepUpCookiePolicies} from "@/lib/step-up-cookie-policy"
 
 export const stepUpSessionCookieName="tanovo-time.stepup.session-token"
 const secure=process.env.NODE_ENV==="production"
-const cookieOptions={httpOnly:true,sameSite:"lax" as const,path:"/",secure}
+// Local HTTP stays Lax; hosted OAuth state cookies must survive Microsoft's
+// cross-site callback and are Secure when SameSite=None is enabled.
+const {standard:cookieOptions,oauth:oauthCookieOptions}=stepUpCookiePolicies(secure)
 
 export const {handlers:stepUpHandlers,auth:stepUpAuth}=NextAuth({
   trustHost:true,
@@ -24,9 +27,9 @@ export const {handlers:stepUpHandlers,auth:stepUpAuth}=NextAuth({
     sessionToken:{name:stepUpSessionCookieName,options:cookieOptions},
     callbackUrl:{name:"tanovo-time.stepup.callback-url",options:cookieOptions},
     csrfToken:{name:"tanovo-time.stepup.csrf-token",options:cookieOptions},
-    pkceCodeVerifier:{name:"tanovo-time.stepup.pkce-code-verifier",options:cookieOptions},
-    state:{name:"tanovo-time.stepup.state",options:cookieOptions},
-    nonce:{name:"tanovo-time.stepup.nonce",options:cookieOptions},
+    pkceCodeVerifier:{name:"tanovo-time.stepup.pkce-code-verifier",options:oauthCookieOptions},
+    state:{name:"tanovo-time.stepup.state",options:oauthCookieOptions},
+    nonce:{name:"tanovo-time.stepup.nonce",options:oauthCookieOptions},
   },
   providers:[MicrosoftEntraID({
     clientId:process.env.AUTH_MICROSOFT_ENTRA_ID_ID,
