@@ -8,7 +8,7 @@ import { beforeAll,beforeEach,expect,it,vi } from "vitest"
 import { createHash,generateKeyPairSync } from "node:crypto"
 vi.mock("@/auth",()=>({auth:vi.fn()}))
 vi.mock("@/lib/effective-permissions",()=>({getEffectivePermissions:vi.fn()}))
-vi.mock("@/lib/collaboration",()=>({actorRoster:vi.fn(),listMessages:vi.fn()}))
+vi.mock("@/lib/collaboration",()=>({actorRoster:vi.fn(),listMessages:vi.fn(),messageAuthors:vi.fn(async()=>[])}))
 vi.mock("@/lib/message-keys",()=>({ownMessageKey:vi.fn(),publicMessageKeys:vi.fn(),registerMessageKey:vi.fn(),registerMessageDevice:vi.fn()}))
 vi.mock("@/lib/db",()=>({recordAuditEvent:vi.fn()}))
 import { auth } from "@/auth"

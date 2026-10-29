@@ -10,6 +10,9 @@ import { signIn, auth } from "@/auth"
 import { AuthScreen } from "@/components/auth-screen"
 import { TimesheetApp } from "@/components/timesheet-app"
 import { getEffectiveUserRole } from "@/lib/access"
+import {SessionBoundary} from "@/components/session-boundary"
+import { TermsAcceptance } from "@/components/terms-of-use"
+import { hasAcceptedCurrentTerms } from "@/lib/terms-of-use"
 
 /**
  * Renders the authenticated timesheet app or the Microsoft sign-in screen.
@@ -41,11 +44,14 @@ export default async function Page() {
     return <AuthScreen email={session.user.email ?? "Microsoft account"} />
   }
 
+  if(session.user.email&&!await hasAcceptedCurrentTerms(session.user.email))return <TermsAcceptance email={session.user.email}/>
+
   return (
-    <TimesheetApp
+    <SessionBoundary key={session.user.email} accountEmail={session.user.email}><TimesheetApp
       role={role ?? "contractor"}
       userName={session.user.name}
       userEmail={session.user.email}
-    />
+      organizationName={process.env.COMPANY_NAME?.trim() || "DevOnCall"}
+    /></SessionBoundary>
   )
 }

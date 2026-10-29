@@ -5,7 +5,7 @@
  */
 import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
-import { actorRoster,listMessages } from "@/lib/collaboration"
+import { actorRoster,listMessages,messageAuthors } from "@/lib/collaboration"
 import { ownMessageKey,publicMessageKeys,registerMessageKey,registerMessageDevice } from "@/lib/message-keys"
 import { z } from "zod"
 import { createHash,createPublicKey } from "node:crypto"
@@ -20,7 +20,7 @@ export async function GET():Promise<Response>{
     const email=(await auth())?.user?.email;const access=await getEffectivePermissions(email)
     if(!email||!access.role)return Response.json({error:"Forbidden."},{status:403})
     const messages=await listMessages(email,access.role==="employee"||access.role==="contractor")
-    const peers=messages.flatMap(message=>[message.sender_email,message.recipient_email,...Object.keys(message.encrypted_payload?.keys??{}),message.encrypted_payload?.author]).filter((value):value is string=>typeof value==="string")
+    const peers=[...await messageAuthors(email),...messages.flatMap(message=>[message.sender_email,message.recipient_email,...Object.keys(message.encrypted_payload?.keys??{}),message.encrypted_payload?.author]).filter((value):value is string=>typeof value==="string")]
     const roster=(access.role==="admin"||access.role==="manager")&&access.permissions.send_messages?(await actorRoster()).filter(user=>user.accessStatus==="active"):[]
     return Response.json({own:await ownMessageKey(email),keys:await publicMessageKeys([...new Set([email,...peers,...roster.map(user=>user.email)])])},{headers:{"Cache-Control":"no-store"}})
   }catch{return Response.json({error:"Encryption keys unavailable."},{status:500})}

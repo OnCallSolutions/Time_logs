@@ -9,10 +9,11 @@ import { z } from "zod"
 import { auth } from "@/auth"
 import { getEffectiveUserRole } from "@/lib/access"
 import { getAuditContext } from "@/lib/audit"
+import { savePersonalProfile } from "@/lib/account-identities"
+import { nicknameSchema } from "@/lib/identity-policy"
 import {
   getUserProfile,
   recordAuditEvent,
-  upsertUserProfile,
 } from "@/lib/db"
 
 export const runtime = "nodejs"
@@ -20,7 +21,7 @@ export const runtime = "nodejs"
 const maxImageDataUrlLength = 750_000
 
 const profileSchema = z.object({
-  displayName: z.string().trim().max(80).default(""),
+  displayName: z.union([z.literal(""),nicknameSchema]).default(""),
   imageDataUrl: z
     .string()
     .max(maxImageDataUrlLength)
@@ -93,7 +94,7 @@ export async function PUT(req: Request) {
 
     const profile = profileSchema.parse(await req.json())
     const previousProfile = await getUserProfile(access.email)
-    const savedProfile = await upsertUserProfile(access.email, profile)
+    const savedProfile = await savePersonalProfile(access.email, profile)
     await recordAuditEvent({
       actorEmail: access.email,
       action: "profile_updated",
@@ -110,6 +111,7 @@ export async function PUT(req: Request) {
     return Response.json({ profile: savedProfile })
   } catch (err) {
     console.error("[profile] save failed")
+    if(err&&typeof err==="object"&&"code" in err&&err.code==="23505")return Response.json({error:"That personal nickname is already in use."},{status:409})
     return Response.json(
       { error: "Failed to save profile." },
       { status: 400 },

@@ -162,6 +162,87 @@
   }
 }
 
+.timesheet-period-toolbar-container {
+  container-type: inline-size;
+}
+
+.timesheet-period-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+}
+
+.timesheet-period-deadline,
+.timesheet-period-center,
+.timesheet-period-selector {
+  min-width: 0;
+}
+
+.timesheet-period-selector {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.timesheet-period-label {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.timesheet-period-label > span {
+  white-space: nowrap;
+}
+
+.timesheet-period-label > select {
+  width: 100%;
+  min-width: 0;
+}
+
+@container (min-width: 48rem) {
+  .timesheet-period-toolbar {
+    grid-template-columns: minmax(0, 1fr) minmax(20rem, 42rem);
+  }
+
+  .timesheet-period-deadline {
+    grid-column: 1;
+  }
+
+  .timesheet-period-center {
+    grid-column: 1 / -1;
+    justify-self: center;
+  }
+
+  .timesheet-period-selector {
+    grid-column: 2;
+    justify-self: end;
+  }
+}
+
+@container (min-width: 80rem) {
+  .timesheet-period-toolbar {
+    grid-template-columns: minmax(0, 1fr) minmax(16rem, 42rem) minmax(20rem, 1fr);
+  }
+
+  .timesheet-period-center {
+    grid-column: 2;
+  }
+
+  .timesheet-period-selector {
+    grid-column: 3;
+  }
+}
+
+@container (max-width: 28rem) {
+  .timesheet-period-label {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -219,6 +300,28 @@
   --workspace-danger: #b91c1c;
   border-top: 4px solid var(--workspace-orange);
   overflow-wrap: anywhere;
+  background-color: #eff8ff;
+  background-image: linear-gradient(135deg, rgb(125 211 252 / 0.43), rgb(103 232 249 / 0.4) 52%, rgb(253 186 116 / 0.34));
+}
+
+/* Broad work canvases use electric cyan glass with a restrained orange blend. */
+.admin-command-canvas {
+  background: linear-gradient(115deg, rgb(125 211 252 / 0.78), rgb(103 232 249 / 0.74) 58%, rgb(254 215 170 / 0.64));
+  backdrop-filter: blur(24px) saturate(1.2);
+  -webkit-backdrop-filter: blur(24px) saturate(1.2);
+  box-shadow: inset 0 1px rgb(255 255 255 / 0.9), 0 5px 18px rgb(2 132 199 / 0.12);
+}
+
+.admin-command-canvas > button {
+  min-height: 2.5rem;
+  border-radius: 0.35rem;
+  transition: background-color 120ms ease, box-shadow 120ms ease;
+}
+
+.admin-command-canvas > button[aria-current='page'] {
+  background: rgb(255 255 255 / 0.78);
+  box-shadow: inset 0 -3px var(--workspace-orange), 0 1px 3px rgb(15 23 42 / 0.08);
+  font-weight: 600;
 }
 
 .workspace-header {
@@ -278,8 +381,16 @@
   width: 100%;
 }
 
-.app-workspace tbody tr:hover {
-  background-color: #fff7ed;
+.role-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr));
+  gap: 0.5rem;
+}
+
+.status-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 8.5rem), 1fr));
+  gap: 0.5rem;
 }
 
 /* Reserve mobile space for the utility control and device safe-area insets. */
@@ -307,11 +418,113 @@
   *, *::before, *::after { scroll-behavior: auto !important; }
 }
 
-/* Expanded windows fill the viewport; only their content areas scroll. */
-.window-surface[data-window-expanded='true'] > .window-content > section {
+/* Window content is bounded in both modes so nested forms and tables can scroll. */
+.window-surface > .window-content {
+  min-width: 0;
+  min-height: 0;
+  overscroll-behavior-y: auto;
+}
+
+.timesheet-scroll-region {
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: auto;
+  scrollbar-gutter: stable;
+  scrollbar-width: auto;
+  scrollbar-color: #64748b #e2e8f0;
+}
+
+.timesheet-scroll-region::-webkit-scrollbar {
+  width: 14px;
+  height: 14px;
+}
+
+.timesheet-scroll-region::-webkit-scrollbar-track {
+  background: #e2e8f0;
+  border-left: 1px solid #cbd5e1;
+  border-top: 1px solid #cbd5e1;
+}
+
+.timesheet-scroll-region::-webkit-scrollbar-thumb {
+  background: #64748b;
+  border: 3px solid #e2e8f0;
+  border-radius: 8px;
+}
+
+.timesheet-scroll-region::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+.timesheet-workspace-frame {
+  border: 2px solid #64748b;
+  border-bottom-width: 4px;
+}
+
+/* Let wheel input follow the pointer's nearest scroll area, then chain at its edge. */
+.app-workspace,
+.app-workspace *,
+.window-surface,
+.window-surface * {
+  overscroll-behavior-y: auto !important;
+}
+
+.window-surface[data-window-expanded='false'] > .window-content {
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.window-surface[data-window-expanded='false'] > .window-content > :is(section, form),
+.window-surface[data-window-expanded='true'] > .window-content > :is(section, form) {
   width: 100%;
   max-width: none;
   height: 100%;
+  min-height: 0;
   max-height: none;
   border-radius: 0;
+}
+
+/* Expanded windows fill the viewport; the first-level form/section owns scrolling. */
+.window-surface[data-window-expanded='true'] > .window-content {
+  overflow: hidden;
+}
+
+.window-surface[data-window-expanded='true'] {
+  background-image: linear-gradient(135deg, rgb(125 211 252 / 0.66), rgb(103 232 249 / 0.6) 54%, rgb(253 186 116 / 0.48));
+  backdrop-filter: blur(24px) saturate(1.16);
+  -webkit-backdrop-filter: blur(24px) saturate(1.16);
+}
+
+/* A session check must also shield portals, not just the workspace root. */
+body[data-session-checking='true'] > :not([data-session-guard='true']) {
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+body[data-session-checking='true'] > [data-session-guard='true'] {
+  visibility: visible !important;
+  z-index: 200;
+}
+
+.approved-timesheets-print { display: none; }
+@media print {
+  body * { visibility: hidden !important; }
+  .approved-timesheets-print,
+  .approved-timesheets-print * { visibility: visible !important; }
+  .approved-timesheets-print {
+    display: block !important;
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    padding: 0.5in;
+    color: #111827;
+    background: white;
+    font: 10pt/1.35 Arial, sans-serif;
+  }
+  .approved-timesheets-print h1 { margin: 0 0 0.15in; font-size: 18pt; }
+  .approved-timesheets-print p { margin: 0.05in 0; }
+  .approved-timesheets-print table { width: 100%; margin-top: 0.2in; border-collapse: collapse; }
+  .approved-timesheets-print th,
+  .approved-timesheets-print td { padding: 0.07in; border: 1px solid #cbd5e1; text-align: left; vertical-align: top; }
+  .approved-timesheets-print th { background: #e0f2fe !important; print-color-adjust: exact; }
+  .approved-timesheets-print tr { break-inside: avoid; }
+  .approved-timesheets-print .print-generated { margin-top: 0.2in; color: #475569; font-size: 8pt; }
 }

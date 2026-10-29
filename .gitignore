@@ -24,5 +24,25 @@ test-results/
 
 # Local testing helpers and generated records
 /scripts/
+/Documents/Tanovo_Time_Architecture_Guide.docx
+/Documents/*.docx
+/Documents/*.doc
+/Documents/*.rtf
+/Documents/*.odt
+/Documents/*.xlsx
+/Documents/*.pptx
+/Documents/*.png
+/Documents/*.jpg
+/Documents/*.jpeg
+/Documents/*.svg
+/Documents/*.webp
+/Documents/**/*.png
+/Documents/**/*.jpg
+/Documents/**/*.jpeg
+/Documents/**/*.svg
+/Documents/**/*.webp
+/Documents/.business_logic_assets/
+/Documents/.business_logic_render/
+/Documents/.build_*.py
 /output/
 /TEST_RESULTS.md

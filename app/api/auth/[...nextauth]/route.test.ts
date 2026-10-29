@@ -32,3 +32,26 @@ it("preserves the POST method and sign-in payload", async () => {
   expect(request.method).toBe("POST")
   expect(await request.text()).toBe("csrfToken=fixture")
 })
+
+it("routes callbacks through the ordinary handler despite a stale legacy step-up cookie", () => {
+  const log=vi.spyOn(console,"info").mockImplementation(()=>{})
+  GET(new NextRequest("http://localhost:3000/api/auth/callback/microsoft-entra-id?code=fixture", {
+    headers: { cookie: "tanovo-time.stepup.state=fixture" },
+  }))
+  expect(vi.mocked(handlers.GET).mock.calls[0][0].url).toBe("http://localhost:3000/tanovo-time/api/auth/callback/microsoft-entra-id?code=fixture")
+  expect(log).toHaveBeenCalledWith("[auth-route] OAuth callback routed.",{
+    flow:"primary",
+  })
+  log.mockRestore()
+})
+
+it("reports a primary callback without exposing cookie values",()=>{
+  const log=vi.spyOn(console,"info").mockImplementation(()=>{})
+  GET(new NextRequest("http://localhost:3000/api/auth/callback/microsoft-entra-id?code=fixture",{
+    headers:{cookie:"unrelated=private-value"},
+  }))
+  expect(log).toHaveBeenCalledWith("[auth-route] OAuth callback routed.",{
+    flow:"primary",
+  })
+  log.mockRestore()
+})

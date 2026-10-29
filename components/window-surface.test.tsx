@@ -4,10 +4,11 @@
  * These tests use isolated DOM fixtures rather than authenticated accounts.
  */
 import { useState } from "react"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { expect, it } from "vitest"
 import { WindowSurface } from "./window-surface"
+import { WindowAssistantProvider } from "./window-assistant-context"
 
 /**
  * Builds a parent window with an editable draft and a nested security window.
@@ -25,14 +26,17 @@ function Windows() {
   </>
 }
 
-it("defaults to full screen and restores the previous window and draft with Back", async () => {
+it("keeps windows full screen without size controls and restores parent draft with Back", async () => {
   render(<Windows />)
   const user = userEvent.setup()
   await user.click(screen.getByRole("button", { name: "Open activity" }))
   const parent = screen.getByRole("dialog", { name: "Activity" })
+  expect(parent).toHaveFocus()
   expect(parent).toHaveAttribute("data-window-expanded", "true")
-  await user.click(screen.getByRole("button", { name: "Restore window" }))
-  expect(parent).toHaveAttribute("data-window-expanded", "false")
+  expect(parent).toHaveAttribute("data-window-resizable", "true")
+  expect(screen.queryByRole("button", { name: "Restore size" })).not.toBeInTheDocument()
+  expect(screen.queryByRole("button", { name: "Expand" })).not.toBeInTheDocument()
+  expect(parent.querySelector(".window-content")?.parentElement).toHaveClass("h-full", "w-full")
   await user.click(screen.getByRole("button", { name: "Open security" }))
   expect(parent).not.toBeVisible()
   expect(parent.inert).toBe(true)
@@ -41,10 +45,22 @@ it("defaults to full screen and restores the previous window and draft with Back
   expect(parent).toBeVisible()
   expect(parent.inert).toBe(false)
   expect(screen.getByLabelText("Draft")).toHaveValue("Retained draft")
-  expect(parent).toHaveAttribute("data-window-expanded", "false")
+  expect(parent).toHaveAttribute("data-window-expanded", "true")
   await user.click(screen.getByRole("button", { name: "Back" }))
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
   expect(screen.getByRole("button", { name: "Open activity" })).toBeVisible()
+})
+
+it("supports dragging compact task dialogs without a resize/restore button",async()=>{
+  render(<WindowSurface title="Period editor" onBack={()=>{}} initialExpanded={false} movable assistant={false}><section>Form</section></WindowSurface>)
+  const dialog=screen.getByRole("dialog",{name:"Period editor"})
+  expect(screen.queryByRole("button",{name:"Restore size"})).not.toBeInTheDocument()
+  const titlebar=dialog.querySelector<HTMLElement>("h1")?.parentElement
+  expect(titlebar).not.toBeNull()
+  fireEvent.pointerDown(titlebar!,{pointerId:1,clientX:100,clientY:100})
+  fireEvent.pointerMove(titlebar!,{pointerId:1,clientX:140,clientY:130})
+  fireEvent.pointerUp(titlebar!,{pointerId:1,clientX:140,clientY:130})
+  expect(dialog.querySelector(":scope > div")).toHaveStyle({left:"40px",top:"30px"})
 })
 
 it("Escape returns from the nested window without dismissing its parent", async () => {
@@ -55,4 +71,42 @@ it("Escape returns from the nested window without dismissing its parent", async 
   await user.keyboard("{Escape}")
   expect(screen.getByRole("dialog", { name: "Activity" })).toBeVisible()
   expect(screen.queryByRole("dialog", { name: "Security" })).not.toBeInTheDocument()
+})
+
+it("maps browser Back to the active window Back and restores the parent surface", async () => {
+  render(<Windows />)
+  const user = userEvent.setup()
+  await user.click(screen.getByRole("button", { name: "Open activity" }))
+  await user.click(screen.getByRole("button", { name: "Open security" }))
+  expect(screen.getByRole("dialog", { name: "Security" })).toBeVisible()
+
+  window.history.back()
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "Security" })).not.toBeInTheDocument())
+  expect(screen.getByRole("dialog", { name: "Activity" })).toBeVisible()
+  expect(screen.getByLabelText("Draft")).toHaveValue("Retained draft")
+
+  window.history.back()
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "Activity" })).not.toBeInTheDocument())
+  expect(screen.getByRole("button", { name: "Open activity" })).toBeVisible()
+})
+
+it("keeps window AI hidden until its bottom-right assistant button is opened",async()=>{
+  render(<WindowAssistantProvider renderAssistant={(workspace,onClose,_height,controls)=><section aria-label="Window AI" data-docked={controls?.docked}><header aria-label="Move assistant" onPointerDown={controls?.onDragStart} onPointerMove={controls?.onDragMove} onPointerUp={controls?.onDragEnd}>AI for {workspace}</header><button onClick={controls?.onToggleDock}>{controls?.docked?"Undock AI assistant":"Dock AI assistant at bottom right"}</button><button onClick={onClose}>Close contextual AI</button></section>}>
+    <WindowSurface title="Reports" onBack={()=>{}}><section>Report workspace</section></WindowSurface>
+  </WindowAssistantProvider>)
+  expect(screen.queryByRole("region",{name:"Window AI"})).not.toBeInTheDocument()
+  await userEvent.click(screen.getByRole("button",{name:"Open Reports AI assistant"}))
+  const assistant=screen.getByRole("region",{name:"Window AI"})
+  expect(assistant).toHaveTextContent("AI for Reports")
+  expect(assistant).toHaveAttribute("data-docked","true")
+  await userEvent.click(screen.getByRole("button",{name:"Undock AI assistant"}))
+  expect(assistant).toHaveAttribute("data-docked","false")
+  const handle=screen.getByLabelText("Move assistant")
+  fireEvent.pointerDown(handle,{pointerId:1,clientX:100,clientY:100})
+  fireEvent.pointerMove(handle,{pointerId:1,clientX:140,clientY:130})
+  fireEvent.pointerUp(handle,{pointerId:1})
+  await userEvent.click(screen.getByRole("button",{name:"Dock AI assistant at bottom right"}))
+  expect(assistant).toHaveAttribute("data-docked","true")
+  await userEvent.click(screen.getByRole("button",{name:"Close contextual AI"}))
+  expect(screen.queryByRole("region",{name:"Window AI"})).not.toBeInTheDocument()
 })

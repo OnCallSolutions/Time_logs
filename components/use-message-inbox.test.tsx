@@ -30,3 +30,18 @@ it("does not alert historical or self-authored messages",async()=>{
   expect(result.current.unread).toBe(1)
   expect(result.current.notification).toBeNull()
 })
+it("keeps loaded history paginated and refreshes old deletion markers and receipts",async()=>{
+  const recent={id:"recent",sender_email:"manager@example.com",recipient_email:"employee@example.com",body:"New",created_at:"2026-10-15T12:00:00Z"}
+  const old={...recent,id:"old",body:"Old",created_at:"2026-10-14T12:00:00Z"}
+  let deleted=false
+  const request=vi.fn(async(url:string)=>Response.json(url.includes("?before=")?{messages:[old],next:null}:url.includes("?ids=")?{messages:[{...old,deleted_at:deleted?recent.created_at:null}]}:{email:"employee@example.com",role:"employee",messages:[recent],next:{date:recent.created_at,id:recent.id}}))
+  vi.stubGlobal("fetch",request)
+  const {result}=renderHook(()=>useMessageInbox())
+  await waitFor(()=>expect(result.current.hasMore).toBe(true))
+  await act(()=>result.current.loadOlder())
+  expect(result.current.messages.map(message=>message.id)).toEqual(["recent","old"])
+  expect(result.current.hasMore).toBe(false)
+  deleted=true;act(()=>window.dispatchEvent(new Event("focus")))
+  await waitFor(()=>expect(result.current.messages.find(message=>message.id==="old")?.deleted_at).toBe(recent.created_at))
+  expect(result.current.hasMore).toBe(false)
+})

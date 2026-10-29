@@ -9,6 +9,22 @@
     {
       "path": "/tanovo-time/api/security?scheduled=1",
       "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/tanovo-time/api/timesheet-period-reminders?scheduled=1",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/tanovo-time/api/teams/transcripts/process?scheduled=1",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/tanovo-time/api/teams/transcripts/renew?scheduled=1",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/tanovo-time/api/teams/transcripts/extract?scheduled=1",
+      "schedule": "* * * * *"
     }
   ]
 }

@@ -11,6 +11,8 @@ import type { AppMessage } from "@/lib/message-policy"
 import { loadDeviceIdentity,rememberDeviceIdentity,forgetDeviceIdentity } from "@/lib/message-device-store"
 import { readClientData,invalidateClientData } from "@/lib/client-data-cache"
 import { automaticMessageIdentity } from "@/lib/message-device-setup"
+import { useMessageHistory } from "./use-message-history"
+import { decryptHistoryMessage } from "@/lib/message-history-crypto"
 
 /**
  * Loads scoped identities, unlocks recovery backups, and decrypts signed messages.
@@ -27,6 +29,7 @@ export function useMessageEncryption(email:string,messages:AppMessage[]) {
   const [busy,setBusy]=useState(false)
   const [loaded,setLoaded]=useState(false)
   const [revision,setRevision]=useState(0)
+  const history=useMessageHistory(email,identity,keys,revision)
   const activeEmail=useRef(email);activeEmail.current=email
   const autoRestore=useRef(true)
   const decrypted=useRef(new Map<string,{evidence:string;text:string}>())
@@ -78,12 +81,14 @@ export function useMessageEncryption(email:string,messages:AppMessage[]) {
         const author=keys.find(key=>key.email===payload.author&&key.fingerprint===authorFingerprint)
         if(!author)continue
         const available=payload.version===2?!!payload.keys[email]?.devices?.[identity!.fingerprint]:payload.keys[email]?.fingerprint===identity!.fingerprint
-        if(!available)continue
+        const share=history[message.id]
+        const transferDevice=share&&keys.find(key=>key.email===email&&key.fingerprint===share.authorFingerprint)
+        if(!available&&(!share||!transferDevice))continue
         try{
           if(message.encrypted_payload.sender!==message.sender_email || message.encrypted_payload.recipient!==message.recipient_email)throw new Error("Message identity mismatch.")
-          const evidence=JSON.stringify([message.encrypted_payload,author.fingerprint])
+          const evidence=JSON.stringify([message.encrypted_payload,author.fingerprint,available?null:share])
           const previous=decrypted.current.get(message.id)
-          const text=previous?.evidence===evidence?previous.text:await decryptMessage(message.encrypted_payload,identity!,email,author)
+          const text=previous?.evidence===evidence?previous.text:available?await decryptMessage(message.encrypted_payload,identity!,email,author):await decryptHistoryMessage(message.encrypted_payload,identity!,email,author,share!,transferDevice!)
           next[message.id]=text
           if(!cancelled)decrypted.current.set(message.id,{evidence,text})
         }
@@ -92,7 +97,7 @@ export function useMessageEncryption(email:string,messages:AppMessage[]) {
       if(!cancelled){for(const id of decrypted.current.keys())if(!(id in next))decrypted.current.delete(id);setPlaintext(next)}
     }
     void decrypt();return ()=>{cancelled=true}
-  },[identity,email,messages,keys])
+  },[identity,email,messages,keys,history])
   /** @param passphrase - Browser-only recovery secret. @param remember - Whether this personal browser may retain nonextractable keys. @returns Promise<boolean> confirming setup or unlocking. */
   async function unlock(passphrase:string,remember=true):Promise<boolean>{
     setBusy(true);setError(null)
@@ -118,7 +123,7 @@ export function useMessageEncryption(email:string,messages:AppMessage[]) {
   }
   /** @param text - Plaintext. @param recipient - Private recipient or broadcast. @param recipients - Fixed participant identities. @param sender - Original sender for edits. @returns Signed ciphertext for server storage. */
   async function encrypt(text:string,recipient:string|null,recipients:string[],sender=email){
-    if(!identity)throw new Error("Unlock messaging encryption first.")
+    if(!identity)throw new Error("Messages are not connected yet. Retry shortly.")
     if(new Set(recipients.map(value=>value.toLowerCase())).size>100)throw new Error("A message can include at most 100 participants, including the sender.")
     const participants=[...new Set(recipients.map(value=>value.toLowerCase()))].flatMap(value=>{
       const devices=keys.filter(key=>key.email===value);if(!devices.length)throw new Error(`${value} must sign in once to connect secure messaging.`);return devices

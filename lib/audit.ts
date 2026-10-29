@@ -12,6 +12,9 @@ import type { AuditAction } from "@/lib/db"
 export type AuditContext = {
   ipAddress: string | null
   userAgent: string | null
+  requestMethod: string
+  requestPath: string
+  requestId: string | null
 }
 
 /**
@@ -32,6 +35,9 @@ export function getAuditContext(req: Request): AuditContext {
   return {
     ipAddress,
     userAgent: req.headers.get("user-agent"),
+    requestMethod: req.method.toUpperCase().slice(0, 12),
+    requestPath: new URL(req.url).pathname.slice(0, 512),
+    requestId: (req.headers.get("x-vercel-id") ?? req.headers.get("x-request-id"))?.slice(0, 128) ?? null,
   }
 }
 

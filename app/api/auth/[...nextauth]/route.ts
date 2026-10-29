@@ -33,6 +33,14 @@ function withPublicAuthBasePath(req: NextRequest) {
   })
 }
 
+/** Logs callback routing without recording OAuth codes, state, or cookie values. */
+function logCallbackFlow(req:NextRequest):void{
+  if(!req.nextUrl.pathname.includes("/callback/"))return
+  console.info("[auth-route] OAuth callback routed.",{
+    flow:"primary",
+  })
+}
+
 /**
  * Handles Auth.js GET requests after restoring the public base path.
  *
@@ -40,6 +48,7 @@ function withPublicAuthBasePath(req: NextRequest) {
  * @returns The Auth.js response for the requested action.
  */
 export function GET(req: NextRequest) {
+  logCallbackFlow(req)
   return handlers.GET(withPublicAuthBasePath(req))
 }
 
@@ -50,5 +59,6 @@ export function GET(req: NextRequest) {
  * @returns The Auth.js response for the requested action.
  */
 export function POST(req: NextRequest) {
+  logCallbackFlow(req)
   return handlers.POST(withPublicAuthBasePath(req))
 }

@@ -4,7 +4,7 @@
  * Review decisions require confirmation, with a mandatory reason for rejection.
  */
 "use client"
-import { useEffect,useState } from "react"
+import { useEffect,useRef,useState } from "react"
 import { BarChart3, CheckCircle2, Sparkles, XCircle } from "lucide-react"
 import { apiPath } from "@/lib/paths"
 import { Button } from "@/components/ui/button"
@@ -84,24 +84,41 @@ export function ManagerWorkspace({ pending, entries, canReview = true, canReport
  * @returns JSX.Element containing the approval decision dialog.
  */
 export function EntryReviewDialog({ entry, decision, initialNote = "", onCancel, onConfirm }: {
-  entry: TimeEntry; decision: "approved" | "rejected"; initialNote?: string; onCancel: () => void; onConfirm: (note: string) => void
+  entry: TimeEntry; decision: "approved" | "rejected"; initialNote?: string; onCancel: () => void; onConfirm: (note: string) => void | Promise<void>
 }) {
-  const [note, setNote] = useState(initialNote)
+  const [note, setNote] = useState(initialNote.slice(0, 500))
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState("")
+  const pending = useRef(false)
+  /**
+   * Confirms one decision and retains the note/dialog if persistence fails.
+   * @returns Promise<void> after confirmation or a visible recoverable error.
+   */
+  async function confirm(): Promise<void> {
+    if (pending.current || (decision === "rejected" && !note.trim())) return
+    pending.current = true
+    setBusy(true)
+    setError("")
+    try { await onConfirm(note.trim()) }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "Decision could not be saved.") }
+    finally { pending.current = false; setBusy(false) }
+  }
   const rejecting = decision === "rejected"
   const title = rejecting ? "Reject entry" : "Approve entry"
-  return <WindowSurface title={title} onBack={onCancel}>
+  return <WindowSurface title={title} disabled={busy} onBack={onCancel}>
     <section className="flex w-full max-w-lg flex-col overflow-hidden rounded-lg border border-border bg-card text-foreground shadow-xl">
       <h2 className="shrink-0 border-b p-4 text-base font-semibold">{title}</h2>
       <div className="min-h-0 overflow-auto p-4">
         <p className="font-medium">{entry.contractor}</p><p>{entry.date} - {entry.hours}h - {entry.project}</p>
         <p className="my-3 whitespace-pre-wrap break-words text-sm">{entry.description}</p>
         <label className="block text-sm">{rejecting ? "Rejection reason" : "Review note (optional)"}
-          <textarea aria-required={rejecting} maxLength={500} value={note} onChange={event => setNote(event.target.value)} className="mt-2 min-h-24 w-full rounded-md border border-border bg-background p-2" />
+          <textarea disabled={busy} aria-required={rejecting} maxLength={500} value={note} onChange={event => setNote(event.target.value)} className="mt-2 min-h-24 w-full rounded-md border border-border bg-background p-2" />
         </label>
       </div>
+      {error && <p role="alert" className="px-4 py-2 text-sm text-destructive">{error}</p>}
       <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t p-4">
-        <Button variant="outline" onClick={onCancel}>Cancel</Button>
-        <Button variant={rejecting ? "destructive" : "default"} disabled={rejecting && !note.trim()} onClick={() => onConfirm(note.trim())}>
+        <Button variant="outline" disabled={busy} onClick={onCancel}>Cancel</Button>
+        <Button variant={rejecting ? "destructive" : "default"} disabled={busy || (rejecting && !note.trim())} onClick={() => void confirm()}>
           {rejecting ? <XCircle className="size-4" /> : <CheckCircle2 className="size-4" />}{title}
         </Button>
       </div>
