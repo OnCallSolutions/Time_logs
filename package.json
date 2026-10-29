@@ -22,6 +22,7 @@
     "verify": "pnpm typecheck && pnpm test && pnpm build"
   },
   "dependencies": {
+    "@ai-sdk/openai": "4.0.60",
     "@azure/msal-node": "^7.1.0",
     "@base-ui/react": "^1.5.0",
     "@neondatabase/serverless": "^1.1.0",

@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { AI_WORKFLOW_MODELS, getAiModel, getAiModelFallbacks, getAiProviderOptions } from "./ai-models"
+const { createOpenAI } = vi.hoisted(() => ({
+  createOpenAI: vi.fn((options: { apiKey: string }) => (modelId: string) => ({ provider: "openai", modelId, apiKey: options.apiKey })),
+}))
+vi.mock("@ai-sdk/openai", () => ({ createOpenAI }))
+import { AI_WORKFLOW_MODELS, getAiModel, getAiModelFallbacks, getAiModelForWorkflow, getAiProvider, getAiProviderOptions } from "./ai-models"
 
 afterEach(() => vi.unstubAllEnvs())
 
@@ -48,5 +52,34 @@ describe("AI workflow model routing", () => {
   it("does not configure failover for ordinary advisory workflows", () => {
     expect(getAiModelFallbacks("assistant")).toEqual([])
     expect(getAiProviderOptions("assistant")).toBeUndefined()
+  })
+
+  it("keeps Gateway as the default provider", () => {
+    expect(getAiProvider()).toBe("gateway")
+    expect(getAiModelForWorkflow("timesheetExtraction")).toBe("openai/gpt-6.1-sol")
+  })
+
+  it("routes directly to OpenAI with the server key and disables Gateway fallbacks", () => {
+    vi.stubEnv("AI_PROVIDER", "openai")
+    vi.stubEnv("OPENAI_API_KEY", "test-only-secret")
+    expect(getAiProvider()).toBe("openai")
+    expect(getAiModelForWorkflow("timesheetExtraction")).toEqual({ provider: "openai", modelId: "gpt-6.1-sol", apiKey: "test-only-secret" })
+    expect(createOpenAI).toHaveBeenCalledWith({ apiKey: "test-only-secret" })
+    expect(getAiProviderOptions("timesheetExtraction")).toBeUndefined()
+  })
+
+  it("fails closed if direct OpenAI is selected without a server key", () => {
+    vi.stubEnv("AI_PROVIDER", "openai")
+    vi.stubEnv("OPENAI_API_KEY", "")
+    expect(() => getAiModelForWorkflow("timesheetExtraction")).toThrow("OPENAI_API_KEY is required")
+  })
+
+  it("rejects unsupported providers and non-OpenAI models in direct mode", () => {
+    vi.stubEnv("AI_PROVIDER", "unknown")
+    expect(() => getAiProvider()).toThrow("use gateway or openai")
+    vi.stubEnv("AI_PROVIDER", "openai")
+    vi.stubEnv("TIMESHEET_REVIEW_MODEL", "anthropic/claude-sonnet-5.5")
+    vi.stubEnv("OPENAI_API_KEY", "test-only-secret")
+    expect(() => getAiModelForWorkflow("timesheetReview")).toThrow("must use the openai/ provider")
   })
 })

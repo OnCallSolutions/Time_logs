@@ -9,6 +9,8 @@
  * workflow. Gateway retries that workflow on the listed fallback only when its
  * primary model/provider route cannot complete; it does not change any app rules.
  */
+import "server-only"
+import { createOpenAI } from "@ai-sdk/openai"
 
 export const AI_WORKFLOW_MODELS = {
   assistant: { env: "ASSISTANT_MODEL", defaultModel: "openai/gpt-5.4-mini" },
@@ -25,6 +27,7 @@ export const AI_WORKFLOW_MODELS = {
 } as const
 
 export type AiWorkflow = keyof typeof AI_WORKFLOW_MODELS
+export type AiProvider = "gateway" | "openai"
 
 const MODEL_ID_PATTERN = /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*$/i
 
@@ -42,6 +45,34 @@ export function getAiModel(workflow: AiWorkflow): string {
     throw new Error(`Invalid model configuration for ${configuration.env}`)
   }
   return configured
+}
+
+/**
+ * Chooses the server-side model route. Gateway remains the default; setting
+ * AI_PROVIDER=openai uses the server-configured OpenAI API key directly and
+ * never sends requests through Gateway or its system-credential fallback.
+ */
+export function getAiProvider(): AiProvider {
+  const configured = process.env.AI_PROVIDER?.trim().toLowerCase()
+  if (!configured || configured === "gateway") return "gateway"
+  if (configured === "openai") return "openai"
+  throw new Error("Invalid AI_PROVIDER configuration; use gateway or openai")
+}
+
+/**
+ * Creates an AI SDK language model for one workflow without exposing its API
+ * key. Workflow model settings retain the Gateway `provider/model` form; direct
+ * OpenAI mode strips only the known `openai/` provider prefix.
+ */
+export function getAiModelForWorkflow(workflow: AiWorkflow) {
+  const configuredModel = getAiModel(workflow)
+  if (getAiProvider() === "gateway") return configuredModel
+  if (!configuredModel.startsWith("openai/")) {
+    throw new Error(`The ${workflow} model must use the openai/ provider when AI_PROVIDER=openai`)
+  }
+  const apiKey = process.env.OPENAI_API_KEY?.trim()
+  if (!apiKey) throw new Error("OPENAI_API_KEY is required when AI_PROVIDER=openai")
+  return createOpenAI({ apiKey })(configuredModel.slice("openai/".length))
 }
 
 /**
@@ -80,6 +111,7 @@ export function getAiModelFallbacks(workflow: AiWorkflow): string[] {
  * explicitly configured model.
  */
 export function getAiProviderOptions(workflow: AiWorkflow) {
+  if (getAiProvider() === "openai") return undefined
   const models = getAiModelFallbacks(workflow)
   return models.length ? { gateway: { models } } : undefined
 }

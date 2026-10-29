@@ -9,7 +9,7 @@ import { listAuditEvents } from "@/lib/db"
 import { neon } from "@neondatabase/serverless"
 import { generateText, Output } from "ai"
 import { z } from "zod"
-import { getAiModel } from "@/lib/ai-models"
+import { getAiModelForWorkflow } from "@/lib/ai-models"
 
 export const maxDuration = 60
 export const runtime = "nodejs"
@@ -45,7 +45,7 @@ export async function GET(req: Request): Promise<Response> {
     if (!scheduled) return Response.json({ reports: await sql`SELECT * FROM security_reports ORDER BY run_day DESC LIMIT 30` }, { headers: { "Cache-Control": "no-store" } })
     const day = new Date().toISOString().slice(0, 10)
     const recent = events.filter(event => Date.parse(event.occurredAt) >= Date.now() - 86400000)
-    const model = getAiModel("securityMonitoring")
+    const model = getAiModelForWorkflow("securityMonitoring")
     const claim = await sql`INSERT INTO security_reports (run_day,status,model,event_count,possibly_truncated)
       VALUES (${day},'running',${model},${recent.length},${events.length === 250})
       ON CONFLICT (run_day) DO UPDATE SET status = 'running', started_at = NOW(), event_count = EXCLUDED.event_count, possibly_truncated = EXCLUDED.possibly_truncated

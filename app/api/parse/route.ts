@@ -13,7 +13,7 @@ import { auth } from "@/auth"
 import { getEffectivePermissions } from "@/lib/effective-permissions"
 import { listTimeProjects, listTimesheetPeriods } from "@/lib/db"
 import { checkApiRateLimit } from "@/lib/api-rate-limit"
-import { getAiModel, getAiProviderOptions } from "@/lib/ai-models"
+import { getAiModelForWorkflow, getAiProvider, getAiProviderOptions } from "@/lib/ai-models"
 import { isValidIsoDate } from "@/lib/iso-date"
 
 export const maxDuration = 30
@@ -114,7 +114,7 @@ async function parseTimesheetNotes(req: Request) {
     const knownProjects = projects.slice(0, 250).map(project => project.name)
 
     const { output } = await generateText({
-      model: getAiModel("timesheetExtraction"),
+      model: getAiModelForWorkflow("timesheetExtraction"),
       // Gateway failover changes only the inference model. The same schema,
       // evidence checks, permissions, and human confirmation requirements apply.
       providerOptions: getAiProviderOptions("timesheetExtraction"),
@@ -163,6 +163,14 @@ async function parseTimesheetNotes(req: Request) {
     const cause=err&&typeof err==="object"&&"cause" in err?(err as {cause?:unknown}).cause:undefined
     const causeMessage=cause instanceof Error?cause.message:typeof cause==="string"?cause:JSON.stringify(cause??"")
     console.error("[parse] AI extraction failed")
+    let provider = "unknown"
+    try { provider = getAiProvider() } catch { /* Invalid provider configuration gets a generic setup response below. */ }
+    if (provider === "openai" && /OPENAI_API_KEY is required/i.test(message)) {
+      return Response.json({ error: "Direct OpenAI is selected, but OPENAI_API_KEY is missing from this server environment.", code: "OPENAI_API_KEY_REQUIRED" }, { status: 503 })
+    }
+    if (provider === "openai" && /unauthenticat|api key|401|403/i.test(`${message} ${causeMessage}`)) {
+      return Response.json({ error: "OpenAI rejected the request. Check the server-side OPENAI_API_KEY, API access to the configured model, and your OpenAI API project quota.", code: "OPENAI_API_REQUEST_REJECTED" }, { status: 503 })
+    }
     if(/free tier|no providers available|restrictedmodels|credits|top-up/i.test(`${message} ${causeMessage}`)){
       return Response.json({error:"AI extraction is connected, but this Vercel AI Gateway account does not currently have access to an inference provider. Enable Gateway credits or configure an approved provider key, then try again.",code:"AI_PROVIDER_ACCESS_REQUIRED"},{status:503})
     }

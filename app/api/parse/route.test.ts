@@ -3,7 +3,7 @@
  * Separate same-day/project tasks must survive output mapping and identity binding.
  * The model prompt explicitly forbids aggregation of independent work units.
  */
-import { beforeEach, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, expect, it, vi } from "vitest"
 vi.mock("@/lib/account-identities",()=>({listAccountIdentities:vi.fn(async()=>[])}))
 vi.mock("ai", () => ({ generateText: vi.fn(), Output: { object: vi.fn() } }))
 vi.mock("@/auth", () => ({ auth: vi.fn() }))
@@ -24,6 +24,7 @@ beforeEach(() => {
   vi.mocked(getEffectivePermissions).mockResolvedValue({ role: "contractor", permissions: resolvePermissions("contractor") })
   vi.mocked(listTimesheetPeriods).mockResolvedValue([{id:"10000000-0000-4000-8000-000000000001",name:"October 2026",startDate:"2026-10-01",endDate:"2026-10-31"}] as never)
 })
+afterEach(() => vi.unstubAllEnvs())
 
 it("preserves twelve distinct work units and binds every personal result to the session", async () => {
   const entries = Array.from({ length: 12 }, (_, index) => ({ contractor: "Untrusted Name", date: "2026-10-15", project: "Same Project", hours: 0.5, description: `Task ${index + 1}`, evidenceQuote: `Task ${index + 1}`, reviewFlags: [] }))
@@ -114,6 +115,26 @@ it("returns an actionable setup message when Gateway inference is blocked by acc
   const response=await POST(new Request("http://localhost/api/parse",{method:"POST",body:JSON.stringify({notes:"I worked 2 hours on a task.",periodId:"10000000-0000-4000-8000-000000000001"})}))
   expect(response.status).toBe(503)
   expect(await response.json()).toMatchObject({code:"AI_PROVIDER_ACCESS_REQUIRED",error:expect.stringContaining("Enable Gateway credits")})
+})
+
+it("returns a clear setup response when direct OpenAI is selected without its server key",async()=>{
+  vi.stubEnv("AI_PROVIDER","openai")
+  vi.stubEnv("OPENAI_API_KEY","")
+  const response=await POST(new Request("http://localhost/api/parse",{method:"POST",body:JSON.stringify({notes:"I worked 2 hours on a task.",periodId:"10000000-0000-4000-8000-000000000001"})}))
+  expect(response.status).toBe(503)
+  expect(await response.json()).toMatchObject({code:"OPENAI_API_KEY_REQUIRED",error:expect.stringContaining("OPENAI_API_KEY")})
+  expect(generateText).not.toHaveBeenCalled()
+})
+
+it("sends extraction directly to OpenAI when explicitly selected and does not enable Gateway fallback",async()=>{
+  vi.stubEnv("AI_PROVIDER","openai")
+  vi.stubEnv("OPENAI_API_KEY","test-only-secret")
+  vi.mocked(generateText).mockResolvedValue({output:{entries:[]}} as never)
+  const response=await POST(new Request("http://localhost/api/parse",{method:"POST",body:JSON.stringify({notes:"Work completed.",periodId:"10000000-0000-4000-8000-000000000001"})}))
+  const call=vi.mocked(generateText).mock.calls[0][0]
+  expect(response.status).toBe(200)
+  expect(call.model).toMatchObject({provider:"openai.responses",modelId:"gpt-6.1-sol"})
+  expect(call.providerOptions).toBeUndefined()
 })
 
 it("rejects oversized streamed JSON even without a Content-Length header",async()=>{

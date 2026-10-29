@@ -8,7 +8,7 @@
 import "server-only"
 import { generateText, Output } from "ai"
 import { z } from "zod"
-import { getAiModel, getAiProviderOptions } from "@/lib/ai-models"
+import { getAiModelForWorkflow, getAiProviderOptions } from "@/lib/ai-models"
 import { isValidIsoDate } from "@/lib/iso-date"
 import type { TeamsSpeakerAttribution } from "@/lib/teams-transcript-attribution"
 
@@ -100,7 +100,7 @@ export async function extractTranscriptDraftEntries(utterances: TranscriptUttera
     totalCharacters += utterance.text.length
   }
   const { output } = await generateText({
-    model: getAiModel("timesheetExtraction"),
+    model: getAiModelForWorkflow("timesheetExtraction"),
     providerOptions: getAiProviderOptions("timesheetExtraction"),
     reasoning: "high",
     output: Output.object({ schema: transcriptOutputSchema }),
