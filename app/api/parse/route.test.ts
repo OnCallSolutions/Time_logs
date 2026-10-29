@@ -36,7 +36,7 @@ it("preserves twelve distinct work units and binds every personal result to the 
   expect(new Set(result.entries.map((entry: { description: string }) => entry.description)).size).toBe(12)
   expect(vi.mocked(generateText).mock.calls[0][0].model).toBe("openai/gpt-6.1-sol")
   expect(vi.mocked(generateText).mock.calls[0][0].providerOptions).toEqual({ gateway: { models: ["openai/gpt-5.6-sol"] } })
-  expect(vi.mocked(generateText).mock.calls[0][0].reasoning).toBe("high")
+  expect(vi.mocked(generateText).mock.calls[0][0].reasoning).toBe("medium")
   expect(vi.mocked(generateText).mock.calls[0][0].system).toContain("never merge, deduplicate, sum, or truncate")
   expect(vi.mocked(generateText).mock.calls[0][0].system).toContain("2026-10-01 through 2026-10-31")
   expect(vi.mocked(generateText).mock.calls[0][0].system).toContain("verbatim contiguous evidenceQuote")

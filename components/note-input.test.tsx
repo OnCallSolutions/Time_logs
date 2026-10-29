@@ -52,6 +52,30 @@ it("sends a long transcript in complete bounded parts and combines all extracted
   expect(parsedRequests.map(part=>part.notes).join("")).toBe(source)
   expect(screen.getByRole("textbox",{name:"Description for entry 1"})).toHaveValue("Work part 1")
 })
+
+it("automatically retries a timed-out transcript section as smaller parts",async()=>{
+  const source="work sentence. ".repeat(390)
+  const parsedRequests:Array<{notes:string;periodId:string}> = []
+  const request=vi.fn(async(input:string|URL|Request,init?:RequestInit)=>{
+    const url=String(input)
+    if(url.includes("timesheet-periods"))return periodResponse()
+    if(url.includes("/api/parse")){
+      parsedRequests.push(JSON.parse(String(init?.body)))
+      if(parsedRequests.length===1)return Response.json({error:"This transcript section took too long."},{status:504})
+      return Response.json({entries:[{contractor:"Own Person",date:"2026-10-17",hours:1,project:"Sample Project",description:`Recovered part ${parsedRequests.length-1}`,evidenceQuote:null,reviewFlags:[]}]})
+    }
+    return Response.json({projects:[{id:"p1",name:"Sample Project",description:""}]})
+  })
+  vi.stubGlobal("fetch",request);render(<NoteInput onParsed={()=>{}}/> )
+  await userEvent.click(screen.getByRole("button",{name:"AI notes"}))
+  await waitFor(()=>expect(screen.getByRole("combobox",{name:"Entry timesheet period"})).toHaveValue(period.id))
+  fireEvent.change(screen.getByRole("textbox",{name:"Time worked notes"}),{target:{value:source}})
+  await userEvent.click(screen.getByRole("button",{name:"Extract entries"}))
+  await screen.findByRole("textbox",{name:"Description for entry 3"})
+  expect(parsedRequests).toHaveLength(4)
+  expect(parsedRequests.slice(1,3).map(part=>part.notes).join("")).toBe(parsedRequests[0].notes)
+  expect(parsedRequests[1].notes.length).toBeLessThan(parsedRequests[0].notes.length)
+})
 it("does not expose extraction for account-manager sample preview",()=>{
   render(<NoteInput previewOnly onParsed={()=>{}}/>)
   expect(screen.queryByRole("button",{name:"Extract entries"})).not.toBeInTheDocument()

@@ -174,9 +174,9 @@ async function parseTimesheetNotes(req: Request) {
       // Gateway failover changes only the inference model. The same schema,
       // evidence checks, permissions, and human confirmation requirements apply.
       providerOptions: getAiProviderOptions("timesheetExtraction"),
-      reasoning: "high",
+      reasoning: "medium",
       output: Output.object({ schema }),
-      abortSignal: AbortSignal.timeout(55_000),
+      abortSignal: AbortSignal.timeout(40_000),
       maxRetries: 0,
       maxOutputTokens: 8_000,
       system: extractionInstructions,
@@ -211,7 +211,7 @@ async function parseTimesheetNotes(req: Request) {
   } catch (err) {
     if(err instanceof RequestTooLargeError)return Response.json({error:"Extraction request is too large."},{status:413})
     if(err instanceof z.ZodError||err instanceof SyntaxError)return Response.json({error:"Enter notes and select a valid configured timesheet period."},{status:400})
-    if(err instanceof Error&&err.name==="TimeoutError")return Response.json({error:"This transcript section took too long to process. Retry extraction; the transcript is divided into smaller sections automatically."},{status:504})
+    if(err instanceof Error&&err.name==="TimeoutError")return Response.json({error:"This transcript section took too long. It will be retried in smaller pieces automatically."},{status:504})
     const message = err instanceof Error ? err.message : String(err)
     const cause=err&&typeof err==="object"&&"cause" in err?(err as {cause?:unknown}).cause:undefined
     const causeMessage=cause instanceof Error?cause.message:typeof cause==="string"?cause:JSON.stringify(cause??"")

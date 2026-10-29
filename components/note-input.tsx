@@ -151,29 +151,44 @@ export function NoteInput({
     setActiveTranscriptDraftId(null);setActiveTranscriptEvidence([]);setAiEntryInsights([])
     setError(null);setExtractionProgress("")
     try {
-      const chunks=splitTranscriptIntoChunks(sourceNotes)
+      const pending=splitTranscriptIntoChunks(sourceNotes,3_000).map(text=>({text}))
+      let totalParts=pending.length
+      let completedParts=0
       const extracted:Array<ParsedEntry&AiEntryInsight&{date:string|null;hours:number|null}> = []
-      for(let index=0;index<chunks.length;index++){
-        setExtractionProgress(chunks.length>1?`Reading transcript part ${index+1} of ${chunks.length}…`:"Reading transcript…")
+      while(pending.length){
+        const part=pending.shift()!
+        setExtractionProgress(totalParts>1?`Reading transcript part ${completedParts+1} of ${totalParts}…`:"Reading transcript…")
         let res=await fetch(apiPath("/api/parse"),{
           method:"POST",
           headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({notes:chunks[index],periodId:selectedPeriod.id}),
+          body:JSON.stringify({notes:part.text,periodId:selectedPeriod.id}),
         })
         while(res.status===429){
           const retryAfter=Number(res.headers.get("Retry-After"))
           const waitSeconds=Number.isFinite(retryAfter)&&retryAfter>0?retryAfter:60
-          setExtractionProgress(`Waiting for the next transcript part (${index+1} of ${chunks.length})…`)
+          setExtractionProgress(`Waiting to continue transcript part ${completedParts+1} of ${totalParts}…`)
           await new Promise(resolve=>window.setTimeout(resolve,waitSeconds*1000))
           res=await fetch(apiPath("/api/parse"),{
             method:"POST",
             headers:{"Content-Type":"application/json"},
-            body:JSON.stringify({notes:chunks[index],periodId:selectedPeriod.id}),
+            body:JSON.stringify({notes:part.text,periodId:selectedPeriod.id}),
           })
         }
+        if(res.status===504){
+          const smallerParts=splitTranscriptIntoChunks(part.text,Math.max(350,Math.floor(part.text.length*0.6)))
+          if(part.text.length>700&&smallerParts.length>1){
+            pending.unshift(...smallerParts.map(text=>({text})))
+            totalParts+=smallerParts.length-1
+            setExtractionProgress(`This section is taking longer. Retrying it as ${smallerParts.length} smaller parts…`)
+            continue
+          }
+          const timeoutData=await res.json().catch(()=>({}))
+          throw new Error(timeoutData.error??`Transcript part ${completedParts+1} took too long. Try again in a moment.`)
+        }
         const data=await res.json()
-        if(!res.ok)throw new Error(data.error??`Could not process transcript part ${index+1} of ${chunks.length}.`)
+        if(!res.ok)throw new Error(data.error??`Could not process transcript part ${completedParts+1} of ${totalParts}.`)
         if(Array.isArray(data.entries))extracted.push(...data.entries as Array<ParsedEntry&AiEntryInsight&{date:string|null;hours:number|null}>)
+        completedParts++
       }
       const entries:ParsedEntry[]=extracted.map(entry=>({...entry,date:entry.date??"",hours:entry.hours??0,contractor:entry.contractor??"Unspecified"}))
     if (entries.length === 0) {
