@@ -57,14 +57,18 @@ it("rejects AI dates outside the selected configured period before they can be s
   expect(generateText).toHaveBeenCalledOnce()
 })
 
-it("leaves unsupported fields blank and flags evidence not found in the source notes",async()=>{
-  vi.mocked(generateText).mockResolvedValue({output:{entries:[{contractor:null,date:null,hours:null,project:"Unassigned",description:"Work item",evidenceQuote:"invented source text",reviewFlags:[]}]}} as never)
-  const response=await POST(new Request("http://localhost/api/parse",{method:"POST",body:JSON.stringify({notes:"The team discussed a possible task.",periodId:"10000000-0000-4000-8000-000000000001"})}))
+it("keeps a concrete meeting decision when hours and date are missing",async()=>{
+  const notes="We agreed to use a phone demo to train the new sales group."
+  vi.mocked(generateText).mockResolvedValue({output:{entries:[{contractor:null,date:null,hours:null,project:"Unassigned",description:"Agreed to use a phone demo to train the sales group.",evidenceQuote:"We agreed to use a phone demo to train the new sales group.",reviewFlags:[]}]}} as never)
+  const response=await POST(new Request("http://localhost/api/parse",{method:"POST",body:JSON.stringify({notes,periodId:"10000000-0000-4000-8000-000000000001"})}))
   const result=await response.json()
   expect(response.status).toBe(200)
-  expect(result.entries[0]).toMatchObject({date:null,hours:null,project:"Unassigned",evidenceQuote:null})
-  expect(result.entries[0].reviewFlags).toEqual(expect.arrayContaining(["date_needs_confirmation","hours_needs_confirmation","project_needs_confirmation","evidence_unverified"]))
+  expect(result.entries[0]).toMatchObject({date:null,hours:null,project:"Unassigned",evidenceQuote:notes})
+  expect(result.entries[0].reviewFlags).toEqual(expect.arrayContaining(["date_needs_confirmation","hours_needs_confirmation","project_needs_confirmation"]))
   expect(result.entries[0].contractor).toBe("Own Person")
+  const prompt=vi.mocked(generateText).mock.calls[0][0].system
+  expect(prompt).toContain("specific review, decision, assignment, coaching action, or coordination step")
+  expect(prompt).toContain("Do not require every field to be known before returning a supported work row")
 })
 
 it("grounds transcript drafts in concrete actions and leaves missing fields for confirmation",async()=>{
@@ -86,9 +90,12 @@ it("grounds transcript drafts in concrete actions and leaves missing fields for 
   expect(result.entries).toHaveLength(1)
   expect(result.entries[0]).toMatchObject({contractor:"Own Person",date:null,hours:null,project:"Unassigned",evidenceQuote:"I enabled transcription so we can test timesheet extraction."})
   expect(result.entries[0].reviewFlags).toEqual(expect.arrayContaining(["date_needs_confirmation","hours_needs_confirmation","project_needs_confirmation"]))
-  expect(prompt).toContain("display name is not proof of an account identity")
-  expect(prompt).toContain("hypothetical examples")
-  expect(prompt).toContain("Never apply a suggested or default 8-hour day")
+  expect(prompt).toContain("This is a personal timesheet for Own Person")
+  expect(prompt).toContain("Do not attribute another speaker's work to them")
+  expect(prompt).toContain("hypotheticals")
+  expect(prompt).toContain("Never apply a default 8-hour day")
+  expect(prompt).toContain("the action, the thing worked on, and the stated outcome or purpose")
+  expect(vi.mocked(generateText).mock.calls[0][0].prompt).toContain("<source_notes>")
 })
 
 it("supplies only the contractor's assigned projects as canonical extraction hints",async()=>{
