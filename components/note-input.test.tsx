@@ -3,7 +3,7 @@
  * Sample content comes from a mocked authenticated endpoint, not client names.
  * Preview controls must never invoke extraction or persist actual evidence.
  */
-import { render,screen } from "@testing-library/react"
+import { fireEvent,render,screen,waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach,expect,it,vi } from "vitest"
 import { NoteInput } from "./note-input"
@@ -26,6 +26,31 @@ it("loads and extracts a synthetic Teams transcript scoped to the signed-in acco
   expect(screen.getByRole("button",{name:"Clear sample"})).toBeVisible()
   expect(screen.getByRole("textbox",{name:"Project for entry 1"})).toHaveValue("Sample Project")
   expect(request).toHaveBeenCalledWith(expect.stringContaining("/api/samples?format=teams-transcript"),{cache:"no-store"})
+})
+
+it("sends a long transcript in complete bounded parts and combines all extracted rows",async()=>{
+  const source="meeting notes ".repeat(1_500)
+  const parsedRequests:Array<{notes:string;periodId:string}> = []
+  const request=vi.fn(async(input:string|URL|Request,init?:RequestInit)=>{
+    const url=String(input)
+    if(url.includes("timesheet-periods"))return periodResponse()
+    if(url.includes("/api/parse")){
+      parsedRequests.push(JSON.parse(String(init?.body)))
+      const index=parsedRequests.length
+      return Response.json({entries:[{contractor:"Own Person",date:"2026-10-17",hours:1,project:"Sample Project",description:`Work part ${index}`,evidenceQuote:`Work part ${index}`,reviewFlags:[]}]})
+    }
+    return Response.json({projects:[{id:"p1",name:"Sample Project",description:""}]})
+  })
+  vi.stubGlobal("fetch",request);render(<NoteInput onParsed={()=>{}}/>)
+  await userEvent.click(screen.getByRole("button",{name:"AI notes"}))
+  await waitFor(()=>expect(screen.getByRole("combobox",{name:"Entry timesheet period"})).toHaveValue(period.id))
+  fireEvent.change(screen.getByRole("textbox",{name:"Time worked notes"}),{target:{value:source}})
+  await userEvent.click(screen.getByRole("button",{name:"Extract entries"}))
+  await waitFor(()=>expect(parsedRequests.length).toBeGreaterThan(1))
+  await waitFor(()=>expect(screen.getByRole("textbox",{name:"Description for entry 2"})).toBeVisible())
+  expect(parsedRequests.length).toBeGreaterThan(1)
+  expect(parsedRequests.map(part=>part.notes).join("")).toBe(source)
+  expect(screen.getByRole("textbox",{name:"Description for entry 1"})).toHaveValue("Work part 1")
 })
 it("does not expose extraction for account-manager sample preview",()=>{
   render(<NoteInput previewOnly onParsed={()=>{}}/>)

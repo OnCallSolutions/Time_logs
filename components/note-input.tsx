@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button"
 import { apiPath } from "@/lib/paths"
 import type { ParsedEntry } from "@/lib/types"
 import { TeamsTranscriptConnect } from "@/components/teams-transcript-connect"
+import { splitTranscriptIntoChunks } from "@/lib/transcript-chunks"
 
 type EntryPeriod={id:string;name:string;startDate:string;endDate:string}
 type EntryProject={id:string;name:string;description:string}
@@ -46,6 +47,7 @@ export function NoteInput({
 }) {
   const [notes, setNotes] = useState("")
   const [loading, setLoading] = useState(false)
+  const [extractionProgress,setExtractionProgress]=useState("")
   const [error, setError] = useState<string | null>(null)
   const [sampleLoaded,setSampleLoaded]=useState(false)
   const [sampleIsPreview, setSampleIsPreview] = useState(false)
@@ -147,16 +149,32 @@ export function NoteInput({
     if (!sourceNotes.trim() || previewOnly || !selectedPeriod) return
     if(!selectedPeriod){setError("Select a configured timesheet period before extracting entries.");return}
     setActiveTranscriptDraftId(null);setActiveTranscriptEvidence([]);setAiEntryInsights([])
-    setError(null)
+    setError(null);setExtractionProgress("")
     try {
-      const res = await fetch(apiPath("/api/parse"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ notes:sourceNotes,periodId:selectedPeriod.id }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error ?? "Something went wrong.")
-      const extracted=(Array.isArray(data.entries)?data.entries:[]) as Array<ParsedEntry&AiEntryInsight&{date:string|null;hours:number|null}>
+      const chunks=splitTranscriptIntoChunks(sourceNotes)
+      const extracted:Array<ParsedEntry&AiEntryInsight&{date:string|null;hours:number|null}> = []
+      for(let index=0;index<chunks.length;index++){
+        setExtractionProgress(chunks.length>1?`Reading transcript part ${index+1} of ${chunks.length}…`:"Reading transcript…")
+        let res=await fetch(apiPath("/api/parse"),{
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({notes:chunks[index],periodId:selectedPeriod.id}),
+        })
+        while(res.status===429){
+          const retryAfter=Number(res.headers.get("Retry-After"))
+          const waitSeconds=Number.isFinite(retryAfter)&&retryAfter>0?retryAfter:60
+          setExtractionProgress(`Waiting for the next transcript part (${index+1} of ${chunks.length})…`)
+          await new Promise(resolve=>window.setTimeout(resolve,waitSeconds*1000))
+          res=await fetch(apiPath("/api/parse"),{
+            method:"POST",
+            headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({notes:chunks[index],periodId:selectedPeriod.id}),
+          })
+        }
+        const data=await res.json()
+        if(!res.ok)throw new Error(data.error??`Could not process transcript part ${index+1} of ${chunks.length}.`)
+        if(Array.isArray(data.entries))extracted.push(...data.entries as Array<ParsedEntry&AiEntryInsight&{date:string|null;hours:number|null}>)
+      }
       const entries:ParsedEntry[]=extracted.map(entry=>({...entry,date:entry.date??"",hours:entry.hours??0,contractor:entry.contractor??"Unspecified"}))
     if (entries.length === 0) {
         setError("No time entries were found in those notes.")
@@ -168,6 +186,7 @@ export function NoteInput({
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to parse notes.")
     } finally {
+      setExtractionProgress("")
       setLoading(false)
     }
   }
@@ -355,6 +374,8 @@ export function NoteInput({
         <p className="text-xs text-muted-foreground" aria-live="polite">
           {error ? (
             <span role="alert" className="text-destructive">{error}</span>
+          ) : extractionProgress ? (
+            <span>{extractionProgress}</span>
           ) : sampleIsPreview ? (
             <span>Display-only sample. Clear it before entering real timesheet notes.</span>
           ) : sampleLoaded ? (

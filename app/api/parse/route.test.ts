@@ -27,7 +27,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs())
 
 it("preserves twelve distinct work units and binds every personal result to the session", async () => {
-  const entries = Array.from({ length: 12 }, (_, index) => ({ contractor: "Untrusted Name", date: "2026-10-15", project: "Same Project", hours: 0.5, description: `Task ${index + 1}`, evidenceQuote: `Task ${index + 1}`, reviewFlags: [] }))
+  const entries = Array.from({ length: 12 }, (_, index) => ({ contractor: "Own Person", date: "2026-10-15", project: "Same Project", hours: 0.5, description: `Task ${index + 1}`, evidenceQuote: `Task ${index + 1}`, reviewFlags: [] }))
   vi.mocked(generateText).mockResolvedValue({ output: { entries } } as never)
   const response = await POST(new Request("http://localhost/api/parse", { method: "POST", body: JSON.stringify({ notes: entries.map(entry => entry.description).join("\n"),periodId:"10000000-0000-4000-8000-000000000001" }) }))
   const result = await response.json()
@@ -73,12 +73,12 @@ it("keeps a concrete meeting decision when hours and date are missing",async()=>
 
 it("grounds transcript drafts in concrete actions and leaves missing fields for confirmation",async()=>{
   const notes = [
-    "Speaker A: I enabled transcription so we can test timesheet extraction.",
+    "Own Person: I enabled transcription so we can test timesheet extraction.",
     "Speaker B: Will it identify who is speaking?",
-    "Speaker A: Someone might say they worked on XYZ, and the app could suggest 8 hours."
+    "Own Person: Someone might say they worked on XYZ, and the app could suggest 8 hours."
   ].join("\n")
   vi.mocked(generateText).mockResolvedValue({output:{entries:[{
-    contractor:"Speaker A",date:null,hours:null,project:"Unassigned",
+    contractor:"Own Person",date:null,hours:null,project:"Unassigned",
     description:"Enabled transcription for a timesheet extraction test.",
     evidenceQuote:"I enabled transcription so we can test timesheet extraction.",
     reviewFlags:["date_needs_confirmation","hours_needs_confirmation","project_needs_confirmation"]
@@ -91,11 +91,27 @@ it("grounds transcript drafts in concrete actions and leaves missing fields for 
   expect(result.entries[0]).toMatchObject({contractor:"Own Person",date:null,hours:null,project:"Unassigned",evidenceQuote:"I enabled transcription so we can test timesheet extraction."})
   expect(result.entries[0].reviewFlags).toEqual(expect.arrayContaining(["date_needs_confirmation","hours_needs_confirmation","project_needs_confirmation"]))
   expect(prompt).toContain("This is a personal timesheet for Own Person")
-  expect(prompt).toContain("Do not attribute another speaker's work to them")
+  expect(prompt).toContain("Omit all rows from other speakers")
   expect(prompt).toContain("hypotheticals")
   expect(prompt).toContain("Never apply a default 8-hour day")
   expect(prompt).toContain("the action, the thing worked on, and the stated outcome or purpose")
   expect(vi.mocked(generateText).mock.calls[0][0].prompt).toContain("<source_notes>")
+})
+
+it("uses official patron names and filters work attributed to other speakers",async()=>{
+  const {listAccountIdentities}=await import("@/lib/account-identities")
+  vi.mocked(listAccountIdentities).mockResolvedValue([{email:"own@example.com",officialName:"Franco Abott",contractorNumber:"TN-1"}] as never)
+  const notes="Other Person: I completed the inventory.\nFranco Abott\n0 minutes 12 seconds0:12\nI spent 2 hours checking the project records."
+  vi.mocked(generateText).mockResolvedValue({output:{entries:[
+    {contractor:"Other Person",date:"2026-10-12",hours:1,project:"Project",description:"Completed inventory",evidenceQuote:"I completed the inventory.",reviewFlags:[]},
+    {contractor:"Franco Abott",date:"2026-10-12",hours:2,project:"Project",description:"Checked project records",evidenceQuote:"I spent 2 hours checking the project records.",reviewFlags:[]},
+  ]}} as never)
+  const response=await POST(new Request("http://localhost/api/parse",{method:"POST",body:JSON.stringify({notes,periodId:"10000000-0000-4000-8000-000000000001"})}))
+  const result=await response.json()
+  expect(response.status).toBe(200)
+  expect(result.entries).toHaveLength(1)
+  expect(result.entries[0]).toMatchObject({contractor:"Franco Abott",hours:2})
+  expect(vi.mocked(generateText).mock.calls[0][0].system).toContain('"franco abott"')
 })
 
 it("supplies only the contractor's assigned projects as canonical extraction hints",async()=>{
@@ -108,10 +124,11 @@ it("supplies only the contractor's assigned projects as canonical extraction hin
 })
 
 it("throttles extraction requests and provides a retry delay",async()=>{
-  vi.mocked(checkApiRateLimit).mockResolvedValue({allowed:false,hits:6})
+  vi.mocked(checkApiRateLimit).mockResolvedValue({allowed:false,hits:61})
   const response=await POST(new Request("http://localhost/api/parse",{method:"POST",body:JSON.stringify({notes:"Work",periodId:"10000000-0000-4000-8000-000000000001"})}))
   expect(response.status).toBe(429)
   expect(response.headers.get("retry-after")).toBe("60")
+  expect(checkApiRateLimit).toHaveBeenCalledWith("own@example.com","timesheet-extraction",60,expect.any(Request))
   expect(generateText).not.toHaveBeenCalled()
 })
 
@@ -145,7 +162,7 @@ it("sends extraction directly to OpenAI when explicitly selected and does not en
 })
 
 it("rejects oversized streamed JSON even without a Content-Length header",async()=>{
-  const response=await POST(new Request("http://localhost/api/parse",{method:"POST",body:JSON.stringify({notes:"x".repeat(20_000),periodId:"10000000-0000-4000-8000-000000000001"})}))
+  const response=await POST(new Request("http://localhost/api/parse",{method:"POST",body:JSON.stringify({notes:"x".repeat(70_000),periodId:"10000000-0000-4000-8000-000000000001"})}))
   expect(response.status).toBe(413)
   expect(generateText).not.toHaveBeenCalled()
 })

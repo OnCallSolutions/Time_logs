@@ -16,8 +16,10 @@ import { checkApiRateLimit } from "@/lib/api-rate-limit"
 import { getAiModelForWorkflow, getAiProvider, getAiProviderOptions } from "@/lib/ai-models"
 import { isValidIsoDate } from "@/lib/iso-date"
 
-export const maxDuration = 30
-const MAX_REQUEST_BYTES=16_384
+export const maxDuration = 60
+// The UI submits bounded excerpts separately; this per-excerpt guard is not a
+// limit on the length of the complete transcript the patron can paste.
+const MAX_REQUEST_BYTES=64*1024
 
 class RequestTooLargeError extends Error{}
 
@@ -60,6 +62,31 @@ const schema = z.object({
     .describe("One item per distinct unit of work. Preserve separate tasks even for the same person, date, and project."),
 })
 
+function normalizePersonName(value:string){
+  return value.normalize("NFKD").replace(/\p{M}/gu,"").toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu," ").trim()
+}
+
+function getPatronNameAliases(...names:Array<string|undefined>){
+  const aliases=new Set<string>()
+  for(const name of names){
+    const normalized=normalizePersonName(name??"")
+    if(!normalized)continue
+    aliases.add(normalized)
+    const words=normalized.split(/\s+/)
+    if(words.length===2)aliases.add(`${words[1]} ${words[0]}`)
+  }
+  return [...aliases]
+}
+
+function isPatronName(value:string|null,aliases:string[]){
+  return Boolean(value&&aliases.includes(normalizePersonName(value)))
+}
+
+function hasTeamsSpeakerLabels(notes:string){
+  return /(?:^|\n)\s*[\p{L}][\p{L}\p{M}'’., -]{1,79}\s*\r?\n\s*\d+\s+minutes?\s+\d+\s+seconds?/imu.test(notes)
+    || /(?:^|\n)\s*[\p{L}][\p{L}\p{M}'’., -]{1,79}:\s+\S/imu.test(notes)
+}
+
 function dateInTimeZone(value: Date, timezone: string) {
   // Relative phrases like "yesterday" must follow the selected period's calendar, not the server's UTC day.
   const parts = new Intl.DateTimeFormat("en-US", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(value)
@@ -91,9 +118,11 @@ async function parseTimesheetNotes(req: Request) {
     if (!email) return Response.json({error:"Forbidden."},{status:403})
     const access = await getEffectivePermissions(email)
     if (!access.permissions.create_entries) return Response.json({error:"Forbidden."},{status:403})
-    const rate=await checkApiRateLimit(email,"timesheet-extraction",5,req)
+    // A transcript is sent as several bounded requests. Keep meaningful abuse
+    // protection while allowing a long meeting to continue across many parts.
+    const rate=await checkApiRateLimit(email,"timesheet-extraction",60,req)
     if(!rate.allowed)return Response.json({error:"Too many extraction requests. Wait a minute before trying again."},{status:429,headers:{"Retry-After":"60","Cache-Control":"no-store"}})
-    const input=z.object({notes:z.string().trim().min(1).max(12_000),periodId:z.string().uuid()}).strict().parse(await readJsonBody(req))
+    const input=z.object({notes:z.string().trim().min(1).max(10_000),periodId:z.string().uuid()}).strict().parse(await readJsonBody(req))
     const {notes,periodId}=input
 
     if (!notes || !notes.trim()) {
@@ -115,8 +144,10 @@ async function parseTimesheetNotes(req: Request) {
     const ownOnly = access.role === "contractor" || access.role === "employee"
     const identity = ownOnly ? (await listAccountIdentities([email]))[0] : undefined
     const ownerName = ownOnly ? identity?.officialName || session?.user?.name?.trim() || email : undefined
+    const patronNameAliases=ownOnly?getPatronNameAliases(identity?.officialName,session?.user?.name?.trim()):[]
+    const labeledTranscript=hasTeamsSpeakerLabels(notes)
     const speakerScope = ownOnly
-      ? `This is a personal timesheet for ${ownerName}. If the source has speaker labels, extract only completed work clearly said by this worker (including an explicit "we" statement that includes them). Do not attribute another speaker's work to them, and do not treat their name being mentioned as proof they did the work. Unlabeled first-person work notes are the signed-in worker's own report.`
+      ? `This is a personal timesheet for ${ownerName}. The signed-in patron's recognized name aliases are ${JSON.stringify(patronNameAliases)}. Inspect the full excerpt for Teams speaker labels: a label can be a name on its own line followed by a timestamp, a repeated name-and-time line, or a name followed by a colon. Match the signed-in patron using an exact alias, reversed first/last name, or an obvious punctuation/diacritic variation; do not match a person merely because their name is mentioned in speech. For a speaker-labeled transcript, include only completed work from the signed-in patron's own turns, and set contractor to the matching name from the transcript. Omit all rows from other speakers; never relabel their work as the signed-in patron's. An explicit "we" action can be included only when the patron is among the clearly identified speakers and the source supports shared work. For unlabeled personal notes, first-person work belongs to the signed-in patron; return contractor as the canonical name ${ownerName}.`
       : "For transcripts, keep each action tied to the speaker who actually said they did it. Use a name only when the source explicitly identifies that speaker; mentioning a person is not proof that person performed the work. A speaker's explicit first-person plural statement may describe shared work, but do not invent individual contributions."
 
     const extractionInstructions = [
@@ -145,7 +176,7 @@ async function parseTimesheetNotes(req: Request) {
       providerOptions: getAiProviderOptions("timesheetExtraction"),
       reasoning: "high",
       output: Output.object({ schema }),
-      abortSignal: AbortSignal.timeout(26_000),
+      abortSignal: AbortSignal.timeout(55_000),
       maxRetries: 0,
       maxOutputTokens: 8_000,
       system: extractionInstructions,
@@ -157,8 +188,13 @@ async function parseTimesheetNotes(req: Request) {
     const refreshedAccess=await getEffectivePermissions(email)
     if(!refreshedAccess.role||!refreshedAccess.permissions.create_entries)return Response.json({error:"Extraction access changed. Please sign in again."},{status:403})
     const stillOwnOnly=refreshedAccess.role==="contractor"||refreshedAccess.role==="employee"
+    const eligibleEntries=output.entries.filter(entry=>{
+      if(!stillOwnOnly)return true
+      if(entry.contractor)return isPatronName(entry.contractor,patronNameAliases)
+      return !labeledTranscript
+    })
     const normalizedNotes=normalizeEvidenceText(notes)
-    const entries=output.entries.map(entry=>{
+    const entries=eligibleEntries.map(entry=>{
       // Model-provided citations are not proof until a normalized exact quote is found in the submitted notes.
       const hasVerifiedEvidence=Boolean(entry.evidenceQuote&&normalizedNotes.includes(normalizeEvidenceText(entry.evidenceQuote)))
       const reviewFlags=new Set(entry.reviewFlags)
@@ -175,7 +211,7 @@ async function parseTimesheetNotes(req: Request) {
   } catch (err) {
     if(err instanceof RequestTooLargeError)return Response.json({error:"Extraction request is too large."},{status:413})
     if(err instanceof z.ZodError||err instanceof SyntaxError)return Response.json({error:"Enter notes and select a valid configured timesheet period."},{status:400})
-    if(err instanceof Error&&err.name==="TimeoutError")return Response.json({error:"Extraction took too long. Split the notes into smaller parts and try again."},{status:504})
+    if(err instanceof Error&&err.name==="TimeoutError")return Response.json({error:"This transcript section took too long to process. Retry extraction; the transcript is divided into smaller sections automatically."},{status:504})
     const message = err instanceof Error ? err.message : String(err)
     const cause=err&&typeof err==="object"&&"cause" in err?(err as {cause?:unknown}).cause:undefined
     const causeMessage=cause instanceof Error?cause.message:typeof cause==="string"?cause:JSON.stringify(cause??"")
